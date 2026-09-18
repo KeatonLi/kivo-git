@@ -1,0 +1,61 @@
+import { execFile } from 'node:child_process';
+import { promises as fs } from 'node:fs';
+import os from 'node:os';
+import path from 'node:path';
+import { promisify } from 'node:util';
+import { afterEach, describe, expect, it } from 'vitest';
+import { GitClient } from '../src/git/GitClient';
+
+const execFileAsync = promisify(execFile);
+const temporaryRepositories: string[] = [];
+
+async function git(root: string, args: string[]): Promise<string> {
+  const result = await execFileAsync('git', args, { cwd: root, encoding: 'utf8' });
+  return result.stdout.trim();
+}
+
+async function createRepository(): Promise<string> {
+  const root = await fs.mkdtemp(path.join(os.tmpdir(), 'ideagit-test-'));
+  temporaryRepositories.push(root);
+  await git(root, ['init', '-b', 'main']);
+  await git(root, ['config', 'user.name', 'IdeaGit Test']);
+  await git(root, ['config', 'user.email', 'ideagit@example.test']);
+  await fs.writeFile(path.join(root, 'alpha.txt'), 'alpha\n');
+  await fs.writeFile(path.join(root, 'beta.txt'), 'beta\n');
+  await git(root, ['add', '.']);
+  await git(root, ['commit', '-m', 'initial']);
+  return root;
+}
+
+afterEach(async () => {
+  await Promise.all(temporaryRepositories.splice(0).map((root) => fs.rm(root, { recursive: true, force: true })));
+});
+
+describe('GitClient integration', () => {
+  it('groups changes and commits selected files without consuming unrelated staged changes', async () => {
+    const root = await createRepository();
+    await fs.appendFile(path.join(root, 'alpha.txt'), 'changed\n');
+    await fs.appendFile(path.join(root, 'beta.txt'), 'staged elsewhere\n');
+    await fs.writeFile(path.join(root, 'new file.txt'), 'new\n');
+    await git(root, ['add', 'beta.txt']);
+
+    const client = new GitClient(root);
+    await client.initialize();
+    await git(root, ['branch', 'feature/local']);
+    await client.createChangelist('Feature work');
+    let snapshot = await client.snapshot();
+    expect(snapshot.branches.find((branch) => branch.name === 'feature/local')).toMatchObject({ remote: false });
+    const featureList = snapshot.changelists.find((list) => list.name === 'Feature work');
+    expect(featureList).toBeDefined();
+    await client.moveToChangelist(['alpha.txt', 'new file.txt'], featureList!.id);
+
+    snapshot = await client.snapshot();
+    expect(snapshot.changelists.find((list) => list.name === 'Feature work')?.changes.map((change) => change.path).sort())
+      .toEqual(['alpha.txt', 'new file.txt']);
+
+    await client.commit('feat: selected files', ['alpha.txt', 'new file.txt']);
+    expect((await git(root, ['show', '--pretty=', '--name-only', 'HEAD'])).split('\n').sort())
+      .toEqual(['alpha.txt', 'new file.txt']);
+    expect(await git(root, ['diff', '--cached', '--name-only'])).toBe('beta.txt');
+  });
+});

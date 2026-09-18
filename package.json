@@ -1,0 +1,85 @@
+{
+  "name": "idea-git",
+  "displayName": "IdeaGit",
+  "description": "An IntelliJ IDEA-inspired Git workflow for Visual Studio Code.",
+  "version": "0.1.0",
+  "publisher": "keatonli",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/KeatonLi/vscode-idea-git.git"
+  },
+  "engines": {
+    "vscode": "^1.95.0"
+  },
+  "categories": ["Source Control", "Other"],
+  "keywords": ["git", "intellij", "idea", "changelist", "source-control"],
+  "activationEvents": ["onView:ideaGit.panel"],
+  "main": "./dist/extension.js",
+  "files": ["dist", "media", "docs", "README.md", "CHANGELOG.md", "LICENSE"],
+  "scripts": {
+    "check": "tsc --noEmit",
+    "compile": "node esbuild.mjs",
+    "watch": "node esbuild.mjs --watch",
+    "test": "vitest run",
+    "package": "npm run check && npm run test && npm run compile && vsce package"
+  },
+  "contributes": {
+    "viewsContainers": {
+      "activitybar": [
+        {
+          "id": "ideaGit",
+          "title": "IdeaGit",
+          "icon": "media/logo.svg"
+        }
+      ]
+    },
+    "views": {
+      "ideaGit": [
+        {
+          "type": "webview",
+          "id": "ideaGit.panel",
+          "name": "IdeaGit"
+        }
+      ]
+    },
+    "commands": [
+      {
+        "command": "ideaGit.refresh",
+        "title": "IdeaGit: Refresh"
+      },
+      {
+        "command": "ideaGit.focus",
+        "title": "IdeaGit: Open Git Tool Window"
+      }
+    ],
+    "menus": {
+      "view/title": [
+        {
+          "command": "ideaGit.refresh",
+          "when": "view == ideaGit.panel",
+          "group": "navigation"
+        }
+      ]
+    },
+    "configuration": {
+      "title": "IdeaGit",
+      "properties": {
+        "ideaGit.autoRefreshInterval": {
+          "type": "number",
+          "default": 2500,
+          "minimum": 1000,
+          "description": "Refresh interval in milliseconds while the IdeaGit view is visible."
+        }
+      }
+    }
+  },
+  "devDependencies": {
+    "@types/node": "^22.10.0",
+    "@types/vscode": "^1.95.0",
+    "@vscode/vsce": "^3.2.1",
+    "esbuild": "^0.25.0",
+    "typescript": "^5.7.2",
+    "vitest": "^3.0.5"
+  }
+}
