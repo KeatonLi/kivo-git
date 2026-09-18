@@ -37,8 +37,12 @@ export class ChangelistStore {
   async group(changes: GitChange[]): Promise<ChangeList[]> {
     const data = await this.read();
     const existingPaths = new Set(changes.map((change) => change.path));
+    let changed = false;
     for (const assignedPath of Object.keys(data.assignments)) {
-      if (!existingPaths.has(assignedPath)) delete data.assignments[assignedPath];
+      if (!existingPaths.has(assignedPath)) {
+        delete data.assignments[assignedPath];
+        changed = true;
+      }
     }
     const lists = data.lists.map((list) => ({ ...list, changes: [] as GitChange[] }));
     for (const change of changes) {
@@ -46,7 +50,7 @@ export class ChangelistStore {
       const list = lists.find((candidate) => candidate.id === listId) ?? lists[0];
       list?.changes.push(change);
     }
-    await this.write(data);
+    if (changed) await this.write(data);
     return lists;
   }
 
