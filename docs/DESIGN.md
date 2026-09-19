@@ -1,8 +1,12 @@
 # Kivo Git product design
 
+## Current release mode: strict parity
+
+The active design target is defined in [`IDEA_PARITY.md`](./IDEA_PARITY.md). Until that contract passes user testing, implementation decisions are made by reference to Rebased and IntelliJ IDEA rather than by Kivo's own visual preferences. Kivo's name and mark remain, but spacing, hierarchy, density, motion, and interaction behavior must not be “improved” independently.
+
 ## Product promise
 
-Kivo Git brings an IDE-style Git workflow to VS Code. It keeps the useful mental model—without copying another product's pixels—and keeps native VS Code editors for code, diff, and merge work.
+Kivo Git brings the Rebased/IntelliJ Git workflow to VS Code with the same bottom-tool-window mental model. It keeps native VS Code editors for code, diff, and merge work.
 
 ## Interaction model
 
@@ -15,9 +19,9 @@ Kivo Git brings an IDE-style Git workflow to VS Code. It keeps the useful mental
 | Git Log | A three-region workspace: branch navigator, dense table-oriented multi-lane commit DAG, and selected-commit details/file diffs |
 | Update/push | Direct actions in the repository header with progress and result feedback |
 
-## Visual language
+## Visual language (parity mode)
 
-Kivo Git uses VS Code Codicons, host theme tokens, compact spacing, quiet surfaces, and a restrained lane palette for focus and active intent. The bottom Panel is the primary workspace: `Local Changes` and `Log` are the user-facing destinations, and Graph exists only as the first column of Log. This preserves the established IDE Git mental model while leaving the editor and Source Control sidebar unobstructed. Incoming, outgoing, active, warning, and destructive states remain visually distinct without turning the tool window into a dense toolbar.
+Kivo Git uses the host theme and Codicons for platform integration, but the composition is reference-led: compact IDEA-style spacing, dense Log rows, a branch navigator, a filter strip, a graph-first history table, and a right-side details/files pane. The bottom Panel is the primary workspace: `Local Changes` and `Log` are the user-facing destinations, and Graph exists only as the first column of Log. Any Kivo-specific treatment is deferred until parity acceptance.
 
 ### Brand mark
 
@@ -25,9 +29,9 @@ The Kivo mark is a K drawn as a small commit topology: a stable vertical stem, t
 
 The repository header exposes upstream freshness and separate Pull/Push commit counts. A non-interactive background fetch refreshes remote refs while the view is visible; failures stay local to the sync status instead of interrupting editing with notifications.
 
-## Motion language
+## Motion language (deferred)
 
-Motion communicates state. The default timings are 80 ms for press feedback, 120 ms for hover, 160–190 ms for structural changes, and 230–260 ms for operation results. Every animation respects `prefers-reduced-motion`; keyboard focus and loading states remain clear when motion is disabled.
+Do not add custom motion during parity mode. Use native/host transitions only where needed for basic feedback, and respect `prefers-reduced-motion`. The previous Kivo motion tokens are retained as a later enhancement proposal, not as an acceptance requirement.
 
 ## Architecture
 

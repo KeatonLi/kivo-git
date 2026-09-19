@@ -2,7 +2,7 @@
   "name": "idea-git",
   "displayName": "Kivo Git",
   "description": "A bottom-docked Git tool window with a graph-first workflow for Visual Studio Code.",
-  "version": "0.3.0-beta.6",
+  "version": "0.3.0-beta.7",
   "publisher": "keatonli",
   "license": "MIT",
   "repository": {

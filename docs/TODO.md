@@ -2,6 +2,12 @@
 
 Kivo Git is not a Source Control sidebar skin. It is a complete Git work system for VS Code that preserves an IDE-style mental model and improves it with continuous feedback, keyboard-first operation, reversible actions, and intent-aware assistance.
 
+## Current release gate — strict Rebased / IntelliJ IDEA parity
+
+Before adding any Kivo-specific polish, finish [`IDEA_PARITY.md`](./IDEA_PARITY.md). The bottom Panel placement, `Local Changes | Log` hierarchy, dense Log layout, Graph topology, filters, selection, refs, details, and keyboard behavior are P0. The user must install and approve the parity VSIX before Marketplace publication.
+
+The older “motion”, “continuous feedback”, and “differentiating capability” items below are deferred when they would change the reference mental model. They may be reconsidered only after the parity gate passes.
+
 ## Product principles
 
 - **IDE-compatible mental model:** changelists, commit review, branches, history, conflicts, stash, and shelf should feel familiar to an IDE user.

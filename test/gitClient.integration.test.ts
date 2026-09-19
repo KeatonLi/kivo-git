@@ -89,6 +89,7 @@ describe('GitClient integration', () => {
   it('builds a real multi-parent graph with branch refs and commit details', async () => {
     const root = await createRepository();
     await git(root, ['branch', 'feature/graph']);
+    await git(root, ['tag', 'v1.0.0']);
     await fs.appendFile(path.join(root, 'alpha.txt'), 'main line\n');
     await git(root, ['add', 'alpha.txt']);
     await git(root, ['commit', '-m', 'main line']);
@@ -113,6 +114,8 @@ describe('GitClient integration', () => {
 
     const feature = snapshot.commits.find((commit) => commit.subject === 'feature line');
     expect(feature?.refs).toEqual(expect.arrayContaining([expect.objectContaining({ name: 'feature/graph', kind: 'local' })]));
+    expect(feature?.paths).toContain('feature.txt');
+    expect(snapshot.tags).toEqual(expect.arrayContaining([expect.objectContaining({ name: 'v1.0.0', kind: 'tag' })]));
     const details = await client.commitDetails(feature!.hash);
     expect(details.files).toEqual(expect.arrayContaining([expect.objectContaining({ path: 'feature.txt', status: 'A' })]));
   });

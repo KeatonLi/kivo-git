@@ -2,6 +2,13 @@
 
 ## Unreleased
 
+## 0.3.0-beta.7 - 2026-09-19
+
+- Locked the next iteration to a Rebased/IntelliJ IDEA parity contract before adding Kivo-specific polish.
+- Tightened the bottom Git Tool Window header, peer tabs, compact Log filters, branch/ref navigator, and right-side Changed Files/details layout.
+- Added path-aware history filtering and tag refs, and disabled Kivo-only Graph/list/counter motion in parity mode.
+- Added a reproducible parity QA report that stays blocked until the VSIX is verified in a real VS Code Extension Host.
+
 ## 0.3.0-beta.6 - 2026-09-19
 
 - Realigned the bottom Kivo Git surface with the familiar Git Tool Window hierarchy: `Local Changes` and `Log` are peer tabs, while the graph is only the first column inside Log.

@@ -24,6 +24,8 @@ export interface CommitSummary {
   date: string;
   subject: string;
   parents: string[];
+  /** Paths touched by this commit, used by the IDEA-style Log path filter. */
+  paths: string[];
   refs: GitRef[];
   lane: number;
   incomingLanes: number[];
@@ -82,6 +84,7 @@ export interface RepositorySnapshot {
   changes: GitChange[];
   changelists: ChangeList[];
   branches: BranchSummary[];
+  tags?: GitRef[];
   commits: CommitSummary[];
   /** True when the repository has more history than the current graph window. */
   commitsHasMore: boolean;

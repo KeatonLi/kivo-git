@@ -23,6 +23,7 @@ const ui = {
   selectionAnchor: undefined,
   commitMessage: persisted.commitMessage || '',
   graphQuery: persisted.graphQuery || '',
+  graphPathFilter: persisted.graphPathFilter || '',
   graphBranchFilter: persisted.graphBranchFilter || '',
   graphAuthorFilter: persisted.graphAuthorFilter || '',
   graphAgeFilter: persisted.graphAgeFilter || 'all',
@@ -68,6 +69,7 @@ function persist() {
     focusedPath: ui.focusedPath,
     commitMessage: ui.commitMessage,
     graphQuery: ui.graphQuery,
+    graphPathFilter: ui.graphPathFilter,
     graphBranchFilter: ui.graphBranchFilter,
     graphAuthorFilter: ui.graphAuthorFilter,
     graphAgeFilter: ui.graphAgeFilter,
@@ -85,10 +87,11 @@ function graphCommits() {
   return commits.filter((commit) => {
     const textMatches = !query || [commit.subject, commit.author, commit.hash, commit.shortHash, ...(commit.refs || []).map((ref) => ref.name)]
       .join(' ').toLowerCase().includes(query);
+    const pathMatches = !ui.graphPathFilter.trim() || (commit.paths || []).some((path) => path.toLowerCase().includes(ui.graphPathFilter.trim().toLowerCase()));
     const branchMatches = !ui.graphBranchFilter || reachable?.has(commit.hash);
     const authorMatches = !ui.graphAuthorFilter || commit.author === ui.graphAuthorFilter;
     const ageMatches = !after || new Date(commit.date).getTime() >= after;
-    return textMatches && branchMatches && authorMatches && ageMatches;
+    return textMatches && pathMatches && branchMatches && authorMatches && ageMatches;
   });
 }
 
@@ -281,9 +284,9 @@ function render() {
       <button class="branch-pill" data-action="branches" aria-label="Git branches, current branch ${escapeHtml(s.branch)}" aria-haspopup="dialog" aria-expanded="${ui.branchOpen}">
         ${icon('git-branch', 'branch-symbol')}<span class="branch-name">${escapeHtml(s.branch)}</span>${icon('chevron-down', 'chevron')}
       </button>
-      <span class="toolbar-divider" aria-hidden="true"></span>
       <span class="upstream" title="${escapeHtml(s.upstream || 'This branch has no upstream')}">${icon(hasUpstream ? 'cloud' : 'warning')}<span>${hasUpstream ? escapeHtml(s.upstream) : 'No upstream'}</span></span>
-      <div class="toolbar-actions">
+      <span class="toolbar-divider" aria-hidden="true"></span>
+      <div class="toolbar-actions" aria-label="Remote synchronization">
         <button class="icon-button fetch-button ${ui.syncPhase === 'fetching' || ui.operationKind === 'fetch' ? 'working' : ''}" aria-label="${ui.syncPhase === 'fetching' ? 'Checking remote' : 'Fetch remote updates'}" title="Fetch remote updates" data-action="fetch" ${ui.busy || ui.syncPhase === 'fetching' ? 'disabled' : ''}>${icon(ui.syncPhase === 'fetching' || ui.operationKind === 'fetch' ? 'loading' : 'refresh', ui.syncPhase === 'fetching' || ui.operationKind === 'fetch' ? 'codicon-modifier-spin' : '')}</button>
         <div class="sync-action-wrap">
           <button class="sync-chip incoming ${s.behind ? 'has-count' : ''} ${ui.operationKind === 'pull' ? 'working' : ''}" data-action="pull-menu" aria-haspopup="menu" aria-expanded="${ui.pullMenuOpen}" aria-label="${s.behind} commits available to pull" title="Choose how to pull ${s.behind} incoming commit${s.behind === 1 ? '' : 's'}" ${!hasUpstream || !s.behind || ui.busy || ui.syncPhase === 'fetching' ? 'disabled' : ''}>${icon('arrow-down')}<strong>${s.behind}</strong><span>Pull</span>${icon('chevron-down', 'sync-chevron')}</button>
@@ -297,7 +300,7 @@ function render() {
         <button class="sync-chip outgoing ${s.ahead ? 'has-count' : ''} ${ui.operationKind === 'push' ? 'working' : ''}" data-action="push" aria-label="${s.ahead} commits ready to push" title="Push ${s.ahead} outgoing commit${s.ahead === 1 ? '' : 's'}" ${!hasUpstream || !s.ahead || ui.busy || ui.syncPhase === 'fetching' ? 'disabled' : ''}>${icon('arrow-up')}<strong>${s.ahead}</strong><span>Push</span></button>
       </div>
       <span class="toolbar-spacer"></span>
-      <span class="sync-freshness" aria-live="polite" title="${escapeHtml(ui.syncError || syncLabel)}">${ui.syncError ? icon('warning') : kivoIcon('sync', 'sync-symbol')}${escapeHtml(syncLabel)}</span>
+      <span class="sync-freshness" aria-live="polite" title="${escapeHtml(ui.syncError || syncLabel)}">${ui.syncError ? icon('warning') : icon('cloud-download')}${escapeHtml(syncLabel)}</span>
     </header>
     <nav class="tool-tabs" aria-label="Git tool window tabs" role="tablist">
       <button class="tab ${ui.tab === 'changes' ? 'active' : ''}" data-tab="changes" role="tab" aria-selected="${ui.tab === 'changes'}">Local Changes <span>${changeCount}</span></button>
@@ -424,14 +427,19 @@ function renderCommitDetails(s) {
   const details = ui.commitDetails?.hash === commit.hash ? ui.commitDetails : undefined;
   const files = details?.files || [];
   return `<aside class="commit-detail" aria-label="Commit details">
-    <div class="commit-detail-head"><div><span class="detail-kicker">COMMIT DETAILS</span><strong>${escapeHtml(commit.subject)}</strong></div><button class="icon-button" data-action="close-commit" aria-label="Close commit details">${icon('close')}</button></div>
-    <div class="commit-detail-meta"><span>${escapeHtml(commit.author)} · ${relativeTime(commit.date)}</span><code>${escapeHtml(commit.hash)}</code></div>
-    <div class="commit-detail-refs">${commit.refs.map(renderRef).join('') || '<span class="detail-muted">No branch label</span>'}</div>
-    ${ui.commitDetailsLoading && !details ? `<div class="detail-loading">${icon('loading', 'codicon-modifier-spin')} Loading changed files…</div>` : ''}
-    ${ui.commitDetailsError && !details ? `<div class="detail-error" role="alert">${icon('error')}<span>${escapeHtml(ui.commitDetailsError)}</span><button class="text-button" data-action="retry-commit">Retry</button></div>` : ''}
-    ${details?.body && details.body !== details.subject ? `<p class="commit-body">${escapeHtml(details.body)}</p>` : ''}
-    ${details?.parents?.length ? `<div class="detail-parents"><span>Parents</span>${details.parents.map((parent) => `<code>${escapeHtml(parent.slice(0, 8))}</code>`).join('')}</div>` : ''}
-    ${details ? `<div class="commit-files"><span class="detail-kicker">CHANGED FILES <b>${details.files.length}</b></span>${files.length ? files.map((file) => `<button class="commit-file" data-commit-file="${escapeHtml(file.path)}" data-commit-kind="${escapeHtml(file.status)}" data-commit-original="${escapeHtml(file.originalPath || '')}" title="Open diff for ${escapeHtml(file.path)}"><span class="status ${file.status === 'D' ? 'deleted' : file.status === 'A' ? 'added' : 'modified'}">${escapeHtml(file.status)}</span><span>${escapeHtml(file.path)}</span>${icon('diff')}</button>`).join('') : '<span class="detail-muted">No file changes reported</span>'}</div>` : ''}
+    <div class="commit-files-panel">
+      <div class="details-section-heading"><span>Changed Files</span><span class="details-count">${details ? details.files.length : ''}</span></div>
+      ${ui.commitDetailsLoading && !details ? `<div class="detail-loading">${icon('loading', 'codicon-modifier-spin')} Loading changed files…</div>` : ''}
+      ${ui.commitDetailsError && !details ? `<div class="detail-error" role="alert">${icon('error')}<span>${escapeHtml(ui.commitDetailsError)}</span><button class="text-button" data-action="retry-commit">Retry</button></div>` : ''}
+      ${details ? `<div class="commit-files">${files.length ? files.map((file) => `<button class="commit-file" data-commit-file="${escapeHtml(file.path)}" data-commit-kind="${escapeHtml(file.status)}" data-commit-original="${escapeHtml(file.originalPath || '')}" title="Open diff for ${escapeHtml(file.path)}"><span class="status ${file.status === 'D' ? 'deleted' : file.status === 'A' ? 'added' : 'modified'}">${escapeHtml(file.status)}</span><span>${escapeHtml(file.path)}</span>${icon('diff')}</button>`).join('') : '<span class="detail-muted">No file changes reported</span>'}</div>` : ''}
+    </div>
+    <div class="commit-metadata">
+      <div class="commit-detail-head"><div><span class="detail-kicker">COMMIT</span><strong>${escapeHtml(commit.subject)}</strong></div><button class="icon-button" data-action="close-commit" aria-label="Close commit details">${icon('close')}</button></div>
+      <div class="commit-detail-meta"><span>${escapeHtml(commit.author)} · ${relativeTime(commit.date)}</span><code>${escapeHtml(commit.hash)}</code></div>
+      <div class="commit-detail-refs">${commit.refs.map(renderRef).join('') || '<span class="detail-muted">No branch label</span>'}</div>
+      ${details?.body && details.body !== details.subject ? `<p class="commit-body">${escapeHtml(details.body)}</p>` : ''}
+      ${details?.parents?.length ? `<div class="detail-parents"><span>Parents</span>${details.parents.map((parent) => `<code>${escapeHtml(parent.slice(0, 8))}</code>`).join('')}</div>` : ''}
+    </div>
   </aside>`;
 }
 
@@ -444,9 +452,11 @@ function renderLogBranchPane(s) {
     ${icon(branch.remote ? 'cloud' : 'git-branch')}<span>${escapeHtml(branch.name)}</span>${branch.current ? '<small>HEAD</small>' : ''}
   </button>`;
   return `<aside class="log-branch-pane" aria-label="Log branches">
-    <div class="log-branch-heading"><span>Branches</span><span>${s.branches.length}</span></div>
+    <div class="log-branch-heading"><span>Branches</span></div>
     <button class="log-branch-row all ${!ui.graphBranchFilter ? 'selected' : ''}" data-log-branch="" aria-pressed="${!ui.graphBranchFilter}">${icon('list-flat')}<span>All branches</span></button>
+    <section class="log-branch-group"><h3>HEAD</h3><button class="log-branch-row current ${ui.graphBranchFilter === s.branch ? 'selected' : ''}" data-log-branch="${escapeHtml(s.branch)}" aria-pressed="${ui.graphBranchFilter === s.branch}">${icon('git-branch')}<span>${escapeHtml(s.branch)}</span><small>HEAD</small></button></section>
     ${groups.map((group) => `<section class="log-branch-group"><h3>${group.label}</h3>${group.branches.map(row).join('')}</section>`).join('')}
+    ${(s.tags || []).length ? `<section class="log-branch-group"><h3>TAGS</h3>${(s.tags || []).map((tag) => `<button class="log-branch-row" data-log-branch="${escapeHtml(tag.name)}" aria-pressed="${ui.graphBranchFilter === tag.name}">${icon('tag')}<span>${escapeHtml(tag.name)}</span></button>`).join('')}</section>` : ''}
   </aside>`;
 }
 
@@ -460,16 +470,18 @@ function renderGraph(s) {
     : commits[0]?.hash;
   const branchOptions = [...new Set(s.branches.map((branch) => branch.name))].sort((a, b) => a.localeCompare(b));
   const authorOptions = [...new Set(s.commits.map((commit) => commit.author))].sort((a, b) => a.localeCompare(b));
-  const filtersActive = Boolean(ui.graphBranchFilter || ui.graphAuthorFilter || ui.graphAgeFilter !== 'all' || ui.graphQuery.trim());
+  const filtersActive = Boolean(ui.graphBranchFilter || ui.graphAuthorFilter || ui.graphAgeFilter !== 'all' || ui.graphQuery.trim() || ui.graphPathFilter.trim());
   const countLabel = filtersActive ? `${commits.length} of ${s.commits.length}` : `${s.commits.length}`;
   return `<div class="graph-view log-view" role="tabpanel" aria-label="Git Log">
-    <div class="log-filter-bar"><div class="graph-toolbar-head"><span class="log-result-count">${countLabel} commits</span>
+    <div class="log-filter-bar"><div class="graph-toolbar-head">
+      <label class="graph-search log-search">${icon('search')}<input id="graph-search" aria-label="Search by text or hash" placeholder="Text / Hash" value="${escapeHtml(ui.graphQuery)}"></label>
       <div class="graph-filters" aria-label="History filters">
         <label class="graph-filter"><span>Branch</span><select data-graph-filter="branch" aria-label="Filter by branch"><option value="">All branches</option>${branchOptions.map((branch) => `<option value="${escapeHtml(branch)}" ${ui.graphBranchFilter === branch ? 'selected' : ''}>${escapeHtml(branch)}</option>`).join('')}</select></label>
         <label class="graph-filter"><span>User</span><select data-graph-filter="author" aria-label="Filter by author"><option value="">All users</option>${authorOptions.map((author) => `<option value="${escapeHtml(author)}" ${ui.graphAuthorFilter === author ? 'selected' : ''}>${escapeHtml(author)}</option>`).join('')}</select></label>
         <label class="graph-filter"><span>Date</span><select data-graph-filter="age" aria-label="Filter by date"><option value="all" ${ui.graphAgeFilter === 'all' ? 'selected' : ''}>All time</option><option value="7d" ${ui.graphAgeFilter === '7d' ? 'selected' : ''}>Last 7 days</option><option value="30d" ${ui.graphAgeFilter === '30d' ? 'selected' : ''}>Last 30 days</option><option value="90d" ${ui.graphAgeFilter === '90d' ? 'selected' : ''}>Last 90 days</option></select></label>
+        <label class="graph-filter path-filter"><span>Path</span><input id="graph-path" aria-label="Filter by path" placeholder="Any path" value="${escapeHtml(ui.graphPathFilter)}"></label>
         ${filtersActive ? '<button class="text-button graph-clear" data-action="clear-graph-filters">Clear</button>' : ''}
-      </div><label class="graph-search">${icon('search')}<input id="graph-search" aria-label="Search Log" placeholder="Search commits" value="${escapeHtml(ui.graphQuery)}"></label>
+      </div><span class="log-result-count" aria-live="polite">${countLabel} commits</span>
     </div></div>
     <div class="log-workspace">
       ${renderLogBranchPane(s)}
@@ -549,6 +561,20 @@ function bind() {
         input?.setSelectionRange(ui.graphQuery.length, ui.graphQuery.length);
       });
       });
+  }
+  const graphPath = app.querySelector('#graph-path');
+  if (graphPath && !graphPath.__ideaGitListeners) {
+    graphPath.__ideaGitListeners = new Set(['path-search']);
+    graphPath.addEventListener('input', () => {
+      ui.graphPathFilter = graphPath.value;
+      persist();
+      render();
+      requestAnimationFrame(() => {
+        const input = app.querySelector('#graph-path');
+        input?.focus();
+        input?.setSelectionRange(ui.graphPathFilter.length, ui.graphPathFilter.length);
+      });
+    });
   }
   once('[data-graph-filter]', 'change', (event) => {
     const select = event.currentTarget;
@@ -761,6 +787,7 @@ function handleAction(action) {
   }
   if (action === 'clear-graph-filters') {
     ui.graphQuery = '';
+    ui.graphPathFilter = '';
     ui.graphBranchFilter = '';
     ui.graphAuthorFilter = '';
     ui.graphAgeFilter = 'all';
