@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+## 0.3.0-beta.1 - 2026-09-19
+
+- Formalized the Kivo Git brand and Graph history milestone in the release artifacts.
+
 ## 0.2.0-beta.3 - 2026-09-19
 
 - Renamed the product to Kivo Git while preserving the internal extension and command IDs for upgrade compatibility.
