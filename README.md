@@ -11,6 +11,7 @@ IdeaGit is for developers who like VS Code but miss the clarity of JetBrains Git
 - Selective commits without forcing a staged/unstaged workflow
 - Local and remote branch popup with checkout
 - Ahead/behind state plus fetch, pull, and push actions
+- Quiet background auto-fetch with explicit incoming and outgoing commit counts
 - Native VS Code diff preview on single-click and a pinned editor on double-click
 - Arrow-key file navigation, Space toggle, and Shift range selection
 - Recent commit log
@@ -24,6 +25,8 @@ npm run compile
 ```
 
 Open this folder in VS Code and press `F5` to launch the Extension Development Host. Open a Git repository there, then select the IdeaGit icon in the Activity Bar.
+
+IdeaGit checks remote refs in the background every five minutes while its view is visible. Configure `ideaGit.autoFetch` or `ideaGit.autoFetchInterval` when a repository needs a different network policy.
 
 ## Release a test build
 

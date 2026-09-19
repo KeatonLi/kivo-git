@@ -15,6 +15,12 @@ IdeaGit brings the IntelliJ IDEA Git workflow to VS Code. It copies the mental m
 | Git log | Compact animated commit list; graph lanes and filters follow in milestone 2 |
 | Update/push | Direct actions in the repository header with progress and result feedback |
 
+## Visual language
+
+IdeaGit uses VS Code Codicons, host theme tokens, compact spacing, quiet surfaces, and a single accent color for focus and active intent. Incoming, outgoing, active, warning, and destructive states remain visually distinct without turning the sidebar into a dense toolbar.
+
+The repository header exposes upstream freshness and separate Pull/Push commit counts. A non-interactive background fetch refreshes remote refs while the view is visible; failures stay local to the sync status instead of interrupting editing with notifications.
+
 ## Motion language
 
 Motion communicates state. The default timings are 80 ms for press feedback, 120 ms for hover, 160–190 ms for structural changes, and 230–260 ms for operation results. Every animation respects `prefers-reduced-motion`.

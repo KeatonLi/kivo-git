@@ -32,6 +32,37 @@ afterEach(async () => {
 });
 
 describe('GitClient integration', () => {
+  it('refreshes upstream ahead and behind counts after fetching remote refs', async () => {
+    const root = await createRepository();
+    const remote = await fs.mkdtemp(path.join(os.tmpdir(), 'ideagit-remote-'));
+    const peer = await fs.mkdtemp(path.join(os.tmpdir(), 'ideagit-peer-'));
+    temporaryRepositories.push(remote, peer);
+    await git(remote, ['init', '--bare']);
+    await git(root, ['remote', 'add', 'origin', remote]);
+    await git(root, ['push', '-u', 'origin', 'main']);
+
+    await fs.appendFile(path.join(root, 'alpha.txt'), 'local commit\n');
+    await git(root, ['add', 'alpha.txt']);
+    await git(root, ['commit', '-m', 'local work']);
+
+    await git(peer, ['clone', '--branch', 'main', remote, '.']);
+    await git(peer, ['config', 'user.name', 'IdeaGit Peer']);
+    await git(peer, ['config', 'user.email', 'peer@example.test']);
+    await fs.writeFile(path.join(peer, 'remote.txt'), 'remote commit\n');
+    await git(peer, ['add', 'remote.txt']);
+    await git(peer, ['commit', '-m', 'remote work']);
+    await git(peer, ['push', 'origin', 'main']);
+
+    const client = new GitClient(root);
+    await client.initialize();
+    const stale = await client.snapshot();
+    expect(stale).toMatchObject({ upstream: 'origin/main', ahead: 1, behind: 0 });
+
+    await client.fetch(true);
+    const current = await client.snapshot();
+    expect(current).toMatchObject({ upstream: 'origin/main', ahead: 1, behind: 1 });
+  });
+
   it('groups changes and commits selected files without consuming unrelated staged changes', async () => {
     const root = await createRepository();
     await fs.appendFile(path.join(root, 'alpha.txt'), 'changed\n');

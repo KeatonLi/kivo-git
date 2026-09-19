@@ -139,7 +139,7 @@ Goal: reach strong IDEA parity for the operations developers perform every day.
 
 ### Remote synchronization
 
-- [ ] **P1** Show clear incoming/outgoing commit counts and upstream state.
+- [x] **P1** Show clear incoming/outgoing commit counts and upstream state.
 - [ ] **P1** Let the user choose pull strategy: fast-forward only, merge, or rebase.
 - [ ] **P1** Add a push preview listing commits, files, remote, and target branch.
 - [ ] **P1** Support setting upstream and selecting among multiple remotes.

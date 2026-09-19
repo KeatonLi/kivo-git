@@ -12,13 +12,18 @@ export class GitClient {
 
   constructor(readonly workspaceRoot: string) {}
 
-  private async run(args: string[], maxBuffer = 8 * 1024 * 1024): Promise<string> {
+  private async run(
+    args: string[],
+    maxBuffer = 8 * 1024 * 1024,
+    options: { timeout?: number; env?: NodeJS.ProcessEnv } = {}
+  ): Promise<string> {
     try {
       const result = await execFileAsync('git', args, {
         cwd: this.workspaceRoot,
         encoding: 'utf8',
         maxBuffer,
-        env: { ...process.env, GIT_OPTIONAL_LOCKS: '0' }
+        timeout: options.timeout,
+        env: { ...process.env, GIT_OPTIONAL_LOCKS: '0', ...options.env }
       });
       return result.stdout;
     } catch (error) {
@@ -130,7 +135,11 @@ export class GitClient {
     await this.run(['switch', '--track', '-c', localName, branchName]);
   }
 
-  async fetch(): Promise<void> { await this.run(['fetch', '--all', '--prune']); }
+  async fetch(background = false): Promise<void> {
+    await this.run(['fetch', '--all', '--prune'], 8 * 1024 * 1024, background
+      ? { timeout: 30000, env: { GIT_TERMINAL_PROMPT: '0', GCM_INTERACTIVE: 'Never' } }
+      : {});
+  }
   async pull(): Promise<void> { await this.run(['pull', '--ff-only']); }
   async push(): Promise<void> { await this.run(['push']); }
 

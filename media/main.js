@@ -13,6 +13,9 @@ const ui = {
   busy: false,
   operationKind: undefined,
   operationId: 0,
+  syncPhase: 'idle',
+  lastFetchedAt: undefined,
+  syncError: undefined,
   branchMotion: undefined,
   listMenuId: undefined,
   focusedPath: persisted.focusedPath,
@@ -29,12 +32,17 @@ const escapeHtml = (value = '') => String(value)
   .replaceAll('"', '&quot;').replaceAll("'", '&#039;');
 
 const iconFor = (kind) => ({ modified: 'M', added: 'A', deleted: 'D', renamed: 'R', untracked: '?', conflict: '!' })[kind] || 'M';
+const icon = (name, classes = '') => `<span class="codicon codicon-${name} ${classes}" aria-hidden="true"></span>`;
 const relativeTime = (date) => {
   const seconds = Math.floor((Date.now() - new Date(date).getTime()) / 1000);
   if (seconds < 60) return 'now';
   if (seconds < 3600) return `${Math.floor(seconds / 60)}m`;
   if (seconds < 86400) return `${Math.floor(seconds / 3600)}h`;
   return `${Math.floor(seconds / 86400)}d`;
+};
+const updatedLabel = (date) => {
+  const relative = relativeTime(date);
+  return relative === 'now' ? 'Updated just now' : `Updated ${relative} ago`;
 };
 
 function post(type, payload = {}) { vscode.postMessage({ type, ...payload }); }
@@ -142,7 +150,7 @@ function patchApp(html) {
   target.innerHTML = html;
   const pool = new Map([...app.querySelectorAll('[data-path], [data-list-id], [data-checkout], [data-hash]')].map((node) => [keyFor(node), node]));
   const before = new Map([...app.querySelectorAll('.file-row')].map((node) => [node.dataset.path, node.getBoundingClientRect()]));
-  const counters = new Map([...app.querySelectorAll('.count, .sync, .tabs .tab span')].map((node) => [node, node.textContent]));
+  const counters = new Map([...app.querySelectorAll('.count, .sync-chip strong, .tabs .tab span')].map((node) => [node, node.textContent]));
   patchNode(app, target, pool);
   if (!window.matchMedia('(prefers-reduced-motion: reduce)').matches) {
     for (const row of app.querySelectorAll('.file-row')) {
@@ -167,27 +175,40 @@ function patchApp(html) {
 function render() {
   const s = ui.snapshot;
   if (!s) {
-    app.innerHTML = `<section class="empty-state"><div class="empty-mark">⑂</div><h2>Open a Git repository</h2><p>IdeaGit will appear here when the workspace is ready.</p><button data-action="refresh">Refresh</button></section>`;
+    app.innerHTML = `<section class="empty-state"><div class="empty-mark">${icon('source-control')}</div><h2>Open a Git repository</h2><p>IdeaGit will appear here when the workspace is ready.</p><button data-action="refresh">${icon('refresh')} Refresh</button></section>`;
     bind();
     return;
   }
   const changeCount = s.changes.length;
+  const hasUpstream = Boolean(s.upstream);
+  const syncLabel = ui.syncPhase === 'fetching'
+    ? 'Checking remote…'
+    : ui.syncError
+      ? 'Sync needs attention'
+      : ui.lastFetchedAt
+        ? updatedLabel(new Date(ui.lastFetchedAt).toISOString())
+        : 'Remote not checked';
   patchApp(`
-    <header class="repo-header">
-      <button class="branch-pill" data-action="branches" aria-label="Git branches" aria-haspopup="dialog" aria-expanded="${ui.branchOpen}">
-        <span class="branch-symbol">⑂</span><span class="branch-name">${escapeHtml(s.branch)}</span>
-        ${s.ahead ? `<span class="sync up">↑${s.ahead}</span>` : ''}${s.behind ? `<span class="sync down">↓${s.behind}</span>` : ''}
-        <span class="chevron">⌄</span>
-      </button>
-      <div class="repo-actions">
-        <button class="icon-button ${ui.operationKind === 'fetch' ? 'working' : ''}" aria-label="${ui.operationKind === 'fetch' ? 'Fetching' : 'Fetch'}" title="Fetch" data-action="fetch" ${ui.busy ? 'disabled' : ''}><span class="action-glyph">↻</span></button>
-        <button class="icon-button ${ui.operationKind === 'pull' ? 'working' : ''}" aria-label="${ui.operationKind === 'pull' ? 'Pulling' : 'Pull'}" title="Pull" data-action="pull" ${ui.busy ? 'disabled' : ''}><span class="action-glyph">↓</span></button>
-        <button class="icon-button ${ui.operationKind === 'push' ? 'working' : ''}" aria-label="${ui.operationKind === 'push' ? 'Pushing' : 'Push'}" title="Push" data-action="push" ${ui.busy ? 'disabled' : ''}><span class="action-glyph">↑</span></button>
+    <header class="repo-shell">
+      <div class="repo-header">
+        <div class="repo-identity"><span class="repo-name" title="${escapeHtml(s.repositoryName)}">${escapeHtml(s.repositoryName)}</span><span class="repo-caption">Repository</span></div>
+        <button class="branch-pill" data-action="branches" aria-label="Git branches, current branch ${escapeHtml(s.branch)}" aria-haspopup="dialog" aria-expanded="${ui.branchOpen}">
+          ${icon('git-branch', 'branch-symbol')}<span class="branch-name">${escapeHtml(s.branch)}</span>${icon('chevron-down', 'chevron')}
+        </button>
+        <button class="icon-button fetch-button ${ui.syncPhase === 'fetching' || ui.operationKind === 'fetch' ? 'working' : ''}" aria-label="${ui.syncPhase === 'fetching' ? 'Checking remote' : 'Fetch remote updates'}" title="Fetch remote updates" data-action="fetch" ${ui.busy || ui.syncPhase === 'fetching' ? 'disabled' : ''}>${icon(ui.syncPhase === 'fetching' || ui.operationKind === 'fetch' ? 'loading' : 'refresh', ui.syncPhase === 'fetching' || ui.operationKind === 'fetch' ? 'codicon-modifier-spin' : '')}</button>
+      </div>
+      <div class="sync-summary ${ui.syncError ? 'has-error' : ''}">
+        <span class="upstream" title="${escapeHtml(s.upstream || 'This branch has no upstream')}">${icon(hasUpstream ? 'cloud' : 'warning')}<span>${hasUpstream ? escapeHtml(s.upstream) : 'No upstream'}</span></span>
+        <div class="sync-counts">
+          <button class="sync-chip incoming ${s.behind ? 'has-count' : ''} ${ui.operationKind === 'pull' ? 'working' : ''}" data-action="pull" aria-label="${s.behind} commits available to pull" title="Pull ${s.behind} incoming commit${s.behind === 1 ? '' : 's'}" ${!hasUpstream || !s.behind || ui.busy ? 'disabled' : ''}>${icon('arrow-down')}<strong>${s.behind}</strong><span>Pull</span></button>
+          <button class="sync-chip outgoing ${s.ahead ? 'has-count' : ''} ${ui.operationKind === 'push' ? 'working' : ''}" data-action="push" aria-label="${s.ahead} commits ready to push" title="Push ${s.ahead} outgoing commit${s.ahead === 1 ? '' : 's'}" ${!hasUpstream || !s.ahead || ui.busy ? 'disabled' : ''}>${icon('arrow-up')}<strong>${s.ahead}</strong><span>Push</span></button>
+        </div>
+        <span class="sync-freshness" title="${escapeHtml(ui.syncError || syncLabel)}">${ui.syncError ? icon('warning') : ''}${escapeHtml(syncLabel)}</span>
       </div>
     </header>
     <nav class="tabs" aria-label="Git views">
-      <button class="tab ${ui.tab === 'changes' ? 'active' : ''}" data-tab="changes">Changes <span>${changeCount}</span></button>
-      <button class="tab ${ui.tab === 'log' ? 'active' : ''}" data-tab="log">Log</button>
+      <button class="tab ${ui.tab === 'changes' ? 'active' : ''}" data-tab="changes">${icon('diff-multiple')} Changes <span>${changeCount}</span></button>
+      <button class="tab ${ui.tab === 'log' ? 'active' : ''}" data-tab="log">${icon('git-commit')} Log</button>
     </nav>
     <section class="content" aria-busy="${ui.busy}">
       ${ui.tab === 'changes' ? renderChanges(s) : renderLog(s)}
@@ -219,8 +240,8 @@ function renderChanges(s) {
     const allSelected = list.changes.length > 0 && selected === list.changes.length;
     return `<section class="changelist ${collapsed ? 'collapsed' : ''} ${list.active ? 'active-list' : ''}" data-list-id="${escapeHtml(list.id)}">
       <div class="list-heading"><label class="list-check check"><input type="checkbox" data-select-list="${escapeHtml(list.id)}" aria-label="Select all files in ${escapeHtml(list.name)}" ${allSelected ? 'checked' : ''} ${ui.busy || !list.changes.length ? 'disabled' : ''}><span></span></label><button class="list-collapse" data-collapse="${escapeHtml(list.id)}" aria-expanded="${!collapsed}">
-        <span class="disclosure">⌄</span><span class="active-dot" title="${list.active ? 'Active changelist' : ''}">${list.active ? '●' : ''}</span><span class="list-name">${escapeHtml(list.name)}</span><span class="count">${list.changes.length}</span>
-      </button><button class="list-more" data-list-menu="${escapeHtml(list.id)}" aria-label="Actions for ${escapeHtml(list.name)}" aria-expanded="${ui.listMenuId === list.id}">•••</button></div>
+        ${icon('chevron-down', 'disclosure')}<span class="active-dot" title="${list.active ? 'Active changelist' : ''}"></span><span class="list-name">${escapeHtml(list.name)}</span>${list.active ? '<span class="active-label">Active</span>' : ''}<span class="count">${list.changes.length}</span>
+      </button><button class="list-more" data-list-menu="${escapeHtml(list.id)}" aria-label="Actions for ${escapeHtml(list.name)}" aria-expanded="${ui.listMenuId === list.id}">${icon('more')}</button></div>
       <div class="file-list-shell"><div class="file-list" data-drop-list="${escapeHtml(list.id)}">
         ${list.changes.length ? list.changes.map(renderFile).join('') : '<div class="drop-hint">Drop files here</div>'}
       </div></div><div class="list-menu ${ui.listMenuId === list.id ? 'open' : ''}" role="menu" ${ui.listMenuId === list.id ? '' : 'inert'}>
@@ -232,12 +253,12 @@ function renderChanges(s) {
   }).join('');
   const selectedCount = ui.selected.size;
   return `
-    <div class="section-toolbar"><span>LOCAL CHANGES</span><button class="text-button" data-action="new-list" ${ui.busy ? 'disabled' : ''}>＋ Changelist</button></div>
+    <div class="section-toolbar"><span>LOCAL CHANGES</span><button class="text-button" data-action="new-list" ${ui.busy ? 'disabled' : ''}>${icon('add')} Changelist</button></div>
     <div class="lists">${lists}</div>
     <footer class="commit-panel">
       <textarea id="commit-message" rows="3" placeholder="Commit message…" spellcheck="true" ${ui.operationKind === 'commit' ? 'disabled' : ''}>${escapeHtml(ui.commitMessage)}</textarea>
       <div class="commit-meta"><span>${selectedCount || 'No'} file${selectedCount === 1 ? '' : 's'} selected</span><span class="shortcut">${commandKey} Enter</span></div>
-      <button class="primary-button ${ui.operationKind === 'commit' ? 'working' : ''}" data-action="commit" ${!selectedCount || ui.busy ? 'disabled' : ''}>${ui.operationKind === 'commit' ? '<span class="button-spinner">↻</span><span class="button-label">Committing…</span>' : '<span class="button-label">Commit</span><span class="button-arrow">⌄</span>'}</button>
+      <button class="primary-button ${ui.operationKind === 'commit' ? 'working' : ''}" data-action="commit" ${!selectedCount || ui.busy ? 'disabled' : ''}>${ui.operationKind === 'commit' ? `${icon('loading', 'codicon-modifier-spin button-spinner')}<span class="button-label">Committing…</span>` : `<span class="button-label">Commit</span>${icon('chevron-down', 'button-arrow')}`}</button>
     </footer>`;
 }
 
@@ -270,11 +291,11 @@ function renderBranchPopup(s) {
   const local = filtered.filter((branch) => !branch.remote);
   const remote = filtered.filter((branch) => branch.remote);
   const rows = (items) => items.map((branch) => `<button class="branch-row ${branch.current ? 'current' : ''}" data-checkout="${escapeHtml(branch.name)}" data-remote="${branch.remote}" ${ui.busy ? 'disabled' : ''}>
-      <span>${branch.current ? '✓' : '⑂'}</span><span class="branch-row-name">${escapeHtml(branch.name)}</span>${branch.tracking ? `<small>${escapeHtml(branch.tracking)}</small>` : ''}
+      ${icon(branch.current ? 'check' : branch.remote ? 'cloud' : 'git-branch')}<span class="branch-row-name">${escapeHtml(branch.name)}</span>${branch.tracking ? `<small>${escapeHtml(branch.tracking)}</small>` : ''}
     </button>`).join('');
   return `<div class="branch-overlay ${ui.branchOpen ? 'open' : ''}" ${ui.branchOpen ? '' : 'inert'} aria-hidden="${!ui.branchOpen}"><div class="scrim" data-action="close-branches"></div><aside class="branch-popup" role="dialog" aria-modal="true" aria-label="Git branches">
-    <div class="popup-title"><strong>Git Branches</strong><button class="icon-button" aria-label="Close branches" data-action="close-branches">×</button></div>
-    <div class="search-wrap"><span>⌕</span><input id="branch-search" aria-label="Search branches" placeholder="Search branches" value="${escapeHtml(ui.branchQuery)}"></div>
+    <div class="popup-title"><strong>Git Branches</strong><button class="icon-button" aria-label="Close branches" data-action="close-branches">${icon('close')}</button></div>
+    <div class="search-wrap">${icon('search')}<input id="branch-search" aria-label="Search branches" placeholder="Search branches" value="${escapeHtml(ui.branchQuery)}"></div>
     <div class="branch-groups"><h3>LOCAL BRANCHES</h3>${rows(local) || '<p class="no-results">No local branches</p>'}<h3>REMOTE BRANCHES</h3>${rows(remote) || '<p class="no-results">No remote branches</p>'}</div>
   </aside></div>`;
 }
@@ -476,7 +497,7 @@ function commit() {
 function toast(message, phase = 'success') {
   const element = document.createElement('div');
   element.className = `toast ${phase}`;
-  element.innerHTML = `<span>${phase === 'success' ? '✓' : phase === 'loading' ? '↻' : '!'}</span><p>${escapeHtml(message)}</p>`;
+  element.innerHTML = `${icon(phase === 'success' ? 'check' : phase === 'loading' ? 'loading' : 'error', phase === 'loading' ? 'codicon-modifier-spin' : '')}<p>${escapeHtml(message)}</p>`;
   toastRegion.append(element);
   if (phase !== 'loading') setTimeout(() => dismissToast(element), 2800);
   return element;
@@ -528,6 +549,12 @@ window.addEventListener('message', (event) => {
     }
     if (message.phase === 'error') ui.branchMotion = undefined;
   }
+  if (message.type === 'syncStatus') {
+    ui.syncPhase = message.phase;
+    ui.lastFetchedAt = message.lastFetchedAt;
+    ui.syncError = message.error;
+    render();
+  }
   if (message.type === 'notice') toast(message.message, message.phase || 'error');
 });
 
@@ -554,6 +581,10 @@ document.addEventListener('click', (event) => {
   ui.listMenuId = undefined;
   render();
 });
+
+setInterval(() => {
+  if (ui.snapshot && ui.lastFetchedAt && ui.syncPhase !== 'fetching') render();
+}, 60000);
 
 post('ready');
 render();

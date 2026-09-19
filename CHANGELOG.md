@@ -2,6 +2,13 @@
 
 ## Unreleased
 
+## 0.2.0-beta.2 - 2026-09-19
+
+- Reworked the repository header, changelists, popovers, and feedback states with a cohesive theme-aware visual system and VS Code Codicons.
+- Added quiet background auto-fetch with a configurable interval and non-interactive timeout.
+- Added explicit upstream, incoming commit, outgoing commit, last-sync, and remote-error states.
+- Added real-repository coverage proving fetch refreshes diverged ahead and behind counts.
+
 ## 0.2.0-beta.1 - 2026-09-19
 
 - Added event-driven repository refresh with unchanged-snapshot suppression.

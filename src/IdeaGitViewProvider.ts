@@ -21,11 +21,17 @@ export class IdeaGitViewProvider implements vscode.WebviewViewProvider, vscode.T
   private view?: vscode.WebviewView;
   private client?: GitClient;
   private refreshTimer?: NodeJS.Timeout;
+  private autoFetchTimer?: NodeJS.Timeout;
+  private autoFetchPromise?: Promise<void>;
   private debounceTimer?: NodeJS.Timeout;
   private watcher?: vscode.FileSystemWatcher;
   private watchedRoot?: string;
   private operationId = 0;
   private operationRunning = false;
+  private lastFetchAttemptAt = 0;
+  private lastFetchedAt?: number;
+  private syncError?: string;
+  private syncGeneration = 0;
   private readonly coordinator = new SnapshotCoordinator(
     () => this.getClient().then((client) => client.snapshot()),
     async (snapshot) => { await this.view?.webview.postMessage({ type: 'snapshot', payload: snapshot }); },
@@ -40,9 +46,16 @@ export class IdeaGitViewProvider implements vscode.WebviewViewProvider, vscode.T
       vscode.workspace.onDidCreateFiles(() => this.scheduleRefresh()),
       vscode.workspace.onDidDeleteFiles(() => this.scheduleRefresh()),
       vscode.workspace.onDidRenameFiles(() => this.scheduleRefresh()),
+      vscode.workspace.onDidChangeConfiguration((event) => {
+        if (event.affectsConfiguration('ideaGit')) this.configurePolling();
+      }),
       vscode.workspace.onDidChangeWorkspaceFolders(() => {
         this.client = undefined;
         this.watchedRoot = undefined;
+        this.lastFetchAttemptAt = 0;
+        this.lastFetchedAt = undefined;
+        this.syncError = undefined;
+        this.syncGeneration += 1;
         this.watcher?.dispose();
         this.coordinator.reset();
         this.configurePolling();
@@ -109,8 +122,13 @@ export class IdeaGitViewProvider implements vscode.WebviewViewProvider, vscode.T
   }
 
   private async handle(message: WebviewMessage): Promise<void> {
-    if (message.type === 'ready' || message.type === 'refresh') {
-      await this.refresh(message.type === 'ready');
+    if (message.type === 'ready') {
+      await this.setSyncState(this.autoFetchPromise ? 'fetching' : this.syncError ? 'error' : 'idle', undefined, this.syncError);
+      await this.refresh(true);
+      return;
+    }
+    if (message.type === 'refresh') {
+      await this.refresh();
       return;
     }
     try {
@@ -175,6 +193,7 @@ export class IdeaGitViewProvider implements vscode.WebviewViewProvider, vscode.T
   }
 
   private async operation(kind: OperationKind, label: string, action: () => Promise<void>, success: string, clearsCommit = false): Promise<void> {
+    if (this.autoFetchPromise) await this.autoFetchPromise;
     if (this.operationRunning) throw new Error('Another Git operation is already running.');
     this.operationRunning = true;
     const id = ++this.operationId;
@@ -182,9 +201,11 @@ export class IdeaGitViewProvider implements vscode.WebviewViewProvider, vscode.T
     await this.view?.webview.postMessage({ type: 'operation', id, kind, phase: 'loading', message: label });
     try {
       await vscode.window.withProgress({ location: vscode.ProgressLocation.SourceControl, title: `IdeaGit: ${label}` }, action);
+      if (kind === 'fetch' || kind === 'pull' || kind === 'push') await this.setSyncState('idle', Date.now());
       await this.view?.webview.postMessage({ type: 'operation', id, kind, phase: 'success', message: success, clearsCommit });
     } catch (error) {
       this.coordinator.reset();
+      if (kind === 'fetch' || kind === 'pull' || kind === 'push') await this.setSyncState('error', undefined, this.errorText(error));
       await this.view?.webview.postMessage({ type: 'operation', id, kind, phase: 'error', message: this.errorText(error) });
     } finally {
       this.operationRunning = false;
@@ -204,10 +225,48 @@ export class IdeaGitViewProvider implements vscode.WebviewViewProvider, vscode.T
 
   private configurePolling(): void {
     if (this.refreshTimer) clearInterval(this.refreshTimer);
+    if (this.autoFetchTimer) clearInterval(this.autoFetchTimer);
     if (!this.view?.visible) return;
-    const interval = vscode.workspace.getConfiguration('ideaGit').get<number>('autoRefreshInterval', 30000);
+    const configuration = vscode.workspace.getConfiguration('ideaGit');
+    const interval = configuration.get<number>('autoRefreshInterval', 30000);
     this.refreshTimer = setInterval(() => void this.refresh(true), interval);
+    if (configuration.get<boolean>('autoFetch', true)) {
+      const autoFetchInterval = configuration.get<number>('autoFetchInterval', 300000);
+      this.autoFetchTimer = setInterval(() => void this.autoFetchIfDue(), autoFetchInterval);
+      void this.autoFetchIfDue();
+    }
     void this.refresh(true);
+  }
+
+  private async autoFetchIfDue(): Promise<void> {
+    if (this.autoFetchPromise || this.operationRunning || !this.view?.visible) return this.autoFetchPromise;
+    const interval = vscode.workspace.getConfiguration('ideaGit').get<number>('autoFetchInterval', 300000);
+    if (Date.now() - this.lastFetchAttemptAt < interval) return;
+    this.lastFetchAttemptAt = Date.now();
+    const generation = this.syncGeneration;
+    const task = (async () => {
+      await this.setSyncState('fetching');
+      this.coordinator.beginWrite();
+      try {
+        const client = await this.getClient();
+        await client.fetch(true);
+        if (generation !== this.syncGeneration) return;
+        await this.setSyncState('idle', Date.now());
+      } catch (error) {
+        if (generation !== this.syncGeneration) return;
+        await this.setSyncState('error', undefined, this.errorText(error));
+      } finally {
+        this.coordinator.endWrite();
+      }
+    })();
+    this.autoFetchPromise = task.finally(() => { this.autoFetchPromise = undefined; });
+    return this.autoFetchPromise;
+  }
+
+  private async setSyncState(phase: 'idle' | 'fetching' | 'error', fetchedAt?: number, error?: string): Promise<void> {
+    if (fetchedAt !== undefined) this.lastFetchedAt = fetchedAt;
+    this.syncError = error;
+    await this.view?.webview.postMessage({ type: 'syncStatus', phase, lastFetchedAt: this.lastFetchedAt, error: this.syncError });
   }
 
   private errorText(error: unknown): string {
@@ -216,6 +275,7 @@ export class IdeaGitViewProvider implements vscode.WebviewViewProvider, vscode.T
 
   private html(webview: vscode.Webview): string {
     const cssUri = webview.asWebviewUri(vscode.Uri.joinPath(this.context.extensionUri, 'media', 'main.css'));
+    const codiconUri = webview.asWebviewUri(vscode.Uri.joinPath(this.context.extensionUri, 'media', 'codicons', 'codicon.css'));
     const jsUri = webview.asWebviewUri(vscode.Uri.joinPath(this.context.extensionUri, 'media', 'main.js'));
     const nonce = Math.random().toString(36).slice(2);
     return `<!doctype html>
@@ -223,7 +283,8 @@ export class IdeaGitViewProvider implements vscode.WebviewViewProvider, vscode.T
       <head>
         <meta charset="UTF-8">
         <meta name="viewport" content="width=device-width, initial-scale=1.0">
-        <meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src ${webview.cspSource}; script-src 'nonce-${nonce}';">
+        <meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src ${webview.cspSource}; font-src ${webview.cspSource}; script-src 'nonce-${nonce}';">
+        <link rel="stylesheet" href="${codiconUri}">
         <link rel="stylesheet" href="${cssUri}">
         <title>IdeaGit</title>
       </head>
@@ -237,6 +298,7 @@ export class IdeaGitViewProvider implements vscode.WebviewViewProvider, vscode.T
 
   dispose(): void {
     if (this.refreshTimer) clearInterval(this.refreshTimer);
+    if (this.autoFetchTimer) clearInterval(this.autoFetchTimer);
     if (this.debounceTimer) clearTimeout(this.debounceTimer);
     this.watcher?.dispose();
     this.emitter.dispose();
