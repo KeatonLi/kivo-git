@@ -26,6 +26,7 @@ const ui = {
   graphBranchFilter: persisted.graphBranchFilter || '',
   graphAuthorFilter: persisted.graphAuthorFilter || '',
   graphAgeFilter: persisted.graphAgeFilter || 'all',
+  graphLoadingMore: false,
   pullMenuOpen: false,
   selectedCommitHash: persisted.selectedCommitHash,
   focusedCommitHash: persisted.focusedCommitHash || persisted.selectedCommitHash,
@@ -402,7 +403,7 @@ function renderGraph(s) {
   const focusHash = ui.focusedCommitHash && commits.some((commit) => commit.hash === ui.focusedCommitHash)
     ? ui.focusedCommitHash
     : commits[0]?.hash;
-  const branchOptions = [...new Set(s.branches.filter((branch) => !branch.remote).map((branch) => branch.name))].sort((a, b) => a.localeCompare(b));
+  const branchOptions = [...new Set(s.branches.map((branch) => branch.name))].sort((a, b) => a.localeCompare(b));
   const authorOptions = [...new Set(s.commits.map((commit) => commit.author))].sort((a, b) => a.localeCompare(b));
   const filtersActive = Boolean(ui.graphBranchFilter || ui.graphAuthorFilter || ui.graphAgeFilter !== 'all' || ui.graphQuery.trim());
   const countLabel = filtersActive ? `${commits.length} of ${s.commits.length}` : `${s.commits.length}`;
@@ -418,7 +419,7 @@ function renderGraph(s) {
     <div class="graph-list" role="listbox" aria-label="Commit history" style="--lane-count:${laneCount}">${commits.length ? commits.map((commit, index) => `<article class="graph-row ${commit.parents.length > 1 ? 'merge-row' : ''} ${ui.selectedCommitHash === commit.hash ? 'selected' : ''}" data-commit="${escapeHtml(commit.hash)}" data-hash="${escapeHtml(commit.hash)}" role="option" aria-selected="${ui.selectedCommitHash === commit.hash}" tabindex="${focusHash === commit.hash ? '0' : '-1'}" style="--delay:${Math.min(index * 12, 180)}ms">
       <div class="graph-canvas" style="--lane-count:${laneCount}">${renderGraphSvg(commit)}</div><div class="graph-commit"><strong>${escapeHtml(commit.subject)}</strong><span>${escapeHtml(commit.author)} · ${relativeTime(commit.date)}</span></div><div class="graph-ref-stack">${(commit.refs || []).slice(0, 2).map(renderRef).join('')}</div><code>${escapeHtml(commit.shortHash)}</code>
     </article>`).join('') : '<div class="inline-empty">No matching commits</div>'}</div>
-    ${s.commitsHasMore ? `<button class="load-more" data-action="load-more-commits" ${ui.busy ? 'disabled' : ''}>${icon('history')}<span>Load more history</span><small>Showing ${s.commits.length}</small></button>` : ''}
+    ${s.commitsHasMore ? `<button class="load-more ${ui.graphLoadingMore ? 'working' : ''}" data-action="load-more-commits" ${ui.busy || ui.graphLoadingMore ? 'disabled' : ''}>${ui.graphLoadingMore ? icon('loading', 'codicon-modifier-spin') : icon('history')}<span>${ui.graphLoadingMore ? 'Loading history…' : 'Load more history'}</span><small>Showing ${s.commits.length}</small></button>` : ''}
     ${renderCommitDetails(s)}
   </div>`;
 }
@@ -503,6 +504,21 @@ function bind() {
     ui.pullMenuOpen = false;
     render();
     post('pull', { strategy });
+  });
+  once('[data-pull-strategy]', 'keydown', (event) => {
+    if (event.key === 'Escape') {
+      event.preventDefault();
+      ui.pullMenuOpen = false;
+      render();
+      app.querySelector('[data-action="pull-menu"]')?.focus();
+      return;
+    }
+    if (!['ArrowDown', 'ArrowUp', 'Home', 'End'].includes(event.key)) return;
+    event.preventDefault();
+    const items = [...app.querySelectorAll('[data-pull-strategy]:not(:disabled)')];
+    const current = items.indexOf(event.currentTarget);
+    const next = event.key === 'Home' ? 0 : event.key === 'End' ? items.length - 1 : (current + (event.key === 'ArrowDown' ? 1 : -1) + items.length) % items.length;
+    items[Math.max(0, next)]?.focus();
   });
   once('[data-list-menu]', 'click', (event) => {
     event.stopPropagation();
@@ -670,8 +686,13 @@ function handleAction(action) {
   if (action === 'pull-menu' && !ui.busy && ui.syncPhase !== 'fetching') {
     ui.pullMenuOpen = !ui.pullMenuOpen;
     render();
+    if (ui.pullMenuOpen) requestAnimationFrame(() => app.querySelector('[data-pull-strategy]:not(:disabled)')?.focus());
   }
-  if (action === 'load-more-commits' && !ui.busy) post('loadMoreCommits');
+  if (action === 'load-more-commits' && !ui.busy && !ui.graphLoadingMore) {
+    ui.graphLoadingMore = true;
+    render();
+    post('loadMoreCommits');
+  }
   if (action === 'clear-graph-filters') {
     ui.graphQuery = '';
     ui.graphBranchFilter = '';
@@ -736,6 +757,7 @@ window.addEventListener('message', (event) => {
     lastSnapshot = fingerprint;
     ui.emptyMessage = undefined;
     ui.snapshot = message.payload;
+    ui.graphLoadingMore = false;
     if (ui.selectedCommitHash && !message.payload.commits.some((commit) => commit.hash === ui.selectedCommitHash)) {
       clearTimeout(commitDetailTimer);
       ui.selectedCommitHash = undefined;
@@ -760,7 +782,7 @@ window.addEventListener('message', (event) => {
       ui.branchMotion = undefined;
     }
   }
-  if (message.type === 'empty') { ui.snapshot = undefined; ui.emptyMessage = message.message; lastSnapshot = ''; render(); }
+  if (message.type === 'empty') { ui.snapshot = undefined; ui.emptyMessage = message.message; ui.graphLoadingMore = false; lastSnapshot = ''; render(); }
   if (message.type === 'operation') {
     if (message.id && message.id < ui.operationId) return;
     if (message.id) ui.operationId = message.id;

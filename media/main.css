@@ -199,6 +199,7 @@ button:disabled { cursor: default !important; }
 .load-more { flex: 0 0 auto; align-self: center; display: inline-flex; align-items: center; gap: 6px; margin: 0 0 8px; padding: 5px 9px; border: 1px solid var(--border-subtle); border-radius: 14px; background: var(--vscode-input-background); color: var(--vscode-textLink-foreground); cursor: pointer; transition: background var(--motion-control), border-color var(--motion-control), transform var(--motion-fast); }
 .load-more:hover:not(:disabled), .load-more:focus-visible { border-color: color-mix(in srgb, var(--accent) 45%, transparent); background: var(--surface-accent); outline: none; }
 .load-more:active:not(:disabled) { transform: scale(.97); }
+.load-more.working { color: var(--muted); opacity: .82; }
 .load-more small { color: var(--muted); font-size: 9px; }
 .commit-detail { flex: 0 0 auto; max-height: 43%; overflow: auto; padding: 10px 11px 12px; border-top: 1px solid var(--vscode-panel-border); background: color-mix(in srgb, var(--vscode-sideBar-background) 94%, var(--accent) 6%); animation: detail-in 190ms var(--ease); }
 .commit-detail-head { display: flex; align-items: flex-start; justify-content: space-between; gap: 8px; }

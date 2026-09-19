@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+## 0.3.0-beta.4 - 2026-09-19
+
+- Added loading-state motion and keyboard navigation for Graph filters, history loading, and Pull strategy menus.
+
 ## 0.3.0-beta.3 - 2026-09-19
 
 - Added incremental Graph history loading with branch, author, time-window, and text filters.
