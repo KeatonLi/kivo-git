@@ -5,6 +5,7 @@ import type { ChangeList, GitChange } from './types';
 interface StoreData {
   lists: Array<{ id: string; name: string }>;
   assignments: Record<string, string>;
+  activeId?: string;
 }
 
 const DEFAULT_LIST = { id: 'default', name: 'Default Changelist' };
@@ -22,10 +23,11 @@ export class ChangelistStore {
       const data = JSON.parse(raw) as StoreData;
       return {
         lists: data.lists.some((item) => item.id === DEFAULT_LIST.id) ? data.lists : [DEFAULT_LIST, ...data.lists],
-        assignments: data.assignments ?? {}
+        assignments: data.assignments ?? {},
+        activeId: data.lists.some((item) => item.id === data.activeId) ? data.activeId : DEFAULT_LIST.id
       };
     } catch {
-      return { lists: [DEFAULT_LIST], assignments: {} };
+      return { lists: [DEFAULT_LIST], assignments: {}, activeId: DEFAULT_LIST.id };
     }
   }
 
@@ -44,9 +46,14 @@ export class ChangelistStore {
         changed = true;
       }
     }
-    const lists = data.lists.map((list) => ({ ...list, changes: [] as GitChange[] }));
+    const activeId = data.activeId ?? DEFAULT_LIST.id;
+    const lists = data.lists.map((list) => ({ ...list, active: list.id === activeId, changes: [] as GitChange[] }));
     for (const change of changes) {
-      const listId = data.assignments[change.path] ?? DEFAULT_LIST.id;
+      const listId = data.assignments[change.path] ?? activeId;
+      if (!data.assignments[change.path]) {
+        data.assignments[change.path] = listId;
+        changed = true;
+      }
       const list = lists.find((candidate) => candidate.id === listId) ?? lists[0];
       list?.changes.push(change);
     }
@@ -61,7 +68,41 @@ export class ChangelistStore {
     if (data.lists.some((item) => item.name.toLowerCase() === trimmed.toLowerCase())) {
       throw new Error(`Changelist “${trimmed}” already exists.`);
     }
-    data.lists.push({ id: `list-${Date.now().toString(36)}`, name: trimmed });
+    const id = `list-${Date.now().toString(36)}`;
+    data.lists.push({ id, name: trimmed });
+    data.activeId = id;
+    await this.write(data);
+  }
+
+  async rename(id: string, name: string): Promise<void> {
+    const trimmed = name.trim();
+    if (!trimmed) throw new Error('Changelist name cannot be empty.');
+    const data = await this.read();
+    const list = data.lists.find((item) => item.id === id);
+    if (!list) throw new Error('Changelist no longer exists.');
+    if (data.lists.some((item) => item.id !== id && item.name.toLowerCase() === trimmed.toLowerCase())) {
+      throw new Error(`Changelist “${trimmed}” already exists.`);
+    }
+    list.name = trimmed;
+    await this.write(data);
+  }
+
+  async delete(id: string): Promise<void> {
+    if (id === DEFAULT_LIST.id) throw new Error('The default changelist cannot be deleted.');
+    const data = await this.read();
+    if (!data.lists.some((item) => item.id === id)) throw new Error('Changelist no longer exists.');
+    data.lists = data.lists.filter((item) => item.id !== id);
+    for (const [filePath, listId] of Object.entries(data.assignments)) {
+      if (listId === id) data.assignments[filePath] = DEFAULT_LIST.id;
+    }
+    if (data.activeId === id) data.activeId = DEFAULT_LIST.id;
+    await this.write(data);
+  }
+
+  async setActive(id: string): Promise<void> {
+    const data = await this.read();
+    if (!data.lists.some((item) => item.id === id)) throw new Error('Changelist no longer exists.');
+    data.activeId = id;
     await this.write(data);
   }
 

@@ -42,6 +42,7 @@ describe('GitClient integration', () => {
     const client = new GitClient(root);
     await client.initialize();
     await git(root, ['branch', 'feature/local']);
+    await client.snapshot();
     await client.createChangelist('Feature work');
     let snapshot = await client.snapshot();
     expect(snapshot.branches.find((branch) => branch.name === 'feature/local')).toMatchObject({ remote: false });
@@ -57,5 +58,30 @@ describe('GitClient integration', () => {
     expect((await git(root, ['show', '--pretty=', '--name-only', 'HEAD'])).split('\n').sort())
       .toEqual(['alpha.txt', 'new file.txt']);
     expect(await git(root, ['diff', '--cached', '--name-only'])).toBe('beta.txt');
+  });
+
+  it('tracks an active changelist and supports rename and delete lifecycle', async () => {
+    const root = await createRepository();
+    const client = new GitClient(root);
+    await client.initialize();
+    await client.snapshot();
+
+    await client.createChangelist('Focused work');
+    await fs.writeFile(path.join(root, 'focused.txt'), 'new work\n');
+    let current = await client.snapshot();
+    const focused = current.changelists.find((list) => list.name === 'Focused work');
+    expect(focused).toMatchObject({ active: true });
+    expect(focused?.changes.map((change) => change.path)).toContain('focused.txt');
+
+    await client.renameChangelist(focused!.id, 'Renamed work');
+    current = await client.snapshot();
+    expect(current.changelists.find((list) => list.id === focused!.id)).toMatchObject({ name: 'Renamed work', active: true });
+
+    await client.deleteChangelist(focused!.id);
+    current = await client.snapshot();
+    expect(current.changelists).toHaveLength(1);
+    const defaultList = current.changelists[0];
+    expect(defaultList).toMatchObject({ id: 'default', active: true });
+    expect(defaultList!.changes.map((change) => change.path)).toContain('focused.txt');
   });
 });

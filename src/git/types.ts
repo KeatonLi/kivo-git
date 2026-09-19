@@ -28,6 +28,7 @@ export interface CommitSummary {
 export interface ChangeList {
   id: string;
   name: string;
+  active: boolean;
   changes: GitChange[];
 }
 

@@ -90,6 +90,21 @@ export class GitClient {
     await this.store!.create(name);
   }
 
+  async renameChangelist(id: string, name: string): Promise<void> {
+    if (!this.store) await this.initialize();
+    await this.store!.rename(id, name);
+  }
+
+  async deleteChangelist(id: string): Promise<void> {
+    if (!this.store) await this.initialize();
+    await this.store!.delete(id);
+  }
+
+  async setActiveChangelist(id: string): Promise<void> {
+    if (!this.store) await this.initialize();
+    await this.store!.setActive(id);
+  }
+
   async moveToChangelist(paths: string[], listId: string): Promise<void> {
     if (!this.store) await this.initialize();
     await this.store!.move(paths, listId);

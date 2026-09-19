@@ -11,7 +11,7 @@ IdeaGit brings the IntelliJ IDEA Git workflow to VS Code. It copies the mental m
 | Commit tool window | Persistent sidebar with changelists, selection, message, and commit action |
 | Local changelists | Named groups stored per repository under `.git/ideagit/` |
 | Branch widget | One-click branch popup with local and remote branches plus ahead/behind state |
-| Changes diff | Double-click a changed file to open VS Code's native diff editor |
+| Changes diff | Single-click for a focused preview; double-click or Enter pins VS Code's native diff editor |
 | Git log | Compact animated commit list; graph lanes and filters follow in milestone 2 |
 | Update/push | Direct actions in the repository header with progress and result feedback |
 
