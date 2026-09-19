@@ -4,7 +4,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { promisify } from 'node:util';
 import { afterEach, describe, expect, it } from 'vitest';
-import { GitClient } from '../src/git/GitClient';
+import { GitClient, pullArgs } from '../src/git/GitClient';
 
 const execFileAsync = promisify(execFile);
 const temporaryRepositories: string[] = [];
@@ -32,6 +32,29 @@ afterEach(async () => {
 });
 
 describe('GitClient integration', () => {
+  it('maps pull intent to explicit, predictable Git strategies', () => {
+    expect(pullArgs('ff-only')).toEqual(['pull', '--ff-only']);
+    expect(pullArgs('rebase')).toEqual(['pull', '--rebase']);
+    expect(pullArgs('merge')).toEqual(['pull', '--no-rebase']);
+  });
+
+  it('reports when the graph history window has more commits to load', async () => {
+    const root = await createRepository();
+    for (let index = 0; index < 4; index += 1) {
+      await fs.appendFile(path.join(root, 'alpha.txt'), `${index}\n`);
+      await git(root, ['add', 'alpha.txt']);
+      await git(root, ['commit', '-m', `history ${index}`]);
+    }
+    const client = new GitClient(root);
+    await client.initialize();
+    const first = await client.snapshot(3);
+    expect(first.commits).toHaveLength(3);
+    expect(first.commitsHasMore).toBe(true);
+    const complete = await client.snapshot(20);
+    expect(complete.commitsHasMore).toBe(false);
+    expect(complete.commits.length).toBeGreaterThan(first.commits.length);
+  });
+
   it('refreshes upstream ahead and behind counts after fetching remote refs', async () => {
     const root = await createRepository();
     const remote = await fs.mkdtemp(path.join(os.tmpdir(), 'ideagit-remote-'));

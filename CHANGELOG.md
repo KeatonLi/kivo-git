@@ -2,6 +2,12 @@
 
 ## Unreleased
 
+## 0.3.0-beta.3 - 2026-09-19
+
+- Added incremental Graph history loading with branch, author, time-window, and text filters.
+- Added explicit Pull strategies: fast-forward only, Rebase, and Merge, with safer intent feedback.
+- Added a first Kivo icon layer for Graph, Changes, and synchronization surfaces.
+
 ## 0.3.0-beta.2 - 2026-09-19
 
 - Improved Graph hand feel with roving focus, Arrow/Home/End navigation, lazy detail requests, retryable detail errors, and stable scroll context.

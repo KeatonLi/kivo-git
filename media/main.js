@@ -23,6 +23,10 @@ const ui = {
   selectionAnchor: undefined,
   commitMessage: persisted.commitMessage || '',
   graphQuery: persisted.graphQuery || '',
+  graphBranchFilter: persisted.graphBranchFilter || '',
+  graphAuthorFilter: persisted.graphAuthorFilter || '',
+  graphAgeFilter: persisted.graphAgeFilter || 'all',
+  pullMenuOpen: false,
   selectedCommitHash: persisted.selectedCommitHash,
   focusedCommitHash: persisted.focusedCommitHash || persisted.selectedCommitHash,
   commitDetails: undefined,
@@ -41,6 +45,7 @@ const escapeHtml = (value = '') => String(value)
 
 const iconFor = (kind) => ({ modified: 'M', added: 'A', deleted: 'D', renamed: 'R', untracked: '?', conflict: '!' })[kind] || 'M';
 const icon = (name, classes = '') => `<span class="codicon codicon-${name} ${classes}" aria-hidden="true"></span>`;
+const kivoIcon = (name, classes = '') => `<svg class="kivo-icon ${classes}" aria-hidden="true" focusable="false"><use href="#kivo-${name}"></use></svg>`;
 const relativeTime = (date) => {
   const seconds = Math.floor((Date.now() - new Date(date).getTime()) / 1000);
   if (seconds < 60) return 'now';
@@ -62,6 +67,9 @@ function persist() {
     focusedPath: ui.focusedPath,
     commitMessage: ui.commitMessage,
     graphQuery: ui.graphQuery,
+    graphBranchFilter: ui.graphBranchFilter,
+    graphAuthorFilter: ui.graphAuthorFilter,
+    graphAgeFilter: ui.graphAgeFilter,
     selectedCommitHash: ui.selectedCommitHash,
     focusedCommitHash: ui.focusedCommitHash
   });
@@ -70,9 +78,16 @@ function persist() {
 function graphCommits() {
   const commits = ui.snapshot?.commits ?? [];
   const query = ui.graphQuery.trim().toLowerCase();
-  if (!query) return commits;
-  return commits.filter((commit) => [commit.subject, commit.author, commit.hash, commit.shortHash, ...(commit.refs || []).map((ref) => ref.name)]
-    .join(' ').toLowerCase().includes(query));
+  const ageDays = { all: 0, '7d': 7, '30d': 30, '90d': 90 }[ui.graphAgeFilter] || 0;
+  const after = ageDays ? Date.now() - ageDays * 24 * 60 * 60 * 1000 : 0;
+  return commits.filter((commit) => {
+    const textMatches = !query || [commit.subject, commit.author, commit.hash, commit.shortHash, ...(commit.refs || []).map((ref) => ref.name)]
+      .join(' ').toLowerCase().includes(query);
+    const branchMatches = !ui.graphBranchFilter || (commit.refs || []).some((ref) => ref.name === ui.graphBranchFilter);
+    const authorMatches = !ui.graphAuthorFilter || commit.author === ui.graphAuthorFilter;
+    const ageMatches = !after || new Date(commit.date).getTime() >= after;
+    return textMatches && branchMatches && authorMatches && ageMatches;
+  });
 }
 
 function postCommitDetails(hash, immediate = true) {
@@ -252,15 +267,23 @@ function render() {
       <div class="sync-summary ${ui.syncError ? 'has-error' : ''}" aria-busy="${ui.syncPhase === 'fetching'}">
         <span class="upstream" title="${escapeHtml(s.upstream || 'This branch has no upstream')}">${icon(hasUpstream ? 'cloud' : 'warning')}<span>${hasUpstream ? escapeHtml(s.upstream) : 'No upstream'}</span></span>
         <div class="sync-counts">
-          <button class="sync-chip incoming ${s.behind ? 'has-count' : ''} ${ui.operationKind === 'pull' ? 'working' : ''}" data-action="pull" aria-label="${s.behind} commits available to pull" title="Pull ${s.behind} incoming commit${s.behind === 1 ? '' : 's'}" ${!hasUpstream || !s.behind || ui.busy || ui.syncPhase === 'fetching' ? 'disabled' : ''}>${icon('arrow-down')}<strong>${s.behind}</strong><span>Pull</span></button>
+          <div class="sync-action-wrap">
+            <button class="sync-chip incoming ${s.behind ? 'has-count' : ''} ${ui.operationKind === 'pull' ? 'working' : ''}" data-action="pull-menu" aria-haspopup="menu" aria-expanded="${ui.pullMenuOpen}" aria-label="${s.behind} commits available to pull" title="Choose how to pull ${s.behind} incoming commit${s.behind === 1 ? '' : 's'}" ${!hasUpstream || !s.behind || ui.busy || ui.syncPhase === 'fetching' ? 'disabled' : ''}>${icon('arrow-down')}<strong>${s.behind}</strong><span>Pull</span>${icon('chevron-down', 'sync-chevron')}</button>
+            <div class="sync-menu ${ui.pullMenuOpen ? 'open' : ''}" role="menu" ${ui.pullMenuOpen ? '' : 'inert'}>
+              <div class="sync-menu-title">Pull strategy</div>
+              <button role="menuitem" data-pull-strategy="ff-only" ${ui.busy ? 'disabled' : ''}><strong>Fast-forward only</strong><small>Safest · refuse divergence</small></button>
+              <button role="menuitem" data-pull-strategy="rebase" ${ui.busy ? 'disabled' : ''}><strong>Rebase</strong><small>Replay local commits on top</small></button>
+              <button role="menuitem" data-pull-strategy="merge" ${ui.busy ? 'disabled' : ''}><strong>Merge</strong><small>Create a merge commit if needed</small></button>
+            </div>
+          </div>
           <button class="sync-chip outgoing ${s.ahead ? 'has-count' : ''} ${ui.operationKind === 'push' ? 'working' : ''}" data-action="push" aria-label="${s.ahead} commits ready to push" title="Push ${s.ahead} outgoing commit${s.ahead === 1 ? '' : 's'}" ${!hasUpstream || !s.ahead || ui.busy || ui.syncPhase === 'fetching' ? 'disabled' : ''}>${icon('arrow-up')}<strong>${s.ahead}</strong><span>Push</span></button>
         </div>
-        <span class="sync-freshness" aria-live="polite" title="${escapeHtml(ui.syncError || syncLabel)}">${ui.syncError ? icon('warning') : ''}${escapeHtml(syncLabel)}</span>
+        <span class="sync-freshness" aria-live="polite" title="${escapeHtml(ui.syncError || syncLabel)}">${ui.syncError ? icon('warning') : kivoIcon('sync', 'sync-symbol')}${escapeHtml(syncLabel)}</span>
       </div>
     </header>
     <nav class="tabs" aria-label="Git views">
-      <button class="tab ${ui.tab === 'changes' ? 'active' : ''}" data-tab="changes">${icon('diff-multiple')} Changes <span>${changeCount}</span></button>
-      <button class="tab ${ui.tab === 'graph' ? 'active' : ''}" data-tab="graph">${icon('graph')} Graph</button>
+      <button class="tab ${ui.tab === 'changes' ? 'active' : ''}" data-tab="changes">${kivoIcon('changes')} Changes <span>${changeCount}</span></button>
+      <button class="tab ${ui.tab === 'graph' ? 'active' : ''}" data-tab="graph">${kivoIcon('graph')} Graph</button>
     </nav>
     <section class="content" aria-busy="${ui.busy}">
       ${ui.tab === 'changes' ? renderChanges(s) : renderGraph(s)}
@@ -374,17 +397,28 @@ function renderCommitDetails(s) {
 
 function renderGraph(s) {
   if (!s.commits.length) return '<div class="inline-empty">No commits yet</div>';
-  const query = ui.graphQuery.trim().toLowerCase();
   const commits = graphCommits();
   const laneCount = Math.max(1, Math.max(...s.commits.flatMap((commit) => [commit.lane, ...(commit.incomingLanes || []), ...(commit.parentLanes || [])])) + 1);
   const focusHash = ui.focusedCommitHash && commits.some((commit) => commit.hash === ui.focusedCommitHash)
     ? ui.focusedCommitHash
     : commits[0]?.hash;
+  const branchOptions = [...new Set(s.branches.filter((branch) => !branch.remote).map((branch) => branch.name))].sort((a, b) => a.localeCompare(b));
+  const authorOptions = [...new Set(s.commits.map((commit) => commit.author))].sort((a, b) => a.localeCompare(b));
+  const filtersActive = Boolean(ui.graphBranchFilter || ui.graphAuthorFilter || ui.graphAgeFilter !== 'all' || ui.graphQuery.trim());
+  const countLabel = filtersActive ? `${commits.length} of ${s.commits.length}` : `${s.commits.length}`;
   return `<div class="graph-view">
-    <div class="graph-toolbar"><div><span class="section-kicker">HISTORY</span><span class="graph-count">${query ? `${commits.length} of ` : ''}${s.commits.length} commits</span></div><label class="graph-search">${icon('search')}<input id="graph-search" aria-label="Filter commit history" placeholder="Filter commits…" value="${escapeHtml(ui.graphQuery)}"></label></div>
+    <div class="graph-toolbar"><div class="graph-toolbar-head"><div><span class="section-kicker">HISTORY</span><span class="graph-count">${countLabel} commits</span></div><label class="graph-search">${icon('search')}<input id="graph-search" aria-label="Filter commit history" placeholder="Filter commits…" value="${escapeHtml(ui.graphQuery)}"></label></div>
+      <div class="graph-filters">
+        <label class="graph-filter"><span>Branch</span><select data-graph-filter="branch" aria-label="Filter by branch"><option value="">All branches</option>${branchOptions.map((branch) => `<option value="${escapeHtml(branch)}" ${ui.graphBranchFilter === branch ? 'selected' : ''}>${escapeHtml(branch)}</option>`).join('')}</select></label>
+        <label class="graph-filter"><span>Author</span><select data-graph-filter="author" aria-label="Filter by author"><option value="">All authors</option>${authorOptions.map((author) => `<option value="${escapeHtml(author)}" ${ui.graphAuthorFilter === author ? 'selected' : ''}>${escapeHtml(author)}</option>`).join('')}</select></label>
+        <label class="graph-filter"><span>Window</span><select data-graph-filter="age" aria-label="Filter by time window"><option value="all" ${ui.graphAgeFilter === 'all' ? 'selected' : ''}>All time</option><option value="7d" ${ui.graphAgeFilter === '7d' ? 'selected' : ''}>Last 7 days</option><option value="30d" ${ui.graphAgeFilter === '30d' ? 'selected' : ''}>Last 30 days</option><option value="90d" ${ui.graphAgeFilter === '90d' ? 'selected' : ''}>Last 90 days</option></select></label>
+        ${filtersActive ? '<button class="text-button graph-clear" data-action="clear-graph-filters">Clear</button>' : ''}
+      </div>
+    </div>
     <div class="graph-list" role="listbox" aria-label="Commit history" style="--lane-count:${laneCount}">${commits.length ? commits.map((commit, index) => `<article class="graph-row ${commit.parents.length > 1 ? 'merge-row' : ''} ${ui.selectedCommitHash === commit.hash ? 'selected' : ''}" data-commit="${escapeHtml(commit.hash)}" data-hash="${escapeHtml(commit.hash)}" role="option" aria-selected="${ui.selectedCommitHash === commit.hash}" tabindex="${focusHash === commit.hash ? '0' : '-1'}" style="--delay:${Math.min(index * 12, 180)}ms">
       <div class="graph-canvas" style="--lane-count:${laneCount}">${renderGraphSvg(commit)}</div><div class="graph-commit"><strong>${escapeHtml(commit.subject)}</strong><span>${escapeHtml(commit.author)} · ${relativeTime(commit.date)}</span></div><div class="graph-ref-stack">${(commit.refs || []).slice(0, 2).map(renderRef).join('')}</div><code>${escapeHtml(commit.shortHash)}</code>
     </article>`).join('') : '<div class="inline-empty">No matching commits</div>'}</div>
+    ${s.commitsHasMore ? `<button class="load-more" data-action="load-more-commits" ${ui.busy ? 'disabled' : ''}>${icon('history')}<span>Load more history</span><small>Showing ${s.commits.length}</small></button>` : ''}
     ${renderCommitDetails(s)}
   </div>`;
 }
@@ -452,8 +486,24 @@ function bind() {
         input?.focus();
         input?.setSelectionRange(ui.graphQuery.length, ui.graphQuery.length);
       });
-    });
+      });
   }
+  once('[data-graph-filter]', 'change', (event) => {
+    const select = event.currentTarget;
+    if (select.dataset.graphFilter === 'branch') ui.graphBranchFilter = select.value;
+    if (select.dataset.graphFilter === 'author') ui.graphAuthorFilter = select.value;
+    if (select.dataset.graphFilter === 'age') ui.graphAgeFilter = select.value || 'all';
+    persist();
+    render();
+  });
+  once('[data-pull-strategy]', 'click', (event) => {
+    event.stopPropagation();
+    if (ui.busy) return;
+    const strategy = event.currentTarget.dataset.pullStrategy;
+    ui.pullMenuOpen = false;
+    render();
+    post('pull', { strategy });
+  });
   once('[data-list-menu]', 'click', (event) => {
     event.stopPropagation();
     const id = event.currentTarget.dataset.listMenu;
@@ -616,7 +666,20 @@ function bind() {
 
 function handleAction(action) {
   if (action === 'refresh') post('refresh');
-  if ((action === 'fetch' || action === 'pull' || action === 'push') && !ui.busy && ui.syncPhase !== 'fetching') post(action);
+  if ((action === 'fetch' || action === 'push') && !ui.busy && ui.syncPhase !== 'fetching') post(action);
+  if (action === 'pull-menu' && !ui.busy && ui.syncPhase !== 'fetching') {
+    ui.pullMenuOpen = !ui.pullMenuOpen;
+    render();
+  }
+  if (action === 'load-more-commits' && !ui.busy) post('loadMoreCommits');
+  if (action === 'clear-graph-filters') {
+    ui.graphQuery = '';
+    ui.graphBranchFilter = '';
+    ui.graphAuthorFilter = '';
+    ui.graphAgeFilter = 'all';
+    persist();
+    render();
+  }
   if (action === 'branches') {
     ui.branchOpen = !ui.branchOpen;
     if (!ui.branchOpen) ui.branchQuery = '';
@@ -704,6 +767,7 @@ window.addEventListener('message', (event) => {
     document.querySelectorAll('.toast.loading').forEach((item) => dismissToast(item));
     ui.busy = message.phase === 'loading';
     ui.operationKind = message.phase === 'loading' ? message.kind : undefined;
+    if (message.phase === 'loading') ui.pullMenuOpen = false;
     if (message.phase === 'success' && message.clearsCommit) { ui.commitMessage = ''; ui.selected.clear(); persist(); }
     toast(message.message, message.phase);
     render();
@@ -738,6 +802,13 @@ window.addEventListener('message', (event) => {
 
 document.addEventListener('keydown', (event) => {
   if (event.key !== 'Escape') return;
+  if (ui.pullMenuOpen) {
+    event.preventDefault();
+    ui.pullMenuOpen = false;
+    render();
+    app.querySelector('[data-action="pull-menu"]')?.focus();
+    return;
+  }
   if (ui.listMenuId) {
     event.preventDefault();
     const id = ui.listMenuId;
@@ -767,6 +838,11 @@ document.addEventListener('keydown', (event) => {
 });
 
 document.addEventListener('click', (event) => {
+  if (ui.pullMenuOpen && !event.target.closest('.sync-action-wrap')) {
+    ui.pullMenuOpen = false;
+    render();
+    return;
+  }
   if (!ui.listMenuId || event.target.closest('.list-menu, .list-more')) return;
   ui.listMenuId = undefined;
   render();

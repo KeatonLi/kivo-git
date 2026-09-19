@@ -1,10 +1,12 @@
 import * as vscode from 'vscode';
 import path from 'node:path';
 import { GitClient } from './git/GitClient';
+import type { PullStrategy } from './git/types';
 import { SnapshotCoordinator } from './SnapshotCoordinator';
 
 type WebviewMessage =
-  | { type: 'ready' | 'refresh' | 'fetch' | 'pull' | 'push' }
+  | { type: 'ready' | 'refresh' | 'fetch' | 'push' | 'loadMoreCommits' }
+  | { type: 'pull'; strategy: PullStrategy }
   | { type: 'commitDetails'; hash: string }
   | { type: 'openDiff'; path: string; originalPath?: string; kind?: string; preview?: boolean }
   | { type: 'openCommitDiff'; hash: string; path: string; originalPath?: string; kind?: string }
@@ -35,8 +37,9 @@ export class IdeaGitViewProvider implements vscode.WebviewViewProvider, vscode.T
   private lastFetchedAt?: number;
   private syncError?: string;
   private syncGeneration = 0;
+  private commitLimit = 80;
   private readonly coordinator = new SnapshotCoordinator(
-    () => this.getClient().then((client) => client.snapshot()),
+    () => this.getClient().then((client) => client.snapshot(this.commitLimit)),
     async (snapshot) => { await this.view?.webview.postMessage({ type: 'snapshot', payload: snapshot }); },
     (error) => { void this.showEmpty(error); }
   );
@@ -59,6 +62,7 @@ export class IdeaGitViewProvider implements vscode.WebviewViewProvider, vscode.T
         this.lastFetchedAt = undefined;
         this.syncError = undefined;
         this.syncGeneration += 1;
+        this.commitLimit = 80;
         this.watcher?.dispose();
         this.coordinator.reset();
         this.configurePolling();
@@ -140,6 +144,10 @@ export class IdeaGitViewProvider implements vscode.WebviewViewProvider, vscode.T
     try {
       const client = await this.getClient();
       switch (message.type) {
+        case 'loadMoreCommits':
+          this.commitLimit = Math.min(this.commitLimit + 80, 800);
+          await this.refresh(true);
+          return;
         case 'commitDetails':
           try {
             await this.view?.webview.postMessage({ type: 'commitDetails', payload: await client.commitDetails(message.hash) });
@@ -178,7 +186,7 @@ export class IdeaGitViewProvider implements vscode.WebviewViewProvider, vscode.T
           await this.operation('fetch', 'Fetching…', () => client.fetch(), 'Fetch complete');
           return;
         case 'pull':
-          await this.operation('pull', 'Pulling…', () => client.pull(), 'Repository updated');
+          await this.operation('pull', `Pulling with ${message.strategy === 'ff-only' ? 'fast-forward only' : message.strategy}…`, () => client.pull(message.strategy), 'Repository updated');
           return;
         case 'push':
           await this.operation('push', 'Pushing…', () => client.push(), 'Push complete');
@@ -319,6 +327,13 @@ export class IdeaGitViewProvider implements vscode.WebviewViewProvider, vscode.T
         <title>${IdeaGitViewProvider.productName}</title>
       </head>
       <body>
+        <svg class="kivo-icon-sprite" aria-hidden="true" focusable="false">
+          <symbol id="kivo-graph" viewBox="0 0 24 24"><path d="M5 5v14m0-7h5m0 0 8-6m-8 6 8 6"/><circle cx="5" cy="5" r="2"/><circle cx="18" cy="6" r="2"/><circle cx="18" cy="18" r="2"/></symbol>
+          <symbol id="kivo-changes" viewBox="0 0 24 24"><path d="M5 7.5h14M5 12h14M5 16.5h9"/><path d="M4 4.5h16v15H4z"/></symbol>
+          <symbol id="kivo-sync" viewBox="0 0 24 24"><path d="M19 8a7.5 7.5 0 0 0-13.2-1.8L4 8.5M5 16a7.5 7.5 0 0 0 13.2 1.8l1.8-2.3"/><path d="M4 4.5v4h4M20 19.5v-4h-4"/></symbol>
+          <symbol id="kivo-recovery" viewBox="0 0 24 24"><path d="M4 6.5h16v13H4zM7 6.5V4h10v2.5M7 11h10M7 15h6"/></symbol>
+          <symbol id="kivo-conflict" viewBox="0 0 24 24"><path d="m12 4 8 15H4z"/><path d="M12 9v4m0 3h.01"/></symbol>
+        </svg>
         <main id="app"></main>
         <div id="toast-region" aria-live="assertive"></div>
         <script nonce="${nonce}" src="${jsUri}"></script>

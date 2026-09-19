@@ -3,9 +3,15 @@ import { promisify } from 'node:util';
 import path from 'node:path';
 import { ChangelistStore } from './ChangelistStore';
 import { parsePorcelainV2 } from './statusParser';
-import type { BranchSummary, CommitDetails, CommitFile, CommitSummary, GitRef, RepositorySnapshot } from './types';
+import type { BranchSummary, CommitDetails, CommitFile, CommitSummary, GitRef, PullStrategy, RepositorySnapshot } from './types';
 
 const execFileAsync = promisify(execFile);
+
+export function pullArgs(strategy: PullStrategy): string[] {
+  if (strategy === 'merge') return ['pull', '--no-rebase'];
+  if (strategy === 'rebase') return ['pull', '--rebase'];
+  return ['pull', '--ff-only'];
+}
 
 export class GitClient {
   private store?: ChangelistStore;
@@ -39,7 +45,7 @@ export class GitClient {
     this.store = new ChangelistStore(gitDirectory);
   }
 
-  async snapshot(): Promise<RepositorySnapshot> {
+  async snapshot(commitLimit = 80): Promise<RepositorySnapshot> {
     if (!this.store) await this.initialize();
     const [statusOutput, branches, topLevel] = await Promise.all([
       this.run(['status', '--porcelain=v2', '--branch', '-z', '--untracked-files=all']),
@@ -49,13 +55,15 @@ export class GitClient {
     const parsed = parsePorcelainV2(statusOutput);
     const root = topLevel.trim();
     const currentBranch = branches.find((branch) => branch.current && !branch.remote)?.name;
+    const commitWindow = await this.getCommits(currentBranch, commitLimit);
     return {
       repositoryName: path.basename(root),
       root,
       ...parsed,
       changelists: await this.store!.group(parsed.changes),
       branches,
-      commits: await this.getCommits(currentBranch)
+      commits: commitWindow.commits,
+      commitsHasMore: commitWindow.hasMore
     };
   }
 
@@ -78,10 +86,11 @@ export class GitClient {
     }).filter((branch) => !branch.name.endsWith('/HEAD'));
   }
 
-  private async getCommits(currentBranch?: string): Promise<CommitSummary[]> {
+  private async getCommits(currentBranch?: string, limit = 80): Promise<{ commits: CommitSummary[]; hasMore: boolean }> {
     try {
       const refs = await this.getRefs(currentBranch);
-      const output = await this.run(['log', '--all', '--topo-order', '-n', '80', '--date=iso-strict', '--pretty=format:%H%x1f%h%x1f%P%x1f%an%x1f%aI%x1f%s%x1e']);
+      const safeLimit = Math.max(1, Math.floor(limit));
+      const output = await this.run(['log', '--all', '--topo-order', '-n', String(safeLimit + 1), '--date=iso-strict', '--pretty=format:%H%x1f%h%x1f%P%x1f%an%x1f%aI%x1f%s%x1e']);
       const commits = output.split('\x1e').filter(Boolean).map((record) => {
         const [hash = '', shortHash = '', parentText = '', author = '', date = '', subject = ''] = record.trim().split('\x1f');
         return {
@@ -97,9 +106,9 @@ export class GitClient {
           parentLanes: []
         };
       });
-      return this.layoutCommits(commits);
+      return { commits: this.layoutCommits(commits.slice(0, safeLimit)), hasMore: commits.length > safeLimit };
     } catch {
-      return [];
+      return { commits: [], hasMore: false };
     }
   }
 
@@ -241,7 +250,7 @@ export class GitClient {
       ? { timeout: 30000, env: { GIT_TERMINAL_PROMPT: '0', GCM_INTERACTIVE: 'Never' } }
       : {});
   }
-  async pull(): Promise<void> { await this.run(['pull', '--ff-only']); }
+  async pull(strategy: PullStrategy = 'ff-only'): Promise<void> { await this.run(pullArgs(strategy)); }
   async push(): Promise<void> { await this.run(['push']); }
 
   async showHeadFile(filePath: string): Promise<string> {

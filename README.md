@@ -15,6 +15,8 @@ Kivo Git is for developers who want a focused Git tool window in VS Code: persis
 - Native VS Code diff preview on single-click and a pinned editor on double-click
 - Arrow-key file navigation, Space toggle, and Shift range selection
 - Real multi-lane Git Graph with branch refs, merge lines, search, commit details, and file-level history diffs
+- Incremental Graph history loading with branch, author, time-window, and text filters
+- Explicit Pull strategies: fast-forward only, Rebase, and Merge
 - Keyboard-first Graph navigation with roving focus, instant selection, and lazy detail loading
 - Clear loading, retry, disabled, and error feedback for remote sync and commit history
 - Theme-aware motion and reduced-motion accessibility
@@ -35,7 +37,7 @@ Kivo Git checks remote refs in the background every five minutes while its view 
 From a clean `main` branch, run:
 
 ```bash
-npm run release -- 0.3.0-beta.2
+npm run release -- 0.3.0-beta.3
 ```
 
 The release tool verifies the repository and version, promotes the Unreleased changelog, runs all checks and tests, packages the VSIX, and pushes a version commit. GitHub Actions then creates the matching tag and publishes the VSIX plus SHA-256 checksum to GitHub Releases. Pre-release semantic versions are published as GitHub pre-releases.

@@ -73,4 +73,8 @@ export interface RepositorySnapshot {
   changelists: ChangeList[];
   branches: BranchSummary[];
   commits: CommitSummary[];
+  /** True when the repository has more history than the current graph window. */
+  commitsHasMore: boolean;
 }
+
+export type PullStrategy = 'merge' | 'rebase' | 'ff-only';
