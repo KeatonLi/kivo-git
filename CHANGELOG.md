@@ -2,6 +2,13 @@
 
 ## Unreleased
 
+## 0.3.0-beta.8 - 2026-09-19
+
+- Corrected the Git window architecture to match the requested IDEA mental model: **Changes** is a real left Activity Bar view, while **History** is a real bottom Panel view.
+- Retired the single bottom-panel `Local Changes | Log` tab switcher. Graph, branches, filters, and commit details now render only in bottom History; files, changelists, diffs, and Commit render only in left Changes.
+- Made the two views share one repository snapshot, sync state, and operation feedback while retaining independent UI context.
+- Added view-routing, manifest, webview-composition, real-Git integration, VSIX structural, and Extension Development Host command-smoke checks. CI and the release workflow now run the Extension Host check before publishing a release.
+
 ## 0.3.0-beta.7 - 2026-09-19
 
 - Locked the next iteration to a Rebased/IntelliJ IDEA parity contract before adding Kivo-specific polish.

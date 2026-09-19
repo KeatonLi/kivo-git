@@ -4,7 +4,7 @@ Kivo Git is not a Source Control sidebar skin. It is a complete Git work system 
 
 ## Current release gate — strict Rebased / IntelliJ IDEA parity
 
-Before adding any Kivo-specific polish, finish [`IDEA_PARITY.md`](./IDEA_PARITY.md). The bottom Panel placement, `Local Changes | Log` hierarchy, dense Log layout, Graph topology, filters, selection, refs, details, and keyboard behavior are P0. The user must install and approve the parity VSIX before Marketplace publication.
+Before adding any Kivo-specific polish, finish [`IDEA_PARITY.md`](./IDEA_PARITY.md). The left Changes/Commit surface, bottom History/Log surface, dense Log layout, Graph topology, filters, selection, refs, details, and keyboard behavior are P0. The user must install and approve the parity VSIX before Marketplace publication.
 
 The older “motion”, “continuous feedback”, and “differentiating capability” items below are deferred when they would change the reference mental model. They may be reconsidered only after the parity gate passes.
 
@@ -37,7 +37,7 @@ Goal: replace the prototype rendering model with a stable, event-driven interact
 - [x] **P0** Update only changed files, changelists, branches, and commits.
 - [x] **P0** Prevent stale async responses from overwriting newer repository state.
 - [ ] **P0** Add typed request, response, event, and error contracts across the webview bridge.
-- [x] **P1** Persist view state when the panel is hidden or VS Code reloads the webview.
+- [x] **P1** Persist each surface's view state when it is hidden or VS Code reloads the webview.
 
 ### Repository event model
 
@@ -157,8 +157,8 @@ Goal: reach strong IDE parity for the operations developers perform every day.
 
 Goal: provide one coherent workspace for changes, history, review, and operations instead of forcing complex work into a narrow sidebar.
 
-- [x] **P1** Establish a bottom-docked Git Tool Window as the daily workspace for Changes and Log.
-- [ ] **P1** Add a compact sidebar overview and entry point when a workspace needs it.
+- [x] **P1** Establish two IDEA-style Git surfaces: Changes/Commit in the Activity Bar and History/Log in the bottom Panel.
+- [x] **P1** Keep Graph exclusively in the bottom History surface, never in the Changes sidebar.
 - [ ] **P1** Add a full-width Git Studio editor tab for complex workflows.
 - [ ] **P1** Create a resizable three-region layout: navigation, diff/content, and action/details.
 - [ ] **P1** Keep selection synchronized between sidebar, Git Studio, native diff, and source editor.
@@ -255,7 +255,7 @@ Goal: make Kivo Git meaningfully better than existing Git clients while keeping 
 
 ### Quality and release
 
-- [ ] **P1** Add unit, integration, webview interaction, and Extension Development Host end-to-end tests.
+- [x] **P1** Add unit, real-Git integration, view-routing/manifest, VSIX structural, and Extension Development Host command-smoke tests.
 - [ ] **P1** Add screenshot and reduced-motion regression coverage for core flows.
 - [ ] **P1** Complete an accessibility review for keyboard, focus, labels, contrast, zoom, and screen readers.
 - [ ] **P1** Verify built-in light, dark, and high-contrast themes.
@@ -276,12 +276,12 @@ A checkbox is complete only when all applicable items below are true:
 - [ ] Motion explains the state change, does not replay on no-op refresh, and respects reduced motion.
 - [ ] Risky changes have a preview and a documented recovery path.
 - [ ] Unit or integration coverage prevents regression.
-- [ ] The feature works in both the compact sidebar and Git Studio when applicable.
+- [ ] The feature works in its declared Changes and History surfaces when applicable.
 - [ ] The documentation describes behavior and known limitations.
 
 ## Explicit non-goals
 
-- Pixel-copying another IDE instead of matching the workflow and building a distinct Kivo Git identity.
+- Introducing a Kivo-specific visual language before the locked IDEA/Rebased parity gate is accepted.
 - Replacing VS Code's code editor, diff editor, or merge editor without a proven capability gap.
 - Requiring a GitHub account or GitHub-specific API for local Git work.
 - Storing user credentials, tokens, passwords, or SSH keys.

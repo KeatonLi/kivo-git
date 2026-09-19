@@ -21,3 +21,4 @@ jobs:
       - run: npm run check
       - run: npm test
       - run: npm run compile
+      - run: xvfb-run -a npm run test:extension

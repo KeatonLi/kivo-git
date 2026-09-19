@@ -8,32 +8,34 @@ source visual truth path:
 
 implementation screenshot path: unavailable
 
-viewport: intended VS Code bottom Panel desktop viewport; no Extension Host capture available in this environment
+viewport: intended VS Code Changes sidebar and bottom History Panel desktop viewports; no Extension Host capture available in this environment
 
 source and implementation pixel dimensions: source captures are available at their URLs; implementation pixels were not captured
 
 density normalization: not applicable; implementation capture is missing
 
-state: dark-theme Git Log with branch navigator, compact filters, multi-lane history, and selected-commit details
+state: dark-theme Changes sidebar for files/commit plus bottom History Panel with branch navigator, compact filters, multi-lane history, and selected-commit details
 
 ## Evidence status
 
-The source references were inspected and the implementation was statically reviewed after the parity-mode changes. A browser-rendered implementation comparison could not be completed because this workspace has neither a running VS Code Extension Host nor an installed Chromium executable for Playwright. The `npm run check`, `npm test`, and `npm run compile` gates pass, but build success is not visual verification.
+The source references were inspected and the implementation was statically reviewed after the two-surface parity change. A browser-rendered implementation comparison could not be completed because this workspace has neither a usable VS Code Extension Host nor an installed Chromium executable for Playwright. The static and Git-fixture gates pass; an Extension Development Host smoke test is included for CI/release runners, but this sandbox's downloaded Electron binary cannot launch. Build success is not visual verification.
 
 ## Findings
 
-- [P1] Browser-rendered comparison is blocked. The actual VS Code Panel placement, row density, theme tokens, and Graph curves still require a real VSIX install and screenshot comparison against the reference.
+- [P1] Browser-rendered comparison is blocked. The actual left Changes placement, bottom History placement, row density, theme tokens, and Graph curves still require a real VSIX install and screenshot comparison against the reference.
   Evidence: no implementation screenshot could be captured.
   Impact: static code inspection cannot prove pixel/interaction parity.
-  Fix: install the parity VSIX in VS Code and compare the bottom Panel Log at the same viewport; record the result in the next QA iteration.
+  Fix: install the parity VSIX in VS Code and compare both the Changes sidebar and bottom History Log at the same viewport; record the result in the next QA iteration.
 
 ## Implementation checklist
 
-- [x] Lock Rebased reference commit and IDEA bottom-tool-window contract.
+- [x] Lock Rebased reference commit and IDEA two-surface tool-window contract.
+- [x] Split the runtime into independent Activity Bar Changes and bottom Panel History views sharing repository state.
 - [x] Move the Log hierarchy toward compact IDEA-style filters, branch/ref navigator, dense rows, and right-side Changed Files/details.
 - [x] Add path filtering and tag presentation to the history model.
 - [x] Disable Kivo-only Graph/list/counter motion during parity mode.
-- [x] Run typecheck, JavaScript syntax checks, integration tests, and compile.
+- [x] Run typecheck, JavaScript syntax checks, routing/manifest tests, real-Git integration tests, and compile.
+- [x] Add a CI/release Extension Development Host entry-point smoke test plus VSIX structural verification.
 - [ ] Capture and compare the real VS Code Extension Host view.
 - [ ] User A/B approval of placement, Graph topology, filters, selection, and details.
 

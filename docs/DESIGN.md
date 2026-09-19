@@ -6,22 +6,22 @@ The active design target is defined in [`IDEA_PARITY.md`](./IDEA_PARITY.md). Unt
 
 ## Product promise
 
-Kivo Git brings the Rebased/IntelliJ Git workflow to VS Code with the same bottom-tool-window mental model. It keeps native VS Code editors for code, diff, and merge work.
+Kivo Git brings the Rebased/IntelliJ Git workflow to VS Code with the same two-surface mental model: commit work in the left tool window and inspect history in the bottom tool window. It keeps native VS Code editors for code, diff, and merge work.
 
 ## Interaction model
 
 | IDE workflow concept | Kivo Git behavior |
 | --- | --- |
-| Commit tool window | Persistent bottom Panel with `Local Changes` and `Log` as peer tabs |
+| Commit tool window | Persistent Activity Bar view for local changes, changelists, diff, and commit |
 | Local changelists | Named groups stored per repository under `.git/ideagit/` |
 | Branch widget | One-click branch popup with local and remote branches plus ahead/behind state |
 | Changes diff | Single-click for a focused preview; double-click or Enter pins VS Code's native diff editor |
-| Git Log | A three-region workspace: branch navigator, dense table-oriented multi-lane commit DAG, and selected-commit details/file diffs |
+| Git Log | Bottom Panel History view: branch navigator, dense table-oriented multi-lane commit DAG, and selected-commit details/file diffs |
 | Update/push | Direct actions in the repository header with progress and result feedback |
 
 ## Visual language (parity mode)
 
-Kivo Git uses the host theme and Codicons for platform integration, but the composition is reference-led: compact IDEA-style spacing, dense Log rows, a branch navigator, a filter strip, a graph-first history table, and a right-side details/files pane. The bottom Panel is the primary workspace: `Local Changes` and `Log` are the user-facing destinations, and Graph exists only as the first column of Log. Any Kivo-specific treatment is deferred until parity acceptance.
+Kivo Git uses the host theme and Codicons for platform integration, but the composition is reference-led: a compact Changes sidebar for local files and commit, plus a dense bottom History Panel with branch navigator, filter strip, graph-first history table, and right-side details/files pane. Graph exists only as the first column of bottom History. Any Kivo-specific treatment is deferred until parity acceptance.
 
 ### Brand mark
 

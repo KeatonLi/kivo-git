@@ -40,6 +40,9 @@ jobs:
           VERSION: ${{ steps.version.outputs.tag }}
         run: node -e "const fs=require('fs'); if (!fs.readFileSync('CHANGELOG.md','utf8').includes('## '+process.env.VERSION.slice(1))) throw new Error('Version missing from changelog')"
       - if: steps.existing.outputs.found == 'false'
+        name: Verify Extension Development Host entry points
+        run: xvfb-run -a npm run test:extension
+      - if: steps.existing.outputs.found == 'false'
         run: npm run package
       - name: Create checksum
         if: steps.existing.outputs.found == 'false'

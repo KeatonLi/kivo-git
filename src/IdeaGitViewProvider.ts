@@ -1,8 +1,9 @@
 import * as vscode from 'vscode';
 import path from 'node:path';
 import { GitClient } from './git/GitClient';
-import type { PullStrategy } from './git/types';
+import type { PullStrategy, RepositorySnapshot } from './git/types';
 import { SnapshotCoordinator } from './SnapshotCoordinator';
+import { isMessageAllowedOnSurface, KivoViewTypes, type KivoSurface, surfaceForViewType } from './viewLayout';
 
 type WebviewMessage =
   | { type: 'ready' | 'refresh' | 'fetch' | 'push' | 'loadMoreCommits' }
@@ -20,10 +21,12 @@ type WebviewMessage =
 type OperationKind = 'commit' | 'checkout' | 'changelist' | 'move' | 'fetch' | 'pull' | 'push';
 
 export class IdeaGitViewProvider implements vscode.WebviewViewProvider, vscode.TextDocumentContentProvider, vscode.Disposable {
-  static readonly viewType = 'ideaGit.panel';
+  static readonly changesViewType = KivoViewTypes.changes;
+  static readonly historyViewType = KivoViewTypes.history;
   static readonly revisionScheme = 'ideagit';
   static readonly productName = 'Kivo Git';
-  private view?: vscode.WebviewView;
+  private readonly views = new Map<KivoSurface, vscode.WebviewView>();
+  private readonly readyViews = new Set<KivoSurface>();
   private client?: GitClient;
   private refreshTimer?: NodeJS.Timeout;
   private autoFetchTimer?: NodeJS.Timeout;
@@ -38,12 +41,13 @@ export class IdeaGitViewProvider implements vscode.WebviewViewProvider, vscode.T
   private syncError?: string;
   private syncGeneration = 0;
   private commitLimit = 80;
-  /** A command may focus the Panel before the Webview has finished loading. */
-  private requestedTab?: 'changes' | 'log';
-  private webviewReady = false;
+  private lastSnapshot?: RepositorySnapshot;
   private readonly coordinator = new SnapshotCoordinator(
     () => this.getClient().then((client) => client.snapshot(this.commitLimit)),
-    async (snapshot) => { await this.view?.webview.postMessage({ type: 'snapshot', payload: snapshot }); },
+    async (snapshot) => {
+      this.lastSnapshot = snapshot;
+      await this.postToReadyViews({ type: 'snapshot', payload: snapshot });
+    },
     (error) => { void this.showEmpty(error); }
   );
   private readonly emitter = new vscode.EventEmitter<vscode.Uri>();
@@ -66,6 +70,7 @@ export class IdeaGitViewProvider implements vscode.WebviewViewProvider, vscode.T
         this.syncError = undefined;
         this.syncGeneration += 1;
         this.commitLimit = 80;
+        this.lastSnapshot = undefined;
         this.watcher?.dispose();
         this.coordinator.reset();
         this.configurePolling();
@@ -74,15 +79,24 @@ export class IdeaGitViewProvider implements vscode.WebviewViewProvider, vscode.T
   }
 
   resolveWebviewView(view: vscode.WebviewView): void {
-    this.view = view;
-    this.webviewReady = false;
+    const surface = surfaceForViewType(view.viewType);
+    if (!surface) throw new Error(`Unsupported Kivo Git view type: ${view.viewType}`);
+    this.views.set(surface, view);
+    this.readyViews.delete(surface);
     view.webview.options = {
       enableScripts: true,
       localResourceRoots: [vscode.Uri.joinPath(this.context.extensionUri, 'media')]
     };
-    view.webview.html = this.html(view.webview);
-    view.webview.onDidReceiveMessage((message: WebviewMessage) => void this.handle(message));
+    view.webview.html = this.html(view.webview, surface);
+    view.webview.onDidReceiveMessage((message: WebviewMessage) => void this.handle(surface, message));
     view.onDidChangeVisibility(() => this.configurePolling());
+    view.onDidDispose(() => {
+      if (this.views.get(surface) === view) {
+        this.views.delete(surface);
+        this.readyViews.delete(surface);
+      }
+      this.configurePolling();
+    });
     this.configurePolling();
   }
 
@@ -98,24 +112,40 @@ export class IdeaGitViewProvider implements vscode.WebviewViewProvider, vscode.T
   }
 
   async refresh(silent = false): Promise<void> {
-    if (!this.view || !this.view.visible) return;
+    if (!this.hasVisibleView()) return;
     this.coordinator.request();
     if (!silent && !vscode.workspace.workspaceFolders?.length) void vscode.window.showInformationMessage(`${IdeaGitViewProvider.productName}: Open a Git repository to start.`);
   }
 
+  async showChanges(): Promise<void> {
+    await vscode.commands.executeCommand(`${IdeaGitViewProvider.changesViewType}.focus`);
+  }
+
   async showLog(): Promise<void> {
-    this.requestedTab = 'log';
-    await vscode.commands.executeCommand('ideaGit.panel.focus');
-    if (this.webviewReady) {
-      await this.view?.webview.postMessage({ type: 'showTab', tab: 'log' });
-      this.requestedTab = undefined;
-    }
+    await vscode.commands.executeCommand(`${IdeaGitViewProvider.historyViewType}.focus`);
   }
 
   private async showEmpty(error: unknown): Promise<void> {
     this.client = undefined;
+    this.lastSnapshot = undefined;
     this.coordinator.reset();
-    await this.view?.webview.postMessage({ type: 'empty', message: this.errorText(error) });
+    await this.postToReadyViews({ type: 'empty', message: this.errorText(error) });
+  }
+
+  private hasVisibleView(): boolean {
+    return [...this.views.values()].some((view) => view.visible);
+  }
+
+  private async postToReadyViews(message: Record<string, unknown>): Promise<void> {
+    await Promise.all([...this.readyViews].map(async (surface) => {
+      const view = this.views.get(surface);
+      if (view) await view.webview.postMessage(message);
+    }));
+  }
+
+  private async postToView(surface: KivoSurface, message: Record<string, unknown>): Promise<void> {
+    if (!this.readyViews.has(surface)) return;
+    await this.views.get(surface)?.webview.postMessage(message);
   }
 
   private async getClient(): Promise<GitClient> {
@@ -139,19 +169,20 @@ export class IdeaGitViewProvider implements vscode.WebviewViewProvider, vscode.T
   }
 
   private scheduleRefresh(): void {
-    if (!this.view?.visible) return;
+    if (!this.hasVisibleView()) return;
     if (this.debounceTimer) clearTimeout(this.debounceTimer);
     this.debounceTimer = setTimeout(() => void this.refresh(true), 180);
   }
 
-  private async handle(message: WebviewMessage): Promise<void> {
+  private async handle(surface: KivoSurface, message: WebviewMessage): Promise<void> {
+    if (!isMessageAllowedOnSurface(surface, message.type)) {
+      await this.postToView(surface, { type: 'notice', phase: 'error', message: 'This action is not available in this Git tool window.' });
+      return;
+    }
     if (message.type === 'ready') {
-      this.webviewReady = true;
-      if (this.requestedTab) {
-        await this.view?.webview.postMessage({ type: 'showTab', tab: this.requestedTab });
-        this.requestedTab = undefined;
-      }
+      this.readyViews.add(surface);
       await this.setSyncState(this.autoFetchPromise ? 'fetching' : this.syncError ? 'error' : 'idle', undefined, this.syncError);
+      if (this.lastSnapshot) await this.postToView(surface, { type: 'snapshot', payload: this.lastSnapshot });
       await this.refresh(true);
       return;
     }
@@ -168,9 +199,9 @@ export class IdeaGitViewProvider implements vscode.WebviewViewProvider, vscode.T
           return;
         case 'commitDetails':
           try {
-            await this.view?.webview.postMessage({ type: 'commitDetails', payload: await client.commitDetails(message.hash) });
+            await this.postToView(surface, { type: 'commitDetails', payload: await client.commitDetails(message.hash) });
           } catch (error) {
-            await this.view?.webview.postMessage({ type: 'commitDetailsError', hash: message.hash, message: this.errorText(error) });
+            await this.postToView(surface, { type: 'commitDetailsError', hash: message.hash, message: this.errorText(error) });
           }
           return;
         case 'openDiff':
@@ -211,7 +242,7 @@ export class IdeaGitViewProvider implements vscode.WebviewViewProvider, vscode.T
       }
     } catch (error) {
       const detail = this.errorText(error);
-      await this.view?.webview.postMessage({ type: 'notice', phase: 'error', message: detail });
+      await this.postToView(surface, { type: 'notice', phase: 'error', message: detail });
       void vscode.window.showErrorMessage(`${IdeaGitViewProvider.productName}: ${detail}`);
     }
   }
@@ -239,18 +270,18 @@ export class IdeaGitViewProvider implements vscode.WebviewViewProvider, vscode.T
     this.operationRunning = true;
     const id = ++this.operationId;
     let writeStarted = false;
-    await this.view?.webview.postMessage({ type: 'operation', id, kind, phase: 'loading', message: label });
+    await this.postToReadyViews({ type: 'operation', id, kind, phase: 'loading', message: label });
     try {
       if (this.autoFetchPromise) await this.autoFetchPromise;
       this.coordinator.beginWrite();
       writeStarted = true;
       await vscode.window.withProgress({ location: vscode.ProgressLocation.SourceControl, title: `${IdeaGitViewProvider.productName}: ${label}` }, action);
       if (kind === 'fetch' || kind === 'pull' || kind === 'push') await this.setSyncState('idle', Date.now());
-      await this.view?.webview.postMessage({ type: 'operation', id, kind, phase: 'success', message: success, clearsCommit });
+      await this.postToReadyViews({ type: 'operation', id, kind, phase: 'success', message: success, clearsCommit });
     } catch (error) {
       this.coordinator.reset();
       if (kind === 'fetch' || kind === 'pull' || kind === 'push') await this.setSyncState('error', undefined, this.errorText(error));
-      await this.view?.webview.postMessage({ type: 'operation', id, kind, phase: 'error', message: this.errorText(error) });
+      await this.postToReadyViews({ type: 'operation', id, kind, phase: 'error', message: this.errorText(error) });
     } finally {
       this.operationRunning = false;
       if (writeStarted) this.coordinator.endWrite();
@@ -282,7 +313,7 @@ export class IdeaGitViewProvider implements vscode.WebviewViewProvider, vscode.T
   private configurePolling(): void {
     if (this.refreshTimer) clearInterval(this.refreshTimer);
     if (this.autoFetchTimer) clearInterval(this.autoFetchTimer);
-    if (!this.view?.visible) return;
+    if (!this.hasVisibleView()) return;
     const configuration = vscode.workspace.getConfiguration('ideaGit');
     const interval = configuration.get<number>('autoRefreshInterval', 30000);
     this.refreshTimer = setInterval(() => void this.refresh(true), interval);
@@ -295,7 +326,7 @@ export class IdeaGitViewProvider implements vscode.WebviewViewProvider, vscode.T
   }
 
   private async autoFetchIfDue(): Promise<void> {
-    if (this.autoFetchPromise || this.operationRunning || !this.view?.visible) return this.autoFetchPromise;
+    if (this.autoFetchPromise || this.operationRunning || !this.hasVisibleView()) return this.autoFetchPromise;
     const interval = vscode.workspace.getConfiguration('ideaGit').get<number>('autoFetchInterval', 300000);
     if (Date.now() - this.lastFetchAttemptAt < interval) return;
     this.lastFetchAttemptAt = Date.now();
@@ -322,14 +353,14 @@ export class IdeaGitViewProvider implements vscode.WebviewViewProvider, vscode.T
   private async setSyncState(phase: 'idle' | 'fetching' | 'error', fetchedAt?: number, error?: string): Promise<void> {
     if (fetchedAt !== undefined) this.lastFetchedAt = fetchedAt;
     this.syncError = error;
-    await this.view?.webview.postMessage({ type: 'syncStatus', phase, lastFetchedAt: this.lastFetchedAt, error: this.syncError });
+    await this.postToReadyViews({ type: 'syncStatus', phase, lastFetchedAt: this.lastFetchedAt, error: this.syncError });
   }
 
   private errorText(error: unknown): string {
     return error instanceof Error ? error.message.replace(/^fatal:\s*/i, '') : String(error);
   }
 
-  private html(webview: vscode.Webview): string {
+  private html(webview: vscode.Webview, surface: KivoSurface): string {
     const cssUri = webview.asWebviewUri(vscode.Uri.joinPath(this.context.extensionUri, 'media', 'main.css'));
     const codiconUri = webview.asWebviewUri(vscode.Uri.joinPath(this.context.extensionUri, 'media', 'codicons', 'codicon.css'));
     const jsUri = webview.asWebviewUri(vscode.Uri.joinPath(this.context.extensionUri, 'media', 'main.js'));
@@ -344,7 +375,7 @@ export class IdeaGitViewProvider implements vscode.WebviewViewProvider, vscode.T
         <link rel="stylesheet" href="${cssUri}">
         <title>${IdeaGitViewProvider.productName}</title>
       </head>
-      <body class="parity-mode">
+      <body class="parity-mode" data-surface="${surface}">
         <svg class="kivo-icon-sprite" aria-hidden="true" focusable="false">
           <symbol id="kivo-graph" viewBox="0 0 24 24"><path d="M5 5v14m0-7h5m0 0 8-6m-8 6 8 6"/><circle cx="5" cy="5" r="2"/><circle cx="18" cy="6" r="2"/><circle cx="18" cy="18" r="2"/></symbol>
           <symbol id="kivo-changes" viewBox="0 0 24 24"><path d="M5 7.5h14M5 12h14M5 16.5h9"/><path d="M4 4.5h16v15H4z"/></symbol>

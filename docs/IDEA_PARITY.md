@@ -9,26 +9,27 @@
 The reference is pinned so that “一致” has a stable meaning instead of changing with upstream screenshots:
 
 - Git behavior, Log semantics, Graph interaction, branch/ref presentation, and commit details: [DetachHead/rebased](https://github.com/DetachHead/rebased) at `master` commit `d5f15c9746e98e2f50d43196c9fbbd58b64edda4` (resolved 2026-09-19).
-- Tool-window placement and the `Local Changes | Log` mental model: [IntelliJ IDEA Git Log](https://www.jetbrains.com/help/idea/investigate-changes.html).
+- Tool-window placement and the separate Commit/Log mental model: [IntelliJ IDEA Git Log](https://www.jetbrains.com/help/idea/investigate-changes.html).
 - The Rebased reference is an interaction and behavior reference. Kivo does not copy JetBrains/Rebased trademarks, logos, product names, or source code without a separate license/NOTICE review.
 
 ## Target mode
 
 Kivo Git is considered in **parity mode** when the following is true:
 
-1. The Git view is opened in the VS Code **bottom Panel**. It is not a left activity-bar view, a separate editor page, or a custom full-screen dashboard.
-2. The bottom tool window exposes `Local Changes` and `Log` as peer tabs. The Graph is the first column of `Log`; it is not a third peer tab and not a standalone page.
-3. The Log has the same hierarchy and density as IDEA: branch/ref navigator on the left, compact filter/action strip above the history, dense commit rows in the center, and changed-files/commit details on the right.
+1. **Changes** is opened from a VS Code **left Activity Bar** container. It owns local changes, changelists, file diffs, commit message, and Commit. It never renders a Graph.
+2. **History** is opened from a VS Code **bottom Panel** container. It owns Log/History only. The Graph is the first column of that Log; it is not a sidebar page or a peer tab next to Changes.
+3. The bottom History tool window has the same hierarchy and density as IDEA: branch/ref navigator on the left, compact filter/action strip above the history, dense commit rows in the center, and changed-files/commit details on the right.
 4. Graph rows are deterministic and branch-aware: commit order, lane reuse, merge joins, branch/tag/HEAD refs, selection, scrolling, and details must remain stable for the same Git repository state.
-5. User actions follow the reference mental model: selecting a commit updates details; double-click/Enter opens the native diff; keyboard arrows move through rows; filters affect the Log rather than creating a second custom view; branch/ref actions are available from the selected item.
-6. Loading, empty, disabled, error, and reduced-motion states use host/IDE conventions. No decorative animation or count-morphing is part of the parity gate.
+5. User actions follow the reference mental model: selecting a commit updates details; double-click/Enter opens the native diff; keyboard arrows move through rows; filters affect History rather than creating a second custom view; branch/ref actions are available from the selected item.
+6. Both surfaces share one repository state: a commit, checkout, fetch, pull, or push updates the left Changes and bottom History surfaces without losing their local selection or scroll context.
+7. Loading, empty, disabled, error, and reduced-motion states use host/IDE conventions. No decorative animation or count-morphing is part of the parity gate.
 
 ## Acceptance matrix
 
 | Area | Reference behavior | Kivo parity check | Gate |
 | --- | --- | --- | --- |
-| Placement | Bottom Git Tool Window | Panel only; no Graph sidebar | P0 |
-| Tabs | `Local Changes` and `Log` are peers | Same order, labels, active-state behavior | P0 |
+| Placement | Commit surface separate from Git Log | Changes in Activity Bar; History in bottom Panel; no Graph sidebar | P0 |
+| Surface ownership | Changes owns files/commit; Log owns history | No Local Changes tab in History; no Graph in Changes | P0 |
 | Log structure | Branch navigator → history → details | Same regions and resize behavior | P0 |
 | Filters | Text/hash, branch, user, date, paths | Same order, scope, clear/apply behavior | P0 |
 | Graph | Multi-lane DAG with merge continuity | Fixture screenshots and row-by-row topology match | P0 |
@@ -46,7 +47,7 @@ Kivo Git is considered in **parity mode** when the following is true:
 
 ## Evidence required before claiming “done”
 
-- `npm run check`, `npm test`, `npm run compile`, and VSIX packaging pass.
+- `npm run check`, `npm test`, `npm run test:extension`, `npm run compile`, and VSIX packaging pass.
 - A fixture repository covers linear history, a merge, a branch fork, remote refs, tags, and a detached/empty state.
 - A screenshot or screen recording for each P0 row is compared against the locked reference at the same viewport and state.
 - The user confirms the bottom-panel placement, Log density, Graph topology, selection, filters, and details feel consistent with IDEA/Rebased.

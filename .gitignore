@@ -3,6 +3,7 @@ dist/
 *.vsix
 .DS_Store
 .vscode-test/
+.vscode-test-workspace/
 coverage/
 # Work Mode attachment cache; source assets belong under media/ instead.
 upload/

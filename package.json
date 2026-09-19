@@ -1,8 +1,8 @@
 {
   "name": "idea-git",
   "displayName": "Kivo Git",
-  "description": "A bottom-docked Git tool window with a graph-first workflow for Visual Studio Code.",
-  "version": "0.3.0-beta.7",
+  "description": "An IDEA-style Git workflow for VS Code: commit changes on the left, inspect history in the bottom Panel.",
+  "version": "0.3.0-beta.8",
   "publisher": "keatonli",
   "license": "MIT",
   "repository": {
@@ -26,7 +26,8 @@
     "source-control"
   ],
   "activationEvents": [
-    "onView:ideaGit.panel"
+    "onView:ideaGit.changes",
+    "onView:ideaGit.history"
   ],
   "main": "./dist/extension.js",
   "files": [
@@ -38,30 +39,46 @@
     "LICENSE"
   ],
   "scripts": {
-    "check": "tsc --noEmit && node --check media/main.js && node --check scripts/release.mjs && node --check scripts/sync-assets.mjs",
+    "check": "tsc --noEmit && node --check media/main.js && node --check scripts/release.mjs && node --check scripts/sync-assets.mjs && node --check scripts/verify-vsix.mjs && node --check scripts/test-extension.mjs",
     "sync-assets": "node scripts/sync-assets.mjs",
     "compile": "npm run sync-assets && node esbuild.mjs",
     "watch": "node esbuild.mjs --watch",
     "test": "vitest run",
-    "package": "npm run check && npm run test && npm run compile && vsce package --out kivo-git-${npm_package_version}.vsix",
+    "test:extension": "npm run compile && node scripts/test-extension.mjs",
+    "test:vsix": "node scripts/verify-vsix.mjs kivo-git-${npm_package_version}.vsix",
+    "package": "npm run check && npm run test && npm run compile && vsce package --out kivo-git-${npm_package_version}.vsix && npm run test:vsix",
     "release": "node scripts/release.mjs"
   },
   "contributes": {
     "viewsContainers": {
+      "activitybar": [
+        {
+          "id": "ideaGitChanges",
+          "title": "Kivo Git",
+          "icon": "media/logo.svg"
+        }
+      ],
       "panel": [
         {
-          "id": "ideaGit",
-          "title": "Kivo Git",
+          "id": "ideaGitHistory",
+          "title": "Kivo Git History",
           "icon": "media/logo.svg"
         }
       ]
     },
     "views": {
-      "ideaGit": [
+      "ideaGitChanges": [
         {
           "type": "webview",
-          "id": "ideaGit.panel",
-          "name": "Kivo Git"
+          "id": "ideaGit.changes",
+          "name": "Changes"
+        }
+      ],
+      "ideaGitHistory": [
+        {
+          "type": "webview",
+          "id": "ideaGit.history",
+          "name": "History"
         }
       ]
     },
@@ -72,7 +89,11 @@
       },
       {
         "command": "ideaGit.focus",
-        "title": "Kivo Git: Open Git Tool Window"
+        "title": "Kivo Git: Show Changes"
+      },
+      {
+        "command": "ideaGit.showChanges",
+        "title": "Kivo Git: Show Changes"
       },
       {
         "command": "ideaGit.showLog",
@@ -83,7 +104,7 @@
       "view/title": [
         {
           "command": "ideaGit.refresh",
-          "when": "view == ideaGit.panel",
+          "when": "view == ideaGit.changes || view == ideaGit.history",
           "group": "navigation"
         }
       ]
@@ -115,6 +136,7 @@
     "@types/node": "^22.10.0",
     "@types/vscode": "^1.95.0",
     "@vscode/codicons": "^0.0.36",
+    "@vscode/test-electron": "^3.1.0",
     "@vscode/vsce": "^3.2.1",
     "esbuild": "^0.25.0",
     "typescript": "^5.7.2",

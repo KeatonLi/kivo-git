@@ -21,6 +21,8 @@
 
 * { box-sizing: border-box; }
 body { margin: 0; color: var(--vscode-foreground); background: var(--surface-base); font: 12px/1.4 var(--vscode-font-family); overflow: hidden; }
+body[data-surface="changes"] { --surface-base: var(--vscode-sideBar-background, var(--vscode-panel-background)); }
+body[data-surface="history"] { --surface-base: var(--vscode-panel-background, var(--vscode-sideBar-background)); }
 button, textarea, input { font: inherit; color: inherit; }
 button { border: 0; }
 button:disabled { cursor: default !important; }
@@ -63,13 +65,6 @@ button:disabled { cursor: default !important; }
 .sync-menu button strong { font-size: 11px; font-weight: 600; }
 .sync-menu button small { color: var(--muted); font-size: 9px; }
 .sync-freshness { grid-column: 1 / -1; display: flex; align-items: center; gap: 4px; min-width: 0; color: var(--muted); font-size: 9px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-
-.tab { position: relative; display: flex; align-items: center; gap: 5px; padding: 8px 1px 9px; background: transparent; color: var(--muted); cursor: pointer; }
-.tab span { margin-left: 1px; font-size: 10px; }
-.tab.active { color: var(--vscode-foreground); }
-.tab.active .codicon, .tab.active .kivo-icon { color: var(--accent); }
-.tab:focus-visible { outline: none; color: var(--vscode-foreground); }
-.tab.active::after { content: ''; position: absolute; height: 2px; left: 0; right: 0; bottom: -1px; border-radius: 2px 2px 0 0; background: var(--accent); animation: tab-in 180ms var(--ease); }
 
 .content { flex: 1; min-height: 0; display: flex; flex-direction: column; }
 .section-toolbar { flex: 0 0 auto; display: flex; justify-content: space-between; align-items: center; padding: 9px 10px 5px 13px; color: var(--muted); font-size: 9px; font-weight: 650; letter-spacing: .6px; }
@@ -239,9 +234,16 @@ button:disabled { cursor: default !important; }
 .toolbar-spacer { min-width: 0; flex: 1; }
 .tool-window-toolbar .sync-freshness { grid-column: auto; max-width: 170px; padding: 0; }
 .tool-window-toolbar.has-error .sync-freshness { color: var(--warning); }
-.tool-tabs { flex: 0 0 auto; display: flex; gap: 0; padding: 0 8px; border-bottom: 1px solid var(--vscode-panel-border); background: var(--surface-base); }
-.tool-tabs .tab { min-height: 30px; padding: 6px 12px 7px; border-right: 1px solid transparent; font-size: 11px; }
-.tool-tabs .tab.active { border-right-color: var(--vscode-panel-border); }
+/* The left Changes view is intentionally compact. The History surface below is
+   the only place that may render a Graph. */
+body[data-surface="changes"] .repository-context,
+body[data-surface="changes"] .upstream,
+body[data-surface="changes"] .toolbar-divider,
+body[data-surface="changes"] .sync-freshness { display: none; }
+body[data-surface="changes"] .changes-toolbar { min-height: 31px; padding: 3px 7px; }
+body[data-surface="changes"] .changes-toolbar .branch-pill { flex: 1 1 auto; max-width: none; }
+body[data-surface="changes"] .changes-toolbar .sync-chip span { display: none; }
+body[data-surface="changes"] .changes-toolbar .toolbar-actions { flex: 0 0 auto; }
 
 .log-view { min-height: 0; }
 .log-filter-bar { flex: 0 0 auto; min-width: 0; padding: 4px 8px; border-bottom: 1px solid var(--vscode-panel-border); background: var(--surface-base); }
@@ -276,7 +278,6 @@ button:disabled { cursor: default !important; }
 .detail-empty-mark { display: grid; width: 27px; height: 27px; place-items: center; border-radius: 7px; background: color-mix(in srgb, var(--accent) 12%, transparent); color: var(--accent); font-size: 14px; }
 
 /* Golden-master mode deliberately removes Kivo-only motion and card emphasis. */
-.parity-mode .tab.active::after,
 .parity-mode .changelist,
 .parity-mode .file-row,
 .parity-mode .graph-row,
@@ -344,7 +345,6 @@ button:disabled { cursor: default !important; }
 .toast.error .codicon { color: var(--danger); }
 .toast.loading .codicon { color: var(--accent); }
 
-@keyframes tab-in { from { transform: scaleX(.3); opacity: 0; } }
 @keyframes list-in { from { opacity: 0; transform: translateY(4px); } }
 @keyframes file-in { from { opacity: 0; transform: translateX(-4px); } }
 @keyframes commit-in { from { opacity: 0; transform: translateY(7px); } }
@@ -353,11 +353,6 @@ button:disabled { cursor: default !important; }
 @keyframes toast-out { to { opacity: 0; transform: translateY(5px) scale(.98); } }
 @keyframes drop-ready { to { box-shadow: inset 0 0 0 1px var(--accent), 0 0 0 2px color-mix(in srgb, var(--accent) 14%, transparent); } }
 @keyframes float { 50% { transform: translateY(-4px); } }
-
-@media (min-width: 660px) {
-  .tool-tabs { padding: 0 14px; }
-  .tab { padding-top: 7px; padding-bottom: 8px; }
-}
 
 @media (max-width: 620px) {
   .graph-toolbar-head { flex-wrap: wrap; }

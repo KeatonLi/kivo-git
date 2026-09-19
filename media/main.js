@@ -2,11 +2,11 @@ const vscode = acquireVsCodeApi();
 const app = document.querySelector('#app');
 const toastRegion = document.querySelector('#toast-region');
 const persisted = vscode.getState?.() || {};
+const surface = document.body.dataset.surface === 'history' ? 'history' : 'changes';
 
 const ui = {
   snapshot: undefined,
   emptyMessage: undefined,
-  tab: persisted.tab === 'log' || persisted.tab === 'graph' ? 'graph' : 'changes',
   selected: new Set(persisted.selected || []),
   collapsed: new Set(persisted.collapsed || []),
   branchOpen: false,
@@ -63,7 +63,6 @@ const updatedLabel = (date) => {
 function post(type, payload = {}) { vscode.postMessage({ type, ...payload }); }
 function persist() {
   vscode.setState?.({
-    tab: ui.tab,
     selected: [...ui.selected],
     collapsed: [...ui.collapsed],
     focusedPath: ui.focusedPath,
@@ -239,7 +238,7 @@ function patchApp(html) {
   target.innerHTML = html;
   const pool = new Map([...app.querySelectorAll('[data-path], [data-list-id], [data-checkout], [data-hash]')].map((node) => [keyFor(node), node]));
   const before = new Map([...app.querySelectorAll('.file-row')].map((node) => [node.dataset.path, node.getBoundingClientRect()]));
-  const counters = new Map([...app.querySelectorAll('.count, .sync-chip strong, .tool-tabs .tab span')].map((node) => [node, node.textContent]));
+  const counters = new Map([...app.querySelectorAll('.count, .sync-chip strong')].map((node) => [node, node.textContent]));
   patchNode(app, target, pool);
   if (!window.matchMedia('(prefers-reduced-motion: reduce)').matches) {
     for (const row of app.querySelectorAll('.file-row')) {
@@ -269,7 +268,6 @@ function render() {
     bind();
     return;
   }
-  const changeCount = s.changes.length;
   const hasUpstream = Boolean(s.upstream);
   const syncLabel = ui.syncPhase === 'fetching'
     ? 'Checking remote…'
@@ -279,7 +277,7 @@ function render() {
         ? updatedLabel(new Date(ui.lastFetchedAt).toISOString())
         : 'Remote not checked';
   patchApp(`
-    <header class="tool-window-toolbar ${ui.syncError ? 'has-error' : ''}" aria-label="Git tool window controls" aria-busy="${ui.syncPhase === 'fetching'}">
+    <header class="tool-window-toolbar ${surface}-toolbar ${ui.syncError ? 'has-error' : ''}" aria-label="${surface === 'history' ? 'Git history controls' : 'Git changes controls'}" aria-busy="${ui.syncPhase === 'fetching'}">
       <span class="repository-context" title="${escapeHtml(s.root)}">${icon('repo')}<span>${escapeHtml(s.repositoryName)}</span></span>
       <button class="branch-pill" data-action="branches" aria-label="Git branches, current branch ${escapeHtml(s.branch)}" aria-haspopup="dialog" aria-expanded="${ui.branchOpen}">
         ${icon('git-branch', 'branch-symbol')}<span class="branch-name">${escapeHtml(s.branch)}</span>${icon('chevron-down', 'chevron')}
@@ -302,12 +300,8 @@ function render() {
       <span class="toolbar-spacer"></span>
       <span class="sync-freshness" aria-live="polite" title="${escapeHtml(ui.syncError || syncLabel)}">${ui.syncError ? icon('warning') : icon('cloud-download')}${escapeHtml(syncLabel)}</span>
     </header>
-    <nav class="tool-tabs" aria-label="Git tool window tabs" role="tablist">
-      <button class="tab ${ui.tab === 'changes' ? 'active' : ''}" data-tab="changes" role="tab" aria-selected="${ui.tab === 'changes'}">Local Changes <span>${changeCount}</span></button>
-      <button class="tab ${ui.tab === 'graph' ? 'active' : ''}" data-tab="graph" role="tab" aria-selected="${ui.tab === 'graph'}">Log</button>
-    </nav>
-    <section class="content" aria-busy="${ui.busy}">
-      ${ui.tab === 'changes' ? renderChanges(s) : renderGraph(s)}
+    <section class="content ${surface}-content" aria-busy="${ui.busy}">
+      ${surface === 'changes' ? renderChanges(s) : renderGraph(s)}
     </section>
     ${renderBranchPopup(s)}
   `);
@@ -520,7 +514,6 @@ function bind() {
     node.__ideaGitListeners.add(token);
     node.addEventListener(event, handler);
   });
-  once('[data-tab]', 'click', (event) => { ui.tab = event.currentTarget.dataset.tab; persist(); render(); });
   once('[data-action]', 'click', (event) => handleAction(event.currentTarget.dataset.action));
   once('[data-commit]', 'click', (event) => selectCommit(event.currentTarget.dataset.commit));
   once('[data-commit]', 'keydown', (event) => {
@@ -844,12 +837,6 @@ function dismissToast(element) {
 
 window.addEventListener('message', (event) => {
   const message = event.data;
-  if (message.type === 'showTab') {
-    ui.tab = message.tab === 'log' ? 'graph' : 'changes';
-    persist();
-    render();
-    return;
-  }
   if (message.type === 'snapshot') {
     const fingerprint = JSON.stringify(message.payload);
     if (fingerprint === lastSnapshot) return;
