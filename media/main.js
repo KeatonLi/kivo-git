@@ -284,7 +284,7 @@ function render() {
     </header>
     <nav class="tabs" aria-label="Git views">
       <button class="tab ${ui.tab === 'changes' ? 'active' : ''}" data-tab="changes">${kivoIcon('changes')} Changes <span>${changeCount}</span></button>
-      <button class="tab ${ui.tab === 'graph' ? 'active' : ''}" data-tab="graph">${kivoIcon('graph')} Graph</button>
+      <button class="tab ${ui.tab === 'graph' ? 'active' : ''}" data-tab="graph">${kivoIcon('graph')} Log</button>
     </nav>
     <section class="content" aria-busy="${ui.busy}">
       ${ui.tab === 'changes' ? renderChanges(s) : renderGraph(s)}
@@ -357,24 +357,44 @@ function renderRef(ref) {
 }
 
 function graphPoint(lane, laneWidth = 18) {
-  return 10 + lane * laneWidth;
+  return 13 + lane * laneWidth;
 }
 
-function renderGraphSvg(commit, laneWidth = 18, rowHeight = 52) {
+function renderGraphSvg(commit, laneCount, laneWidth = 18, rowHeight = 30) {
   const lines = [];
-  const maxLane = Math.max(commit.lane, ...(commit.incomingLanes || []), ...(commit.parentLanes || []));
-  const graphWidth = Math.max(28, (maxLane + 1) * laneWidth + 10);
-  for (const incomingLane of commit.incomingLanes || []) {
-    const from = graphPoint(incomingLane, laneWidth);
-    const to = graphPoint(commit.lane, laneWidth);
-    lines.push(`<path class="graph-edge incoming graph-lane-${incomingLane % 6}" d="M ${from} 0 C ${from} 10, ${to} 13, ${to} 25"/>`);
+  const graphWidth = Math.max(80, laneCount * laneWidth + 26);
+  const midpoint = rowHeight / 2;
+  const transitions = commit.laneTransitions || [];
+  const throughTransitions = transitions.filter((transition) => transition.kind === 'through');
+  const parentTransitions = transitions.filter((transition) => transition.kind === 'parent');
+  if (throughTransitions.length || parentTransitions.length || commit.hasIncoming !== undefined) {
+    for (const transition of throughTransitions) {
+      const from = graphPoint(transition.from, laneWidth);
+      const to = graphPoint(transition.to, laneWidth);
+      lines.push(`<path class="graph-edge through graph-lane-${transition.from % 6}" d="M ${from} 0 C ${from} ${midpoint * .58}, ${to} ${midpoint * 1.42}, ${to} ${rowHeight}"/>`);
+    }
+    if (commit.hasIncoming) {
+      const x = graphPoint(commit.lane, laneWidth);
+      lines.push(`<path class="graph-edge incoming graph-lane-${commit.lane % 6}" d="M ${x} 0 L ${x} ${midpoint}"/>`);
+    }
+    for (const transition of parentTransitions) {
+      const from = graphPoint(commit.lane, laneWidth);
+      const to = graphPoint(transition.to, laneWidth);
+      lines.push(`<path class="graph-edge outgoing graph-lane-${transition.to % 6}" d="M ${from} ${midpoint} C ${from} ${midpoint + midpoint * .44}, ${to} ${midpoint + midpoint * .52}, ${to} ${rowHeight}"/>`);
+    }
+  } else {
+    for (const incomingLane of commit.incomingLanes || []) {
+      const from = graphPoint(incomingLane, laneWidth);
+      const to = graphPoint(commit.lane, laneWidth);
+      lines.push(`<path class="graph-edge incoming graph-lane-${incomingLane % 6}" d="M ${from} 0 C ${from} ${midpoint * .48}, ${to} ${midpoint * .56}, ${to} ${midpoint}"/>`);
+    }
+    for (const parentLane of commit.parentLanes || []) {
+      const from = graphPoint(commit.lane, laneWidth);
+      const to = graphPoint(parentLane, laneWidth);
+      lines.push(`<path class="graph-edge outgoing graph-lane-${parentLane % 6}" d="M ${from} ${midpoint} C ${from} ${midpoint + midpoint * .44}, ${to} ${midpoint + midpoint * .52}, ${to} ${rowHeight}"/>`);
+    }
   }
-  for (const parentLane of commit.parentLanes || []) {
-    const from = graphPoint(commit.lane, laneWidth);
-    const to = graphPoint(parentLane, laneWidth);
-    lines.push(`<path class="graph-edge outgoing graph-lane-${parentLane % 6}" d="M ${from} 25 C ${from} 35, ${to} 38, ${to} ${rowHeight}"/>`);
-  }
-  lines.push(`<circle class="graph-node graph-lane-${commit.lane % 6} ${commit.parents?.length > 1 ? 'merge' : ''}" cx="${graphPoint(commit.lane, laneWidth)}" cy="25" r="5"/>`);
+  lines.push(`<circle class="graph-node graph-lane-${commit.lane % 6} ${commit.parents?.length > 1 ? 'merge' : ''}" cx="${graphPoint(commit.lane, laneWidth)}" cy="${midpoint}" r="${commit.parents?.length > 1 ? '4.5' : '3.6'}"/>`);
   return `<svg class="graph-svg" viewBox="0 0 ${graphWidth} ${rowHeight}" preserveAspectRatio="none" aria-hidden="true">${lines.join('')}</svg>`;
 }
 
@@ -400,6 +420,7 @@ function renderGraph(s) {
   if (!s.commits.length) return '<div class="inline-empty">No commits yet</div>';
   const commits = graphCommits();
   const laneCount = Math.max(1, Math.max(...s.commits.flatMap((commit) => [commit.lane, ...(commit.incomingLanes || []), ...(commit.parentLanes || [])])) + 1);
+  const graphWidth = Math.max(80, laneCount * 18 + 26);
   const focusHash = ui.focusedCommitHash && commits.some((commit) => commit.hash === ui.focusedCommitHash)
     ? ui.focusedCommitHash
     : commits[0]?.hash;
@@ -408,16 +429,17 @@ function renderGraph(s) {
   const filtersActive = Boolean(ui.graphBranchFilter || ui.graphAuthorFilter || ui.graphAgeFilter !== 'all' || ui.graphQuery.trim());
   const countLabel = filtersActive ? `${commits.length} of ${s.commits.length}` : `${s.commits.length}`;
   return `<div class="graph-view">
-    <div class="graph-toolbar"><div class="graph-toolbar-head"><div><span class="section-kicker">HISTORY</span><span class="graph-count">${countLabel} commits</span></div><label class="graph-search">${icon('search')}<input id="graph-search" aria-label="Filter commit history" placeholder="Filter commits…" value="${escapeHtml(ui.graphQuery)}"></label></div>
-      <div class="graph-filters">
+    <div class="graph-toolbar"><div class="graph-toolbar-head"><div class="log-title-group">${kivoIcon('graph', 'log-symbol')}<span class="log-title">Log</span><span class="graph-count">${countLabel} commits</span></div>
+      <div class="graph-filters" aria-label="History filters">
         <label class="graph-filter"><span>Branch</span><select data-graph-filter="branch" aria-label="Filter by branch"><option value="">All branches</option>${branchOptions.map((branch) => `<option value="${escapeHtml(branch)}" ${ui.graphBranchFilter === branch ? 'selected' : ''}>${escapeHtml(branch)}</option>`).join('')}</select></label>
         <label class="graph-filter"><span>Author</span><select data-graph-filter="author" aria-label="Filter by author"><option value="">All authors</option>${authorOptions.map((author) => `<option value="${escapeHtml(author)}" ${ui.graphAuthorFilter === author ? 'selected' : ''}>${escapeHtml(author)}</option>`).join('')}</select></label>
         <label class="graph-filter"><span>Window</span><select data-graph-filter="age" aria-label="Filter by time window"><option value="all" ${ui.graphAgeFilter === 'all' ? 'selected' : ''}>All time</option><option value="7d" ${ui.graphAgeFilter === '7d' ? 'selected' : ''}>Last 7 days</option><option value="30d" ${ui.graphAgeFilter === '30d' ? 'selected' : ''}>Last 30 days</option><option value="90d" ${ui.graphAgeFilter === '90d' ? 'selected' : ''}>Last 90 days</option></select></label>
         ${filtersActive ? '<button class="text-button graph-clear" data-action="clear-graph-filters">Clear</button>' : ''}
-      </div>
+      </div><label class="graph-search">${icon('search')}<input id="graph-search" aria-label="Filter commit history" placeholder="Find commits" value="${escapeHtml(ui.graphQuery)}"></label>
     </div>
-    <div class="graph-list" role="listbox" aria-label="Commit history" style="--lane-count:${laneCount}">${commits.length ? commits.map((commit, index) => `<article class="graph-row ${commit.parents.length > 1 ? 'merge-row' : ''} ${ui.selectedCommitHash === commit.hash ? 'selected' : ''}" data-commit="${escapeHtml(commit.hash)}" data-hash="${escapeHtml(commit.hash)}" role="option" aria-selected="${ui.selectedCommitHash === commit.hash}" tabindex="${focusHash === commit.hash ? '0' : '-1'}" style="--delay:${Math.min(index * 12, 180)}ms">
-      <div class="graph-canvas" style="--lane-count:${laneCount}">${renderGraphSvg(commit)}</div><div class="graph-commit"><strong>${escapeHtml(commit.subject)}</strong><span>${escapeHtml(commit.author)} · ${relativeTime(commit.date)}</span></div><div class="graph-ref-stack">${(commit.refs || []).slice(0, 2).map(renderRef).join('')}</div><code>${escapeHtml(commit.shortHash)}</code>
+    <div class="log-column-header" aria-hidden="true" style="--graph-width:${graphWidth}px"><span>GRAPH</span><span>COMMIT</span><span>AUTHOR</span><span>DATE</span></div>
+    <div class="graph-list" role="listbox" aria-label="Commit history" style="--lane-count:${laneCount};--graph-width:${graphWidth}px">${commits.length ? commits.map((commit, index) => `<article class="graph-row ${commit.parents.length > 1 ? 'merge-row' : ''} ${ui.selectedCommitHash === commit.hash ? 'selected' : ''}" data-commit="${escapeHtml(commit.hash)}" data-hash="${escapeHtml(commit.hash)}" role="option" aria-selected="${ui.selectedCommitHash === commit.hash}" tabindex="${focusHash === commit.hash ? '0' : '-1'}" style="--delay:${Math.min(index * 5, 90)}ms">
+      <div class="graph-canvas">${renderGraphSvg(commit, laneCount)}</div><div class="graph-commit"><div class="log-subject"><strong>${escapeHtml(commit.subject)}</strong>${(commit.refs || []).slice(0, 3).map(renderRef).join('')}</div><span class="log-meta"><code>${escapeHtml(commit.shortHash)}</code>${commit.parents?.length > 1 ? '<span class="merge-note">Merge</span>' : ''}</span></div><span class="log-author" title="${escapeHtml(commit.author)}">${escapeHtml(commit.author)}</span><time class="log-date" title="${escapeHtml(commit.date)}">${relativeTime(commit.date)}</time>
     </article>`).join('') : '<div class="inline-empty">No matching commits</div>'}</div>
     ${s.commitsHasMore ? `<button class="load-more ${ui.graphLoadingMore ? 'working' : ''}" data-action="load-more-commits" ${ui.busy || ui.graphLoadingMore ? 'disabled' : ''}>${ui.graphLoadingMore ? icon('loading', 'codicon-modifier-spin') : icon('history')}<span>${ui.graphLoadingMore ? 'Loading history…' : 'Load more history'}</span><small>Showing ${s.commits.length}</small></button>` : ''}
     ${renderCommitDetails(s)}

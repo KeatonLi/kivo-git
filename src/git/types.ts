@@ -28,6 +28,16 @@ export interface CommitSummary {
   lane: number;
   incomingLanes: number[];
   parentLanes: number[];
+  /** Whether the current commit enters this row from the preceding graph row. */
+  hasIncoming?: boolean;
+  /** Exact lane routing for this row. `through` edges bypass the commit node. */
+  laneTransitions?: GraphLaneTransition[];
+}
+
+export interface GraphLaneTransition {
+  from: number;
+  to: number;
+  kind: 'through' | 'parent';
 }
 
 export type GitRefKind = 'local' | 'remote' | 'tag';

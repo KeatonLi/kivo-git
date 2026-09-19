@@ -151,7 +151,8 @@ Goal: reach strong IDE parity for the operations developers perform every day.
 
 Goal: provide one coherent workspace for changes, history, review, and operations instead of forcing complex work into a narrow sidebar.
 
-- [ ] **P1** Keep the sidebar as a compact daily overview and entry point.
+- [x] **P1** Establish a bottom-docked Git Tool Window as the daily workspace for Changes and Log.
+- [ ] **P1** Add a compact sidebar overview and entry point when a workspace needs it.
 - [ ] **P1** Add a full-width Git Studio editor tab for complex workflows.
 - [ ] **P1** Create a resizable three-region layout: navigation, diff/content, and action/details.
 - [ ] **P1** Keep selection synchronized between sidebar, Git Studio, native diff, and source editor.
@@ -163,6 +164,7 @@ Goal: provide one coherent workspace for changes, history, review, and operation
 ### Real Git graph and history
 
 - [x] **P1** Parse and render a real multi-lane commit DAG.
+- [x] **P1** Present history as a dense, bottom-panel Log with graph, commit, author, and date columns.
 - [x] **P1** Render local branches, remote branches, tags, HEAD, and upstream labels.
 - [ ] **P1** Add filters for branch, author, date, path, repository, and commit text.
 - [x] **P1** Add commit details, changed files, and immediate diff preview.

@@ -106,6 +106,9 @@ describe('GitClient integration', () => {
     expect(merge).toMatchObject({ parents: expect.arrayContaining([expect.any(String)]) });
     expect(merge?.parents).toHaveLength(2);
     expect(merge?.parentLanes).toHaveLength(2);
+    expect(merge?.laneTransitions).toEqual(expect.arrayContaining([
+      expect.objectContaining({ kind: 'parent', from: merge?.lane })
+    ]));
     expect(merge?.refs).toEqual(expect.arrayContaining([expect.objectContaining({ name: 'main', kind: 'local', current: true })]));
 
     const feature = snapshot.commits.find((commit) => commit.subject === 'feature line');

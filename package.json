@@ -1,14 +1,15 @@
 {
   "name": "idea-git",
   "displayName": "Kivo Git",
-  "description": "A tactile, graph-first Git workflow for Visual Studio Code.",
-  "version": "0.3.0-beta.4",
+  "description": "A bottom-docked Git tool window with a graph-first workflow for Visual Studio Code.",
+  "version": "0.3.0-beta.5",
   "publisher": "keatonli",
   "license": "MIT",
   "repository": {
     "type": "git",
     "url": "https://github.com/KeatonLi/kivo-git.git"
   },
+  "icon": "media/kivo-icon.png",
   "engines": {
     "vscode": "^1.95.0"
   },
@@ -47,7 +48,7 @@
   },
   "contributes": {
     "viewsContainers": {
-      "activitybar": [
+      "panel": [
         {
           "id": "ideaGit",
           "title": "Kivo Git",

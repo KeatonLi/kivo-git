@@ -2,6 +2,12 @@
 
 ## Unreleased
 
+## 0.3.0-beta.5 - 2026-09-19
+
+- Moved Kivo Git from the left Activity Bar to VS Code’s bottom Panel, so Changes and Log have the width of a real Git tool window.
+- Rebuilt Graph as a compact Log table: fixed graph lanes, commit, author, and date columns; inline refs; denser rows; and faster selection feedback.
+- Replaced the extension and Panel artwork with Kivo’s K-topology mark, including a dedicated Marketplace PNG icon.
+
 ## 0.3.0-beta.4 - 2026-09-19
 
 - Added loading-state motion and keyboard navigation for Graph filters, history loading, and Pull strategy menus.

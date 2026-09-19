@@ -8,16 +8,20 @@ Kivo Git brings an IDE-style Git workflow to VS Code. It keeps the useful mental
 
 | IDE workflow concept | Kivo Git behavior |
 | --- | --- |
-| Commit tool window | Persistent sidebar with changelists, selection, message, and commit action |
+| Commit tool window | Persistent bottom Panel with changelists, selection, message, and commit action |
 | Local changelists | Named groups stored per repository under `.git/ideagit/` |
 | Branch widget | One-click branch popup with local and remote branches plus ahead/behind state |
 | Changes diff | Single-click for a focused preview; double-click or Enter pins VS Code's native diff editor |
-| Git Graph | Real multi-lane commit DAG with branch refs, merge points, searchable commit details, and file diffs |
+| Git Log | Dense, table-oriented multi-lane commit DAG with branch refs, merge points, searchable commit details, and file diffs |
 | Update/push | Direct actions in the repository header with progress and result feedback |
 
 ## Visual language
 
-Kivo Git uses VS Code Codicons, host theme tokens, compact spacing, quiet surfaces, and a restrained lane palette for focus and active intent. Incoming, outgoing, active, warning, and destructive states remain visually distinct without turning the sidebar into a dense toolbar.
+Kivo Git uses VS Code Codicons, host theme tokens, compact spacing, quiet surfaces, and a restrained lane palette for focus and active intent. The bottom Panel is the primary workspace: it gives Changes and Log enough horizontal room for a genuine Git tool window while leaving the editor and Source Control sidebar unobstructed. Incoming, outgoing, active, warning, and destructive states remain visually distinct without turning the tool window into a dense toolbar.
+
+### Brand mark
+
+The Kivo mark is a K drawn as a small commit topology: a stable vertical stem, two branching paths, and two terminal nodes. In the Panel it is monochrome and inherits the host theme; in Marketplace it sits in a blue-violet rounded square. The mark must remain legible at 16 px, avoid literal Git or JetBrains logos, and never rely on decorative detail to identify the product.
 
 The repository header exposes upstream freshness and separate Pull/Push commit counts. A non-interactive background fetch refreshes remote refs while the view is visible; failures stay local to the sync status instead of interrupting editing with notifications.
 

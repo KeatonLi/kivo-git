@@ -147,8 +147,10 @@ export class GitClient {
   private layoutCommits(commits: CommitSummary[]): CommitSummary[] {
     const active: string[] = [];
     return commits.map((commit) => {
-      const incomingLanes = active.map((_hash, index) => index);
+      const activeBefore = [...active];
+      const incomingLanes = activeBefore.map((_hash, index) => index);
       let lane = active.indexOf(commit.hash);
+      const hasIncoming = lane >= 0;
       if (lane < 0) {
         lane = 0;
         active.splice(lane, 0, commit.hash);
@@ -163,7 +165,15 @@ export class GitClient {
         }
         parentLanes.push(parentLane);
       }
-      return { ...commit, lane, incomingLanes, parentLanes };
+      const laneTransitions = [
+        ...activeBefore.flatMap((hash, from) => {
+          if (hash === commit.hash) return [];
+          const to = active.indexOf(hash);
+          return to >= 0 ? [{ from, to, kind: 'through' as const }] : [];
+        }),
+        ...parentLanes.map((to) => ({ from: lane, to, kind: 'parent' as const }))
+      ];
+      return { ...commit, lane, incomingLanes, parentLanes, hasIncoming, laneTransitions };
     });
   }
 

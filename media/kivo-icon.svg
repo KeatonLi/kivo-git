@@ -1,0 +1,21 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" role="img" aria-label="Kivo Git">
+  <defs>
+    <linearGradient id="kivo-bg" x1="72" y1="54" x2="440" y2="468" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#1B2D74"/>
+      <stop offset=".48" stop-color="#315BEA"/>
+      <stop offset="1" stop-color="#6A5DF3"/>
+    </linearGradient>
+    <linearGradient id="kivo-glow" x1="174" y1="104" x2="362" y2="406" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#A7CEFF" stop-opacity=".42"/>
+      <stop offset="1" stop-color="#F1EDFF" stop-opacity="0"/>
+    </linearGradient>
+  </defs>
+  <rect width="512" height="512" rx="116" fill="url(#kivo-bg)"/>
+  <path d="M104 126c58-53 141-76 217-53 48 14 87 46 112 87" fill="none" stroke="url(#kivo-glow)" stroke-width="18" stroke-linecap="round" opacity=".85"/>
+  <path d="M164 128v256M186 256l164-126M186 256l164 126" stroke="#FFF" stroke-width="37" stroke-linecap="round" stroke-linejoin="round"/>
+  <circle cx="185" cy="256" r="34" fill="#FFF"/>
+  <circle cx="352" cy="128" r="35" fill="#FFF"/>
+  <circle cx="352" cy="384" r="35" fill="#FFF"/>
+  <circle cx="352" cy="128" r="13" fill="#315BEA"/>
+  <circle cx="352" cy="384" r="13" fill="#6A5DF3"/>
+</svg>
