@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+## 0.3.0-beta.2 - 2026-09-19
+
 - Improved Graph hand feel with roving focus, Arrow/Home/End navigation, lazy detail requests, retryable detail errors, and stable scroll context.
 - Added lane-aware Graph colors and clearer sync disabled/loading feedback.
 - Renamed the GitHub repository to `KeatonLi/kivo-git` and aligned release artifacts with the Kivo Git brand.
