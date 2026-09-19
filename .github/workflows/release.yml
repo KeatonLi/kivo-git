@@ -47,7 +47,7 @@ jobs:
       - uses: actions/upload-artifact@v4
         if: steps.existing.outputs.found == 'false'
         with:
-          name: idea-git-${{ steps.version.outputs.tag }}
+          name: kivo-git-${{ steps.version.outputs.tag }}
           path: |
             kivo-git-*.vsix
             kivo-git-*.vsix.sha256
@@ -62,7 +62,7 @@ jobs:
           git config user.name github-actions[bot]
           git config user.email 41898282+github-actions[bot]@users.noreply.github.com
           if ! git ls-remote --exit-code --tags origin "refs/tags/$TAG" >/dev/null 2>&1; then
-            git tag -a "$TAG" -m "IdeaGit $TAG"
+            git tag -a "$TAG" -m "Kivo Git $TAG"
             git push origin "$TAG"
           fi
           gh release create "$TAG" kivo-git-*.vsix kivo-git-*.vsix.sha256 \

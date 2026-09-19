@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+- Improved Graph hand feel with roving focus, Arrow/Home/End navigation, lazy detail requests, retryable detail errors, and stable scroll context.
+- Added lane-aware Graph colors and clearer sync disabled/loading feedback.
+- Renamed the GitHub repository to `KeatonLi/kivo-git` and aligned release artifacts with the Kivo Git brand.
+
 ## 0.3.0-beta.1 - 2026-09-19
 
 - Formalized the Kivo Git brand and Graph history milestone in the release artifacts.
@@ -33,6 +37,6 @@
 
 ## 0.1.0
 
-- Initial IdeaGit MVP.
+- Initial Kivo Git MVP (the internal compatibility identifiers remain `ideaGit.*`).
 - Added repository status, local changelists, selective commit, native diff, branch checkout, sync actions, and recent history.
 - Added a theme-aware motion system with reduced-motion support.

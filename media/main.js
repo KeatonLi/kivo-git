@@ -5,6 +5,7 @@ const persisted = vscode.getState?.() || {};
 
 const ui = {
   snapshot: undefined,
+  emptyMessage: undefined,
   tab: persisted.tab === 'log' || persisted.tab === 'graph' ? 'graph' : 'changes',
   selected: new Set(persisted.selected || []),
   collapsed: new Set(persisted.collapsed || []),
@@ -23,11 +24,14 @@ const ui = {
   commitMessage: persisted.commitMessage || '',
   graphQuery: persisted.graphQuery || '',
   selectedCommitHash: persisted.selectedCommitHash,
+  focusedCommitHash: persisted.focusedCommitHash || persisted.selectedCommitHash,
   commitDetails: undefined,
-  commitDetailsLoading: false
+  commitDetailsLoading: false,
+  commitDetailsError: undefined
 };
 let lastSnapshot = '';
 let previewTimer;
+let commitDetailTimer;
 let dragAvatar;
 const commandKey = /Mac|iPhone|iPad/.test(navigator.platform) ? '⌘' : 'Ctrl';
 
@@ -58,8 +62,43 @@ function persist() {
     focusedPath: ui.focusedPath,
     commitMessage: ui.commitMessage,
     graphQuery: ui.graphQuery,
-    selectedCommitHash: ui.selectedCommitHash
+    selectedCommitHash: ui.selectedCommitHash,
+    focusedCommitHash: ui.focusedCommitHash
   });
+}
+
+function graphCommits() {
+  const commits = ui.snapshot?.commits ?? [];
+  const query = ui.graphQuery.trim().toLowerCase();
+  if (!query) return commits;
+  return commits.filter((commit) => [commit.subject, commit.author, commit.hash, commit.shortHash, ...(commit.refs || []).map((ref) => ref.name)]
+    .join(' ').toLowerCase().includes(query));
+}
+
+function postCommitDetails(hash, immediate = true) {
+  clearTimeout(commitDetailTimer);
+  const request = () => {
+    if (ui.selectedCommitHash === hash) post('commitDetails', { hash });
+  };
+  if (immediate) request();
+  else commitDetailTimer = setTimeout(request, 90);
+}
+
+function selectCommit(hash, { focus = false, immediate = true } = {}) {
+  if (!hash) return;
+  ui.selectedCommitHash = hash;
+  ui.focusedCommitHash = hash;
+  ui.commitDetails = undefined;
+  ui.commitDetailsError = undefined;
+  ui.commitDetailsLoading = true;
+  persist();
+  render();
+  if (focus) requestAnimationFrame(() => {
+    const row = [...app.querySelectorAll('[data-commit]')].find((item) => item.dataset.commit === hash);
+    row?.focus();
+    row?.scrollIntoView({ block: 'nearest' });
+  });
+  postCommitDetails(hash, immediate);
 }
 
 function orderedPaths() {
@@ -187,7 +226,8 @@ function patchApp(html) {
 function render() {
   const s = ui.snapshot;
   if (!s) {
-    app.innerHTML = `<section class="empty-state"><div class="empty-mark">${icon('source-control')}</div><h2>Open a Git repository</h2><p>Kivo Git will appear here when the workspace is ready.</p><button data-action="refresh">${icon('refresh')} Refresh</button></section>`;
+    const hasError = Boolean(ui.emptyMessage);
+    app.innerHTML = `<section class="empty-state"><div class="empty-mark">${icon(hasError ? 'error' : 'source-control')}</div><h2>${hasError ? 'Kivo Git needs attention' : 'Open a Git repository'}</h2><p>${escapeHtml(ui.emptyMessage || 'Kivo Git will appear here when the workspace is ready.')}</p><button data-action="refresh">${icon('refresh')} ${hasError ? 'Retry' : 'Refresh'}</button></section>`;
     bind();
     return;
   }
@@ -209,13 +249,13 @@ function render() {
         </button>
         <button class="icon-button fetch-button ${ui.syncPhase === 'fetching' || ui.operationKind === 'fetch' ? 'working' : ''}" aria-label="${ui.syncPhase === 'fetching' ? 'Checking remote' : 'Fetch remote updates'}" title="Fetch remote updates" data-action="fetch" ${ui.busy || ui.syncPhase === 'fetching' ? 'disabled' : ''}>${icon(ui.syncPhase === 'fetching' || ui.operationKind === 'fetch' ? 'loading' : 'refresh', ui.syncPhase === 'fetching' || ui.operationKind === 'fetch' ? 'codicon-modifier-spin' : '')}</button>
       </div>
-      <div class="sync-summary ${ui.syncError ? 'has-error' : ''}">
+      <div class="sync-summary ${ui.syncError ? 'has-error' : ''}" aria-busy="${ui.syncPhase === 'fetching'}">
         <span class="upstream" title="${escapeHtml(s.upstream || 'This branch has no upstream')}">${icon(hasUpstream ? 'cloud' : 'warning')}<span>${hasUpstream ? escapeHtml(s.upstream) : 'No upstream'}</span></span>
         <div class="sync-counts">
-          <button class="sync-chip incoming ${s.behind ? 'has-count' : ''} ${ui.operationKind === 'pull' ? 'working' : ''}" data-action="pull" aria-label="${s.behind} commits available to pull" title="Pull ${s.behind} incoming commit${s.behind === 1 ? '' : 's'}" ${!hasUpstream || !s.behind || ui.busy ? 'disabled' : ''}>${icon('arrow-down')}<strong>${s.behind}</strong><span>Pull</span></button>
-          <button class="sync-chip outgoing ${s.ahead ? 'has-count' : ''} ${ui.operationKind === 'push' ? 'working' : ''}" data-action="push" aria-label="${s.ahead} commits ready to push" title="Push ${s.ahead} outgoing commit${s.ahead === 1 ? '' : 's'}" ${!hasUpstream || !s.ahead || ui.busy ? 'disabled' : ''}>${icon('arrow-up')}<strong>${s.ahead}</strong><span>Push</span></button>
+          <button class="sync-chip incoming ${s.behind ? 'has-count' : ''} ${ui.operationKind === 'pull' ? 'working' : ''}" data-action="pull" aria-label="${s.behind} commits available to pull" title="Pull ${s.behind} incoming commit${s.behind === 1 ? '' : 's'}" ${!hasUpstream || !s.behind || ui.busy || ui.syncPhase === 'fetching' ? 'disabled' : ''}>${icon('arrow-down')}<strong>${s.behind}</strong><span>Pull</span></button>
+          <button class="sync-chip outgoing ${s.ahead ? 'has-count' : ''} ${ui.operationKind === 'push' ? 'working' : ''}" data-action="push" aria-label="${s.ahead} commits ready to push" title="Push ${s.ahead} outgoing commit${s.ahead === 1 ? '' : 's'}" ${!hasUpstream || !s.ahead || ui.busy || ui.syncPhase === 'fetching' ? 'disabled' : ''}>${icon('arrow-up')}<strong>${s.ahead}</strong><span>Push</span></button>
         </div>
-        <span class="sync-freshness" title="${escapeHtml(ui.syncError || syncLabel)}">${ui.syncError ? icon('warning') : ''}${escapeHtml(syncLabel)}</span>
+        <span class="sync-freshness" aria-live="polite" title="${escapeHtml(ui.syncError || syncLabel)}">${ui.syncError ? icon('warning') : ''}${escapeHtml(syncLabel)}</span>
       </div>
     </header>
     <nav class="tabs" aria-label="Git views">
@@ -303,14 +343,14 @@ function renderGraphSvg(commit, laneWidth = 18, rowHeight = 52) {
   for (const incomingLane of commit.incomingLanes || []) {
     const from = graphPoint(incomingLane, laneWidth);
     const to = graphPoint(commit.lane, laneWidth);
-    lines.push(`<path class="graph-edge incoming" d="M ${from} 0 C ${from} 10, ${to} 13, ${to} 25"/>`);
+    lines.push(`<path class="graph-edge incoming graph-lane-${incomingLane % 6}" d="M ${from} 0 C ${from} 10, ${to} 13, ${to} 25"/>`);
   }
   for (const parentLane of commit.parentLanes || []) {
     const from = graphPoint(commit.lane, laneWidth);
     const to = graphPoint(parentLane, laneWidth);
-    lines.push(`<path class="graph-edge outgoing" d="M ${from} 25 C ${from} 35, ${to} 38, ${to} ${rowHeight}"/>`);
+    lines.push(`<path class="graph-edge outgoing graph-lane-${parentLane % 6}" d="M ${from} 25 C ${from} 35, ${to} 38, ${to} ${rowHeight}"/>`);
   }
-  lines.push(`<circle class="graph-node ${commit.parents?.length > 1 ? 'merge' : ''}" cx="${graphPoint(commit.lane, laneWidth)}" cy="25" r="5"/>`);
+  lines.push(`<circle class="graph-node graph-lane-${commit.lane % 6} ${commit.parents?.length > 1 ? 'merge' : ''}" cx="${graphPoint(commit.lane, laneWidth)}" cy="25" r="5"/>`);
   return `<svg class="graph-svg" viewBox="0 0 ${graphWidth} ${rowHeight}" preserveAspectRatio="none" aria-hidden="true">${lines.join('')}</svg>`;
 }
 
@@ -325,6 +365,7 @@ function renderCommitDetails(s) {
     <div class="commit-detail-meta"><span>${escapeHtml(commit.author)} · ${relativeTime(commit.date)}</span><code>${escapeHtml(commit.hash)}</code></div>
     <div class="commit-detail-refs">${commit.refs.map(renderRef).join('') || '<span class="detail-muted">No branch label</span>'}</div>
     ${ui.commitDetailsLoading && !details ? `<div class="detail-loading">${icon('loading', 'codicon-modifier-spin')} Loading changed files…</div>` : ''}
+    ${ui.commitDetailsError && !details ? `<div class="detail-error" role="alert">${icon('error')}<span>${escapeHtml(ui.commitDetailsError)}</span><button class="text-button" data-action="retry-commit">Retry</button></div>` : ''}
     ${details?.body && details.body !== details.subject ? `<p class="commit-body">${escapeHtml(details.body)}</p>` : ''}
     ${details?.parents?.length ? `<div class="detail-parents"><span>Parents</span>${details.parents.map((parent) => `<code>${escapeHtml(parent.slice(0, 8))}</code>`).join('')}</div>` : ''}
     ${details ? `<div class="commit-files"><span class="detail-kicker">CHANGED FILES <b>${details.files.length}</b></span>${files.length ? files.map((file) => `<button class="commit-file" data-commit-file="${escapeHtml(file.path)}" data-commit-kind="${escapeHtml(file.status)}" data-commit-original="${escapeHtml(file.originalPath || '')}" title="Open diff for ${escapeHtml(file.path)}"><span class="status ${file.status === 'D' ? 'deleted' : file.status === 'A' ? 'added' : 'modified'}">${escapeHtml(file.status)}</span><span>${escapeHtml(file.path)}</span>${icon('diff')}</button>`).join('') : '<span class="detail-muted">No file changes reported</span>'}</div>` : ''}
@@ -334,11 +375,14 @@ function renderCommitDetails(s) {
 function renderGraph(s) {
   if (!s.commits.length) return '<div class="inline-empty">No commits yet</div>';
   const query = ui.graphQuery.trim().toLowerCase();
-  const commits = s.commits.filter((commit) => !query || [commit.subject, commit.author, commit.hash, commit.shortHash, ...(commit.refs || []).map((ref) => ref.name)].join(' ').toLowerCase().includes(query));
+  const commits = graphCommits();
   const laneCount = Math.max(1, Math.max(...s.commits.flatMap((commit) => [commit.lane, ...(commit.incomingLanes || []), ...(commit.parentLanes || [])])) + 1);
+  const focusHash = ui.focusedCommitHash && commits.some((commit) => commit.hash === ui.focusedCommitHash)
+    ? ui.focusedCommitHash
+    : commits[0]?.hash;
   return `<div class="graph-view">
     <div class="graph-toolbar"><div><span class="section-kicker">HISTORY</span><span class="graph-count">${query ? `${commits.length} of ` : ''}${s.commits.length} commits</span></div><label class="graph-search">${icon('search')}<input id="graph-search" aria-label="Filter commit history" placeholder="Filter commits…" value="${escapeHtml(ui.graphQuery)}"></label></div>
-    <div class="graph-list" role="list" style="--lane-count:${laneCount}">${commits.length ? commits.map((commit, index) => `<article class="graph-row ${commit.parents.length > 1 ? 'merge-row' : ''} ${ui.selectedCommitHash === commit.hash ? 'selected' : ''}" data-commit="${escapeHtml(commit.hash)}" data-hash="${escapeHtml(commit.hash)}" role="listitem" tabindex="0" style="--delay:${Math.min(index * 12, 180)}ms">
+    <div class="graph-list" role="listbox" aria-label="Commit history" style="--lane-count:${laneCount}">${commits.length ? commits.map((commit, index) => `<article class="graph-row ${commit.parents.length > 1 ? 'merge-row' : ''} ${ui.selectedCommitHash === commit.hash ? 'selected' : ''}" data-commit="${escapeHtml(commit.hash)}" data-hash="${escapeHtml(commit.hash)}" role="option" aria-selected="${ui.selectedCommitHash === commit.hash}" tabindex="${focusHash === commit.hash ? '0' : '-1'}" style="--delay:${Math.min(index * 12, 180)}ms">
       <div class="graph-canvas" style="--lane-count:${laneCount}">${renderGraphSvg(commit)}</div><div class="graph-commit"><strong>${escapeHtml(commit.subject)}</strong><span>${escapeHtml(commit.author)} · ${relativeTime(commit.date)}</span></div><div class="graph-ref-stack">${(commit.refs || []).slice(0, 2).map(renderRef).join('')}</div><code>${escapeHtml(commit.shortHash)}</code>
     </article>`).join('') : '<div class="inline-empty">No matching commits</div>'}</div>
     ${renderCommitDetails(s)}
@@ -370,20 +414,21 @@ function bind() {
   });
   once('[data-tab]', 'click', (event) => { ui.tab = event.currentTarget.dataset.tab; persist(); render(); });
   once('[data-action]', 'click', (event) => handleAction(event.currentTarget.dataset.action));
-  once('[data-commit]', 'click', (event) => {
-    const hash = event.currentTarget.dataset.commit;
-    if (!hash) return;
-    ui.selectedCommitHash = hash;
-    ui.commitDetails = undefined;
-    ui.commitDetailsLoading = true;
-    persist();
-    render();
-    post('commitDetails', { hash });
-  });
+  once('[data-commit]', 'click', (event) => selectCommit(event.currentTarget.dataset.commit));
   once('[data-commit]', 'keydown', (event) => {
-    if (!['Enter', ' '].includes(event.key)) return;
+    if (['Enter', ' '].includes(event.key)) {
+      event.preventDefault();
+      event.currentTarget.click();
+      return;
+    }
+    if (!['ArrowDown', 'ArrowUp', 'Home', 'End'].includes(event.key)) return;
+    const rows = [...app.querySelectorAll('[data-commit]')];
+    if (!rows.length) return;
     event.preventDefault();
-    event.currentTarget.click();
+    const current = rows.indexOf(event.currentTarget);
+    const next = event.key === 'Home' ? 0 : event.key === 'End' ? rows.length - 1 : current + (event.key === 'ArrowDown' ? 1 : -1);
+    const target = rows[Math.max(0, Math.min(rows.length - 1, next))];
+    if (target && target !== event.currentTarget) selectCommit(target.dataset.commit, { focus: true, immediate: false });
   });
   once('[data-commit-file]', 'click', (event) => {
     const button = event.currentTarget;
@@ -571,7 +616,7 @@ function bind() {
 
 function handleAction(action) {
   if (action === 'refresh') post('refresh');
-  if ((action === 'fetch' || action === 'pull' || action === 'push') && !ui.busy) post(action);
+  if ((action === 'fetch' || action === 'pull' || action === 'push') && !ui.busy && ui.syncPhase !== 'fetching') post(action);
   if (action === 'branches') {
     ui.branchOpen = !ui.branchOpen;
     if (!ui.branchOpen) ui.branchQuery = '';
@@ -584,12 +629,16 @@ function handleAction(action) {
   }
   if (action === 'commit') commit();
   if (action === 'close-commit') {
+    clearTimeout(commitDetailTimer);
     ui.selectedCommitHash = undefined;
+    ui.focusedCommitHash = undefined;
     ui.commitDetails = undefined;
+    ui.commitDetailsError = undefined;
     ui.commitDetailsLoading = false;
     persist();
     render();
   }
+  if (action === 'retry-commit' && ui.selectedCommitHash) selectCommit(ui.selectedCommitHash);
 }
 
 function commit() {
@@ -622,10 +671,14 @@ window.addEventListener('message', (event) => {
     const fingerprint = JSON.stringify(message.payload);
     if (fingerprint === lastSnapshot) return;
     lastSnapshot = fingerprint;
+    ui.emptyMessage = undefined;
     ui.snapshot = message.payload;
     if (ui.selectedCommitHash && !message.payload.commits.some((commit) => commit.hash === ui.selectedCommitHash)) {
+      clearTimeout(commitDetailTimer);
       ui.selectedCommitHash = undefined;
+      ui.focusedCommitHash = undefined;
       ui.commitDetails = undefined;
+      ui.commitDetailsError = undefined;
       ui.commitDetailsLoading = false;
     }
     const valid = new Set(message.payload.changes.map((change) => change.path));
@@ -644,7 +697,7 @@ window.addEventListener('message', (event) => {
       ui.branchMotion = undefined;
     }
   }
-  if (message.type === 'empty') { ui.snapshot = undefined; lastSnapshot = ''; render(); }
+  if (message.type === 'empty') { ui.snapshot = undefined; ui.emptyMessage = message.message; lastSnapshot = ''; render(); }
   if (message.type === 'operation') {
     if (message.id && message.id < ui.operationId) return;
     if (message.id) ui.operationId = message.id;
@@ -669,7 +722,15 @@ window.addEventListener('message', (event) => {
   if (message.type === 'commitDetails') {
     if (message.payload?.hash !== ui.selectedCommitHash) return;
     ui.commitDetails = message.payload;
+    ui.commitDetailsError = undefined;
     ui.commitDetailsLoading = false;
+    render();
+  }
+  if (message.type === 'commitDetailsError') {
+    if (message.hash !== ui.selectedCommitHash) return;
+    ui.commitDetails = undefined;
+    ui.commitDetailsLoading = false;
+    ui.commitDetailsError = message.message || 'Unable to load commit details.';
     render();
   }
   if (message.type === 'notice') toast(message.message, message.phase || 'error');
@@ -687,8 +748,11 @@ document.addEventListener('keydown', (event) => {
   }
   if (ui.selectedCommitHash && !ui.branchOpen) {
     event.preventDefault();
+    clearTimeout(commitDetailTimer);
     ui.selectedCommitHash = undefined;
+    ui.focusedCommitHash = undefined;
     ui.commitDetails = undefined;
+    ui.commitDetailsError = undefined;
     ui.commitDetailsLoading = false;
     persist();
     render();

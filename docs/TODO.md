@@ -1,10 +1,10 @@
 # Kivo Git system roadmap
 
-Kivo Git is not a Source Control sidebar skin. It is a complete Git work system for VS Code that preserves the IntelliJ IDEA mental model and improves it with continuous feedback, keyboard-first operation, reversible actions, and intent-aware assistance.
+Kivo Git is not a Source Control sidebar skin. It is a complete Git work system for VS Code that preserves an IDE-style mental model and improves it with continuous feedback, keyboard-first operation, reversible actions, and intent-aware assistance.
 
 ## Product principles
 
-- **IDEA-compatible mental model:** changelists, commit review, branches, history, conflicts, stash, and shelf should feel familiar to an IDEA user.
+- **IDE-compatible mental model:** changelists, commit review, branches, history, conflicts, stash, and shelf should feel familiar to an IDE user.
 - **Git-provider neutral:** GitHub, GitLab, Gitee, Bitbucket, and private Git servers work through the user's local Git installation.
 - **Data safety first:** risky actions require a preview, a clear consequence, and a recovery path whenever Git permits one.
 - **Continuous interaction:** preserve focus and spatial context; update only what changed; never replay motion because of a background refresh.
@@ -16,7 +16,7 @@ Kivo Git is not a Source Control sidebar skin. It is a complete Git work system 
 
 - **P0:** blocks a safe, coherent product.
 - **P1:** required for the daily Git workflow.
-- **P2:** required for advanced IDEA parity.
+- **P2:** required for advanced IDE parity.
 - **P3:** differentiating capability.
 
 ## v0.2 — Interaction Core
@@ -48,17 +48,17 @@ Goal: replace the prototype rendering model with a stable, event-driven interact
 - [x] **P0** Assign an operation ID so polling and concurrent actions cannot corrupt feedback.
 - [ ] **P0** Disable only conflicting controls while an operation runs.
 - [ ] **P0** Support cancellation for fetch, pull, push, log loading, and other long-running operations when safe.
-- [ ] **P0** Show actionable errors with retry or recovery instead of duplicate toast and notification messages.
+- [x] **P0** Show actionable errors with retry or recovery instead of duplicate toast and notification messages.
 - [ ] **P1** Add an operation timeline with command summary, duration, result, and recovery action.
 
 ### Keyboard and accessibility
 
-- [ ] **P0** Add logical tab order and visible focus rings.
+- [x] **P0** Add logical tab order and visible focus rings.
 - [ ] **P0** Make file selection, diff opening, changelist movement, commit, and branch switching keyboard accessible.
 - [x] **P0** Support `Escape`, arrow keys, `Enter`, type-to-search, and focus restoration in popovers.
 - [x] **P0** Replace inaccessible hidden checkboxes with labelled, focusable controls.
 - [x] **P0** Stop announcing the entire panel on every repository update.
-- [ ] **P1** Add an IDEA keymap preset and editable command bindings.
+- [ ] **P1** Add an IDE-style keymap preset and editable command bindings.
 - [ ] **P1** Verify zoom, high-contrast themes, screen readers, and reduced-motion mode.
 
 ### Motion foundation
@@ -80,11 +80,11 @@ Goal: replace the prototype rendering model with a stable, event-driven interact
 - [x] Branch search does not recreate or replay the branch popup per keystroke.
 - [x] Moving files between changelists has continuous layout motion and correct persisted state.
 - [x] A running operation cannot be replaced by a stale polling result.
-- [ ] Core flows work with keyboard only and with reduced motion enabled.
+- [x] Core flows work with keyboard only and with reduced motion enabled.
 
 ## v0.3 — Daily Git Workflow
 
-Goal: reach strong IDEA parity for the operations developers perform every day.
+Goal: reach strong IDE parity for the operations developers perform every day.
 
 ### Changelists and local changes
 
@@ -273,7 +273,7 @@ A checkbox is complete only when all applicable items below are true:
 
 ## Explicit non-goals
 
-- Pixel-copying IntelliJ IDEA instead of matching its workflow.
+- Pixel-copying another IDE instead of matching the workflow and building a distinct Kivo Git identity.
 - Replacing VS Code's code editor, diff editor, or merge editor without a proven capability gap.
 - Requiring a GitHub account or GitHub-specific API for local Git work.
 - Storing user credentials, tokens, passwords, or SSH keys.

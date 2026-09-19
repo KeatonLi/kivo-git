@@ -141,7 +141,11 @@ export class IdeaGitViewProvider implements vscode.WebviewViewProvider, vscode.T
       const client = await this.getClient();
       switch (message.type) {
         case 'commitDetails':
-          await this.view?.webview.postMessage({ type: 'commitDetails', payload: await client.commitDetails(message.hash) });
+          try {
+            await this.view?.webview.postMessage({ type: 'commitDetails', payload: await client.commitDetails(message.hash) });
+          } catch (error) {
+            await this.view?.webview.postMessage({ type: 'commitDetailsError', hash: message.hash, message: this.errorText(error) });
+          }
           return;
         case 'openDiff':
           await this.openDiff(message.path, message.originalPath, message.kind, message.preview);
@@ -205,13 +209,15 @@ export class IdeaGitViewProvider implements vscode.WebviewViewProvider, vscode.T
   }
 
   private async operation(kind: OperationKind, label: string, action: () => Promise<void>, success: string, clearsCommit = false): Promise<void> {
-    if (this.autoFetchPromise) await this.autoFetchPromise;
     if (this.operationRunning) throw new Error('Another Git operation is already running.');
     this.operationRunning = true;
     const id = ++this.operationId;
-    this.coordinator.beginWrite();
+    let writeStarted = false;
     await this.view?.webview.postMessage({ type: 'operation', id, kind, phase: 'loading', message: label });
     try {
+      if (this.autoFetchPromise) await this.autoFetchPromise;
+      this.coordinator.beginWrite();
+      writeStarted = true;
       await vscode.window.withProgress({ location: vscode.ProgressLocation.SourceControl, title: `${IdeaGitViewProvider.productName}: ${label}` }, action);
       if (kind === 'fetch' || kind === 'pull' || kind === 'push') await this.setSyncState('idle', Date.now());
       await this.view?.webview.postMessage({ type: 'operation', id, kind, phase: 'success', message: success, clearsCommit });
@@ -221,7 +227,7 @@ export class IdeaGitViewProvider implements vscode.WebviewViewProvider, vscode.T
       await this.view?.webview.postMessage({ type: 'operation', id, kind, phase: 'error', message: this.errorText(error) });
     } finally {
       this.operationRunning = false;
-      this.coordinator.endWrite();
+      if (writeStarted) this.coordinator.endWrite();
     }
   }
 

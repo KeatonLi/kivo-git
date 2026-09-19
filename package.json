@@ -7,7 +7,7 @@
   "license": "MIT",
   "repository": {
     "type": "git",
-    "url": "https://github.com/KeatonLi/vscode-idea-git.git"
+    "url": "https://github.com/KeatonLi/kivo-git.git"
   },
   "engines": {
     "vscode": "^1.95.0"
@@ -18,9 +18,10 @@
   ],
   "keywords": [
     "git",
-    "intellij",
-    "idea",
     "changelist",
+    "history",
+    "graph",
+    "workflow",
     "source-control"
   ],
   "activationEvents": [

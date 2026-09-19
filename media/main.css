@@ -155,10 +155,18 @@ button:disabled { cursor: default !important; }
 .graph-canvas { position: relative; width: calc(var(--lane-count) * 18px + 10px); height: 52px; }
 .graph-svg { position: absolute; inset: 0; width: 100%; height: 100%; overflow: visible; }
 .graph-edge { fill: none; stroke: color-mix(in srgb, var(--accent) 56%, var(--vscode-panel-border)); stroke-width: 1.5; vector-effect: non-scaling-stroke; stroke-linecap: round; }
-.graph-edge.incoming { stroke: color-mix(in srgb, var(--accent) 42%, var(--muted)); }
-.graph-edge.outgoing { stroke: color-mix(in srgb, var(--accent) 62%, var(--vscode-panel-border)); }
+.graph-edge.incoming { stroke: color-mix(in srgb, var(--lane-color, var(--accent)) 52%, var(--muted)); }
+.graph-edge.outgoing { stroke: color-mix(in srgb, var(--lane-color, var(--accent)) 72%, var(--vscode-panel-border)); }
+.graph-lane-0 { --lane-color: var(--accent); }
+.graph-lane-1 { --lane-color: var(--vscode-textLink-foreground); }
+.graph-lane-2 { --lane-color: var(--success); }
+.graph-lane-3 { --lane-color: var(--warning); }
+.graph-lane-4 { --lane-color: #a78bfa; }
+.graph-lane-5 { --lane-color: #f472b6; }
 .graph-node { fill: var(--vscode-sideBar-background); stroke: var(--accent); stroke-width: 2; vector-effect: non-scaling-stroke; }
+.graph-node.graph-lane-1, .graph-node.graph-lane-2, .graph-node.graph-lane-3, .graph-node.graph-lane-4, .graph-node.graph-lane-5 { stroke: var(--lane-color); }
 .graph-node.merge { fill: var(--accent); stroke: var(--vscode-sideBar-background); stroke-width: 3; }
+.graph-node.merge.graph-lane-1, .graph-node.merge.graph-lane-2, .graph-node.merge.graph-lane-3, .graph-node.merge.graph-lane-4, .graph-node.merge.graph-lane-5 { fill: var(--lane-color); }
 .graph-commit { min-width: 0; display: flex; flex-direction: column; gap: 3px; }
 .graph-commit strong { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-weight: 560; }
 .graph-commit span, .graph-row > code { color: var(--muted); font-size: 10px; }
@@ -177,6 +185,9 @@ button:disabled { cursor: default !important; }
 .commit-detail-meta code { overflow: hidden; text-overflow: ellipsis; color: var(--muted); font-size: 9px; }
 .commit-detail-refs { display: flex; flex-wrap: wrap; gap: 3px; margin-top: 7px; }
 .detail-loading, .detail-muted { display: inline-flex; align-items: center; gap: 5px; margin-top: 8px; color: var(--muted); font-size: 10px; }
+.detail-error { display: flex; align-items: center; gap: 6px; margin-top: 8px; color: var(--danger); font-size: 10px; }
+.detail-error > span { min-width: 0; flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.detail-error .text-button { flex: 0 0 auto; padding: 2px 4px; color: var(--vscode-textLink-foreground); }
 .commit-body { max-height: 66px; overflow: auto; margin: 8px 0; padding: 7px 8px; border-left: 2px solid color-mix(in srgb, var(--accent) 45%, transparent); color: var(--muted); white-space: pre-wrap; font-size: 10px; }
 .detail-parents { display: flex; align-items: center; flex-wrap: wrap; gap: 4px; margin-top: 8px; color: var(--muted); font-size: 9px; }
 .detail-parents code { padding: 2px 4px; border-radius: 4px; background: var(--vscode-badge-background); color: var(--vscode-badge-foreground); }

@@ -2,11 +2,11 @@
 
 ## Product promise
 
-Kivo Git brings the IntelliJ IDEA Git workflow to VS Code. It copies the mental model—not every pixel—and keeps native VS Code editors for code, diff, and merge work.
+Kivo Git brings an IDE-style Git workflow to VS Code. It keeps the useful mental model—without copying another product's pixels—and keeps native VS Code editors for code, diff, and merge work.
 
 ## Interaction model
 
-| IDEA concept | Kivo Git behavior |
+| IDE workflow concept | Kivo Git behavior |
 | --- | --- |
 | Commit tool window | Persistent sidebar with changelists, selection, message, and commit action |
 | Local changelists | Named groups stored per repository under `.git/ideagit/` |
@@ -17,13 +17,13 @@ Kivo Git brings the IntelliJ IDEA Git workflow to VS Code. It copies the mental 
 
 ## Visual language
 
-Kivo Git uses VS Code Codicons, host theme tokens, compact spacing, quiet surfaces, and a single accent color for focus and active intent. Incoming, outgoing, active, warning, and destructive states remain visually distinct without turning the sidebar into a dense toolbar.
+Kivo Git uses VS Code Codicons, host theme tokens, compact spacing, quiet surfaces, and a restrained lane palette for focus and active intent. Incoming, outgoing, active, warning, and destructive states remain visually distinct without turning the sidebar into a dense toolbar.
 
 The repository header exposes upstream freshness and separate Pull/Push commit counts. A non-interactive background fetch refreshes remote refs while the view is visible; failures stay local to the sync status instead of interrupting editing with notifications.
 
 ## Motion language
 
-Motion communicates state. The default timings are 80 ms for press feedback, 120 ms for hover, 160–190 ms for structural changes, and 230–260 ms for operation results. Every animation respects `prefers-reduced-motion`.
+Motion communicates state. The default timings are 80 ms for press feedback, 120 ms for hover, 160–190 ms for structural changes, and 230–260 ms for operation results. Every animation respects `prefers-reduced-motion`; keyboard focus and loading states remain clear when motion is disabled.
 
 ## Architecture
 
