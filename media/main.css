@@ -30,11 +30,6 @@ button:disabled { cursor: default !important; }
 .kivo-icon.sync-symbol { width: 12px; height: 12px; }
 #app { height: 100vh; display: flex; flex-direction: column; position: relative; }
 
-.repo-shell { flex: 0 0 auto; padding-top: 8px; border-bottom: 1px solid var(--vscode-panel-border); background: linear-gradient(180deg, var(--surface-soft), transparent); }
-.repo-header { display: grid; grid-template-columns: minmax(64px,.65fr) minmax(100px,1fr) 28px; align-items: center; gap: 7px; padding: 0 10px 7px; }
-.repo-identity { min-width: 0; display: flex; flex-direction: column; }
-.repo-name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 11px; font-weight: 650; }
-.repo-caption { margin-top: -1px; color: var(--muted); font-size: 9px; text-transform: uppercase; letter-spacing: .45px; }
 .branch-pill { min-width: 0; height: 30px; display: flex; align-items: center; gap: 6px; padding: 0 8px; border: 1px solid var(--border-subtle); border-radius: var(--radius-md); background: var(--vscode-input-background); cursor: pointer; transition: background var(--motion-control), border-color var(--motion-control), transform var(--motion-fast), box-shadow var(--motion-control); }
 .branch-pill:hover { border-color: color-mix(in srgb, var(--accent) 58%, transparent); background: var(--surface-accent); }
 .branch-pill:focus-visible { outline: none; border-color: var(--accent); box-shadow: 0 0 0 1px color-mix(in srgb, var(--accent) 35%, transparent); }
@@ -47,10 +42,8 @@ button:disabled { cursor: default !important; }
 .icon-button:focus-visible { outline: 1px solid var(--accent); outline-offset: 1px; }
 .icon-button:disabled { opacity: .55; }
 
-.sync-summary { display: grid; grid-template-columns: minmax(0,1fr) auto; align-items: center; gap: 5px 8px; padding: 0 10px 8px; }
 .upstream { min-width: 0; display: flex; align-items: center; gap: 5px; color: var(--muted); font-size: 10px; }
 .upstream > span:last-child { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.sync-counts { display: flex; gap: 4px; }
 .sync-action-wrap { position: relative; }
 .sync-chip { height: 24px; display: inline-flex; align-items: center; gap: 4px; padding: 0 7px; border: 1px solid transparent; border-radius: 12px; background: transparent; color: var(--muted); cursor: pointer; transition: background var(--motion-control), border-color var(--motion-control), color var(--motion-control), transform var(--motion-fast); }
 .sync-chip span { font-size: 9px; }
@@ -70,9 +63,7 @@ button:disabled { cursor: default !important; }
 .sync-menu button strong { font-size: 11px; font-weight: 600; }
 .sync-menu button small { color: var(--muted); font-size: 9px; }
 .sync-freshness { grid-column: 1 / -1; display: flex; align-items: center; gap: 4px; min-width: 0; color: var(--muted); font-size: 9px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-.sync-summary.has-error .sync-freshness { color: var(--warning); }
 
-.tabs { flex: 0 0 auto; display: flex; gap: 18px; padding: 0 12px; border-bottom: 1px solid var(--vscode-panel-border); }
 .tab { position: relative; display: flex; align-items: center; gap: 5px; padding: 8px 1px 9px; background: transparent; color: var(--muted); cursor: pointer; }
 .tab span { margin-left: 1px; font-size: 10px; }
 .tab.active { color: var(--vscode-foreground); }
@@ -232,6 +223,65 @@ button:disabled { cursor: default !important; }
 .commit-file .status { width: 13px; font-size: 9px; }
 .commit-file .codicon { color: var(--muted); }
 
+/* Git Tool Window: use the same hierarchy as an IDE Log without copying its pixels. */
+.tool-window-toolbar { flex: 0 0 auto; min-width: 0; min-height: 34px; display: flex; align-items: center; gap: 7px; padding: 4px 9px; border-bottom: 1px solid var(--vscode-panel-border); background: color-mix(in srgb, var(--surface-base) 96%, var(--vscode-foreground) 4%); }
+.repository-context { min-width: 0; display: inline-flex; align-items: center; gap: 5px; color: var(--muted); font-size: 10px; }
+.repository-context > span { max-width: 180px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--vscode-foreground); font-weight: 600; }
+.tool-window-toolbar .branch-pill { width: auto; max-width: 210px; height: 25px; padding: 0 6px; border-color: transparent; border-radius: 4px; background: transparent; }
+.tool-window-toolbar .branch-pill:hover { border-color: var(--border-subtle); background: var(--vscode-toolbar-hoverBackground); }
+.toolbar-divider { width: 1px; height: 17px; background: var(--vscode-panel-border); }
+.tool-window-toolbar .upstream { max-width: 210px; }
+.toolbar-actions { display: flex; align-items: center; gap: 1px; }
+.tool-window-toolbar .icon-button { width: 25px; height: 25px; }
+.tool-window-toolbar .sync-chip { height: 25px; border-radius: 4px; }
+.toolbar-spacer { min-width: 0; flex: 1; }
+.tool-window-toolbar .sync-freshness { grid-column: auto; max-width: 170px; padding: 0; }
+.tool-window-toolbar.has-error .sync-freshness { color: var(--warning); }
+.tool-tabs { flex: 0 0 auto; display: flex; gap: 17px; padding: 0 12px; border-bottom: 1px solid var(--vscode-panel-border); background: var(--surface-base); }
+.tool-tabs .tab { min-height: 31px; padding-top: 7px; padding-bottom: 8px; font-size: 11px; }
+
+.log-view { min-height: 0; }
+.log-filter-bar { flex: 0 0 auto; min-width: 0; padding: 5px 8px; border-bottom: 1px solid var(--vscode-panel-border); background: color-mix(in srgb, var(--surface-base) 97%, var(--vscode-foreground) 3%); }
+.log-filter-bar .graph-toolbar-head { min-width: 0; display: flex; align-items: center; gap: 8px; }
+.log-result-count { flex: 0 0 auto; padding-right: 8px; border-right: 1px solid var(--vscode-panel-border); color: var(--muted); font-size: 10px; white-space: nowrap; }
+.log-filter-bar .graph-filters { flex: 0 1 auto; }
+.log-filter-bar .graph-filter { height: 24px; border-radius: 3px; }
+.log-filter-bar .graph-search { height: 24px; flex-basis: 188px; border-radius: 3px; }
+.log-workspace { flex: 1; min-height: 0; display: grid; grid-template-columns: minmax(150px, 180px) minmax(340px, 1fr) minmax(235px, 304px); background: var(--surface-base); }
+.log-branch-pane { min-width: 0; overflow: auto; padding: 5px; border-right: 1px solid var(--vscode-panel-border); background: color-mix(in srgb, var(--surface-base) 98%, var(--vscode-foreground) 2%); }
+.log-branch-heading { display: flex; justify-content: space-between; align-items: center; padding: 3px 6px 5px; color: var(--muted); font-size: 9px; font-weight: 700; letter-spacing: .5px; text-transform: uppercase; }
+.log-branch-heading > span:last-child { padding: 0 4px; border-radius: 8px; background: var(--vscode-badge-background); color: var(--vscode-badge-foreground); font-size: 8px; letter-spacing: 0; }
+.log-branch-group { margin-top: 7px; }
+.log-branch-group h3 { margin: 0 6px 3px; color: var(--muted); font-size: 8px; font-weight: 700; letter-spacing: .55px; }
+.log-branch-row { width: 100%; min-width: 0; display: flex; align-items: center; gap: 6px; padding: 4px 6px; border-radius: 3px; background: transparent; color: var(--vscode-foreground); text-align: left; cursor: pointer; }
+.log-branch-row:hover, .log-branch-row:focus-visible { outline: none; background: var(--vscode-list-hoverBackground); }
+.log-branch-row.selected { background: var(--vscode-list-activeSelectionBackground, color-mix(in srgb, var(--accent) 16%, transparent)); color: var(--vscode-list-activeSelectionForeground, var(--vscode-foreground)); }
+.log-branch-row.current:not(.selected) { color: var(--accent); }
+.log-branch-row > span { min-width: 0; flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 10px; }
+.log-branch-row small { color: inherit; opacity: .75; font-size: 8px; font-weight: 650; }
+.log-branch-row.all { margin-bottom: 3px; }
+.log-history-pane { min-width: 0; min-height: 0; display: flex; flex-direction: column; }
+.log-history-pane .log-column-header { flex: 0 0 auto; }
+.log-history-pane .graph-list { min-height: 0; }
+.log-workspace .commit-detail { min-width: 0; max-height: none; overflow: auto; padding: 10px 11px 12px; border-top: 0; border-left: 1px solid var(--vscode-panel-border); background: color-mix(in srgb, var(--surface-base) 96%, var(--accent) 4%); animation: detail-in 160ms var(--ease); }
+.commit-detail-empty { display: flex; align-items: center; justify-content: center; flex-direction: column; gap: 5px; color: var(--muted); text-align: center; }
+.commit-detail-empty strong { color: var(--vscode-foreground); font-size: 11px; }
+.commit-detail-empty > span { max-width: 190px; font-size: 10px; }
+.detail-empty-mark { display: grid; width: 27px; height: 27px; place-items: center; border-radius: 7px; background: color-mix(in srgb, var(--accent) 12%, transparent); color: var(--accent); font-size: 14px; }
+
+@media (max-width: 1040px) {
+  .log-workspace { grid-template-columns: minmax(142px, 166px) minmax(0, 1fr); grid-template-rows: minmax(135px, 1fr) minmax(116px, 34%); }
+  .log-workspace .commit-detail { grid-column: 1 / -1; border-top: 1px solid var(--vscode-panel-border); border-left: 0; }
+}
+
+@media (max-width: 700px) {
+  .repository-context > span { max-width: 112px; }
+  .tool-window-toolbar .upstream, .tool-window-toolbar .sync-freshness { display: none; }
+  .log-workspace { grid-template-columns: minmax(0, 1fr); }
+  .log-branch-pane { display: none; }
+  .log-workspace .commit-detail { grid-column: auto; }
+}
+
 .branch-overlay { position: fixed; inset: 0; z-index: 10; pointer-events: none; }
 .scrim { position: absolute; inset: 0; background: rgba(0,0,0,.25); opacity: 0; transition: opacity 140ms ease; backdrop-filter: blur(1px); }
 .branch-popup { position: absolute; z-index: 1; left: 7px; right: 7px; top: 7px; max-height: calc(100vh - 14px); display: flex; flex-direction: column; border: 1px solid var(--vscode-widget-border, var(--border-subtle)); border-radius: var(--radius-lg); background: var(--vscode-editorWidget-background); box-shadow: var(--shadow-popover); opacity: 0; transform: translateY(-5px) scale(.985); transform-origin: top center; transition: opacity 170ms ease, transform 190ms var(--ease); overflow: hidden; }
@@ -277,11 +327,7 @@ button:disabled { cursor: default !important; }
 @keyframes float { 50% { transform: translateY(-4px); } }
 
 @media (min-width: 660px) {
-  .repo-shell { display: flex; align-items: center; padding: 0 10px; }
-  .repo-header { min-width: 300px; flex: 1; grid-template-columns: minmax(120px,.7fr) minmax(160px,1fr) 28px; padding: 6px 0; }
-  .sync-summary { min-width: 310px; display: flex; align-items: center; gap: 8px; margin-left: 12px; padding: 0 0 0 12px; border-left: 1px solid var(--vscode-panel-border); }
-  .sync-freshness { grid-column: auto; margin-left: auto; }
-  .tabs { padding: 0 14px; }
+  .tool-tabs { padding: 0 14px; }
   .tab { padding-top: 7px; padding-bottom: 8px; }
 }
 
@@ -294,8 +340,6 @@ button:disabled { cursor: default !important; }
 }
 
 @media (max-width: 280px) {
-  .repo-header { grid-template-columns: minmax(0,1fr) 28px; }
-  .repo-identity { display: none; }
   .sync-chip span { display: none; }
   .active-label { display: none; }
   .log-column-header, .graph-row { grid-template-columns: var(--graph-width) minmax(190px, 1fr); }

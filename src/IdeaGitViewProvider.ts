@@ -38,6 +38,9 @@ export class IdeaGitViewProvider implements vscode.WebviewViewProvider, vscode.T
   private syncError?: string;
   private syncGeneration = 0;
   private commitLimit = 80;
+  /** A command may focus the Panel before the Webview has finished loading. */
+  private requestedTab?: 'changes' | 'log';
+  private webviewReady = false;
   private readonly coordinator = new SnapshotCoordinator(
     () => this.getClient().then((client) => client.snapshot(this.commitLimit)),
     async (snapshot) => { await this.view?.webview.postMessage({ type: 'snapshot', payload: snapshot }); },
@@ -72,6 +75,7 @@ export class IdeaGitViewProvider implements vscode.WebviewViewProvider, vscode.T
 
   resolveWebviewView(view: vscode.WebviewView): void {
     this.view = view;
+    this.webviewReady = false;
     view.webview.options = {
       enableScripts: true,
       localResourceRoots: [vscode.Uri.joinPath(this.context.extensionUri, 'media')]
@@ -97,6 +101,15 @@ export class IdeaGitViewProvider implements vscode.WebviewViewProvider, vscode.T
     if (!this.view || !this.view.visible) return;
     this.coordinator.request();
     if (!silent && !vscode.workspace.workspaceFolders?.length) void vscode.window.showInformationMessage(`${IdeaGitViewProvider.productName}: Open a Git repository to start.`);
+  }
+
+  async showLog(): Promise<void> {
+    this.requestedTab = 'log';
+    await vscode.commands.executeCommand('ideaGit.panel.focus');
+    if (this.webviewReady) {
+      await this.view?.webview.postMessage({ type: 'showTab', tab: 'log' });
+      this.requestedTab = undefined;
+    }
   }
 
   private async showEmpty(error: unknown): Promise<void> {
@@ -133,6 +146,11 @@ export class IdeaGitViewProvider implements vscode.WebviewViewProvider, vscode.T
 
   private async handle(message: WebviewMessage): Promise<void> {
     if (message.type === 'ready') {
+      this.webviewReady = true;
+      if (this.requestedTab) {
+        await this.view?.webview.postMessage({ type: 'showTab', tab: this.requestedTab });
+        this.requestedTab = undefined;
+      }
       await this.setSyncState(this.autoFetchPromise ? 'fetching' : this.syncError ? 'error' : 'idle', undefined, this.syncError);
       await this.refresh(true);
       return;

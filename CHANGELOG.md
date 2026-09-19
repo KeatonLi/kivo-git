@@ -2,6 +2,13 @@
 
 ## Unreleased
 
+## 0.3.0-beta.6 - 2026-09-19
+
+- Realigned the bottom Kivo Git surface with the familiar Git Tool Window hierarchy: `Local Changes` and `Log` are peer tabs, while the graph is only the first column inside Log.
+- Added `Kivo Git: Show Log`, which focuses the bottom Panel and opens Log directly instead of creating a separate Graph destination.
+- Rebuilt Log into a three-region workspace: branch navigator, commit graph/table, and selected-commit details; narrow Panels collapse gracefully.
+- Made branch filtering follow reachable commit history rather than matching only the commit carrying the branch label.
+
 ## 0.3.0-beta.5 - 2026-09-19
 
 - Moved Kivo Git from the left Activity Bar to VS Code’s bottom Panel, so Changes and Log have the width of a real Git tool window.

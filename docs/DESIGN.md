@@ -8,16 +8,16 @@ Kivo Git brings an IDE-style Git workflow to VS Code. It keeps the useful mental
 
 | IDE workflow concept | Kivo Git behavior |
 | --- | --- |
-| Commit tool window | Persistent bottom Panel with changelists, selection, message, and commit action |
+| Commit tool window | Persistent bottom Panel with `Local Changes` and `Log` as peer tabs |
 | Local changelists | Named groups stored per repository under `.git/ideagit/` |
 | Branch widget | One-click branch popup with local and remote branches plus ahead/behind state |
 | Changes diff | Single-click for a focused preview; double-click or Enter pins VS Code's native diff editor |
-| Git Log | Dense, table-oriented multi-lane commit DAG with branch refs, merge points, searchable commit details, and file diffs |
+| Git Log | A three-region workspace: branch navigator, dense table-oriented multi-lane commit DAG, and selected-commit details/file diffs |
 | Update/push | Direct actions in the repository header with progress and result feedback |
 
 ## Visual language
 
-Kivo Git uses VS Code Codicons, host theme tokens, compact spacing, quiet surfaces, and a restrained lane palette for focus and active intent. The bottom Panel is the primary workspace: it gives Changes and Log enough horizontal room for a genuine Git tool window while leaving the editor and Source Control sidebar unobstructed. Incoming, outgoing, active, warning, and destructive states remain visually distinct without turning the tool window into a dense toolbar.
+Kivo Git uses VS Code Codicons, host theme tokens, compact spacing, quiet surfaces, and a restrained lane palette for focus and active intent. The bottom Panel is the primary workspace: `Local Changes` and `Log` are the user-facing destinations, and Graph exists only as the first column of Log. This preserves the established IDE Git mental model while leaving the editor and Source Control sidebar unobstructed. Incoming, outgoing, active, warning, and destructive states remain visually distinct without turning the tool window into a dense toolbar.
 
 ### Brand mark
 
