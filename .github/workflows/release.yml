@@ -66,4 +66,4 @@ jobs:
             git push origin "$TAG"
           fi
           gh release create "$TAG" kivo-git-*.vsix kivo-git-*.vsix.sha256 \
-            --title "IdeaGit $TAG" --generate-notes $prerelease
+            --title "Kivo Git $TAG" --generate-notes $prerelease
