@@ -23,6 +23,36 @@ export interface CommitSummary {
   author: string;
   date: string;
   subject: string;
+  parents: string[];
+  refs: GitRef[];
+  lane: number;
+  incomingLanes: number[];
+  parentLanes: number[];
+}
+
+export type GitRefKind = 'local' | 'remote' | 'tag';
+
+export interface GitRef {
+  name: string;
+  kind: GitRefKind;
+  current?: boolean;
+}
+
+export interface CommitFile {
+  path: string;
+  status: string;
+  originalPath?: string;
+}
+
+export interface CommitDetails {
+  hash: string;
+  subject: string;
+  body: string;
+  author: string;
+  date: string;
+  parents: string[];
+  refs: GitRef[];
+  files: CommitFile[];
 }
 
 export interface ChangeList {

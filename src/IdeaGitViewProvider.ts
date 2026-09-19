@@ -5,7 +5,9 @@ import { SnapshotCoordinator } from './SnapshotCoordinator';
 
 type WebviewMessage =
   | { type: 'ready' | 'refresh' | 'fetch' | 'pull' | 'push' }
+  | { type: 'commitDetails'; hash: string }
   | { type: 'openDiff'; path: string; originalPath?: string; kind?: string; preview?: boolean }
+  | { type: 'openCommitDiff'; hash: string; path: string; originalPath?: string; kind?: string }
   | { type: 'commit'; message: string; paths: string[] }
   | { type: 'checkout'; branch: string; remote: boolean }
   | { type: 'createChangelist' }
@@ -18,6 +20,7 @@ type OperationKind = 'commit' | 'checkout' | 'changelist' | 'move' | 'fetch' | '
 export class IdeaGitViewProvider implements vscode.WebviewViewProvider, vscode.TextDocumentContentProvider, vscode.Disposable {
   static readonly viewType = 'ideaGit.panel';
   static readonly revisionScheme = 'ideagit';
+  static readonly productName = 'Kivo Git';
   private view?: vscode.WebviewView;
   private client?: GitClient;
   private refreshTimer?: NodeJS.Timeout;
@@ -80,13 +83,16 @@ export class IdeaGitViewProvider implements vscode.WebviewViewProvider, vscode.T
     const workspace = vscode.workspace.workspaceFolders?.[0];
     if (!workspace) return '';
     const client = await this.getClient();
-    return client.showHeadFile(uri.path.replace(/^\//, ''));
+    const revision = new URLSearchParams(uri.query).get('commit');
+    return revision
+      ? client.showFileAtRevision(revision, uri.path.replace(/^\//, ''))
+      : client.showHeadFile(uri.path.replace(/^\//, ''));
   }
 
   async refresh(silent = false): Promise<void> {
     if (!this.view || !this.view.visible) return;
     this.coordinator.request();
-    if (!silent && !vscode.workspace.workspaceFolders?.length) void vscode.window.showInformationMessage('IdeaGit: Open a Git repository to start.');
+    if (!silent && !vscode.workspace.workspaceFolders?.length) void vscode.window.showInformationMessage(`${IdeaGitViewProvider.productName}: Open a Git repository to start.`);
   }
 
   private async showEmpty(error: unknown): Promise<void> {
@@ -134,8 +140,14 @@ export class IdeaGitViewProvider implements vscode.WebviewViewProvider, vscode.T
     try {
       const client = await this.getClient();
       switch (message.type) {
+        case 'commitDetails':
+          await this.view?.webview.postMessage({ type: 'commitDetails', payload: await client.commitDetails(message.hash) });
+          return;
         case 'openDiff':
           await this.openDiff(message.path, message.originalPath, message.kind, message.preview);
+          return;
+        case 'openCommitDiff':
+          await this.openCommitDiff(client, message.hash, message.path, message.originalPath, message.kind);
           return;
         case 'commit':
           await this.operation('commit', 'Creating commit…', async () => client.commit(message.message, message.paths), 'Commit created', true);
@@ -170,7 +182,7 @@ export class IdeaGitViewProvider implements vscode.WebviewViewProvider, vscode.T
     } catch (error) {
       const detail = this.errorText(error);
       await this.view?.webview.postMessage({ type: 'notice', phase: 'error', message: detail });
-      void vscode.window.showErrorMessage(`IdeaGit: ${detail}`);
+      void vscode.window.showErrorMessage(`${IdeaGitViewProvider.productName}: ${detail}`);
     }
   }
 
@@ -200,7 +212,7 @@ export class IdeaGitViewProvider implements vscode.WebviewViewProvider, vscode.T
     this.coordinator.beginWrite();
     await this.view?.webview.postMessage({ type: 'operation', id, kind, phase: 'loading', message: label });
     try {
-      await vscode.window.withProgress({ location: vscode.ProgressLocation.SourceControl, title: `IdeaGit: ${label}` }, action);
+      await vscode.window.withProgress({ location: vscode.ProgressLocation.SourceControl, title: `${IdeaGitViewProvider.productName}: ${label}` }, action);
       if (kind === 'fetch' || kind === 'pull' || kind === 'push') await this.setSyncState('idle', Date.now());
       await this.view?.webview.postMessage({ type: 'operation', id, kind, phase: 'success', message: success, clearsCommit });
     } catch (error) {
@@ -221,6 +233,18 @@ export class IdeaGitViewProvider implements vscode.WebviewViewProvider, vscode.T
       ? vscode.Uri.from({ scheme: IdeaGitViewProvider.revisionScheme, path: `/${filePath}`, query: 'empty=1' })
       : vscode.Uri.file(path.join(workspace.uri.fsPath, filePath));
     await vscode.commands.executeCommand('vscode.diff', oldUri, currentUri, `${filePath} (HEAD ↔ Working Tree)`, { preview, preserveFocus: preview });
+  }
+
+  private async openCommitDiff(client: GitClient, hash: string, filePath: string, originalPath?: string, kind?: string): Promise<void> {
+    const details = await client.commitDetails(hash);
+    const parent = details.parents[0];
+    const oldUri = kind === 'A' || !parent
+      ? vscode.Uri.from({ scheme: IdeaGitViewProvider.revisionScheme, path: `/${originalPath ?? filePath}`, query: 'empty=1' })
+      : vscode.Uri.from({ scheme: IdeaGitViewProvider.revisionScheme, path: `/${originalPath ?? filePath}`, query: `commit=${encodeURIComponent(parent)}` });
+    const currentUri = kind === 'D'
+      ? vscode.Uri.from({ scheme: IdeaGitViewProvider.revisionScheme, path: `/${filePath}`, query: 'empty=1' })
+      : vscode.Uri.from({ scheme: IdeaGitViewProvider.revisionScheme, path: `/${filePath}`, query: `commit=${encodeURIComponent(hash)}` });
+    await vscode.commands.executeCommand('vscode.diff', oldUri, currentUri, `${filePath} (${hash.slice(0, 8)} · ${details.subject})`, { preview: false });
   }
 
   private configurePolling(): void {
@@ -286,7 +310,7 @@ export class IdeaGitViewProvider implements vscode.WebviewViewProvider, vscode.T
         <meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src ${webview.cspSource}; font-src ${webview.cspSource}; script-src 'nonce-${nonce}';">
         <link rel="stylesheet" href="${codiconUri}">
         <link rel="stylesheet" href="${cssUri}">
-        <title>IdeaGit</title>
+        <title>${IdeaGitViewProvider.productName}</title>
       </head>
       <body>
         <main id="app"></main>

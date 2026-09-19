@@ -1,23 +1,23 @@
-# IdeaGit product design
+# Kivo Git product design
 
 ## Product promise
 
-IdeaGit brings the IntelliJ IDEA Git workflow to VS Code. It copies the mental model—not every pixel—and keeps native VS Code editors for code, diff, and merge work.
+Kivo Git brings the IntelliJ IDEA Git workflow to VS Code. It copies the mental model—not every pixel—and keeps native VS Code editors for code, diff, and merge work.
 
 ## Interaction model
 
-| IDEA concept | IdeaGit behavior |
+| IDEA concept | Kivo Git behavior |
 | --- | --- |
 | Commit tool window | Persistent sidebar with changelists, selection, message, and commit action |
 | Local changelists | Named groups stored per repository under `.git/ideagit/` |
 | Branch widget | One-click branch popup with local and remote branches plus ahead/behind state |
 | Changes diff | Single-click for a focused preview; double-click or Enter pins VS Code's native diff editor |
-| Git log | Compact animated commit list; graph lanes and filters follow in milestone 2 |
+| Git Graph | Real multi-lane commit DAG with branch refs, merge points, searchable commit details, and file diffs |
 | Update/push | Direct actions in the repository header with progress and result feedback |
 
 ## Visual language
 
-IdeaGit uses VS Code Codicons, host theme tokens, compact spacing, quiet surfaces, and a single accent color for focus and active intent. Incoming, outgoing, active, warning, and destructive states remain visually distinct without turning the sidebar into a dense toolbar.
+Kivo Git uses VS Code Codicons, host theme tokens, compact spacing, quiet surfaces, and a single accent color for focus and active intent. Incoming, outgoing, active, warning, and destructive states remain visually distinct without turning the sidebar into a dense toolbar.
 
 The repository header exposes upstream freshness and separate Pull/Push commit counts. A non-interactive background fetch refreshes remote refs while the view is visible; failures stay local to the sync status instead of interrupting editing with notifications.
 
@@ -41,6 +41,6 @@ The extension never stores credentials or tokens. Fetch, pull, and push are dele
 ## Milestones
 
 1. **Foundation:** real status, changelists, selective commit, branch popup, native diff, fetch/pull/push.
-2. **Daily workflow:** graph log, branch operations, partial-hunk assignment, stash and shelf.
+2. **Daily workflow:** graph history, branch operations, partial-hunk assignment, stash and shelf.
 3. **Conflict workflow:** merge editor integration, rebase status, abort/continue actions.
 4. **Polish:** multi-root repositories, performance work, keyboard map, accessibility audit, marketplace release.

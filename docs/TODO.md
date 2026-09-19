@@ -1,6 +1,6 @@
-# IdeaGit system roadmap
+# Kivo Git system roadmap
 
-IdeaGit is not a Source Control sidebar skin. It is a complete Git work system for VS Code that preserves the IntelliJ IDEA mental model and improves it with continuous feedback, keyboard-first operation, reversible actions, and intent-aware assistance.
+Kivo Git is not a Source Control sidebar skin. It is a complete Git work system for VS Code that preserves the IntelliJ IDEA mental model and improves it with continuous feedback, keyboard-first operation, reversible actions, and intent-aware assistance.
 
 ## Product principles
 
@@ -162,10 +162,10 @@ Goal: provide one coherent workspace for changes, history, review, and operation
 
 ### Real Git graph and history
 
-- [ ] **P1** Parse and render a real multi-lane commit DAG.
-- [ ] **P1** Render local branches, remote branches, tags, HEAD, and upstream labels.
+- [x] **P1** Parse and render a real multi-lane commit DAG.
+- [x] **P1** Render local branches, remote branches, tags, HEAD, and upstream labels.
 - [ ] **P1** Add filters for branch, author, date, path, repository, and commit text.
-- [ ] **P1** Add commit details, changed files, and immediate diff preview.
+- [x] **P1** Add commit details, changed files, and immediate diff preview.
 - [ ] **P1** Add jump to hash/branch/tag and parent/child navigation.
 - [ ] **P1** Add context actions: checkout, new branch, tag, cherry-pick, revert, reset, and push up to commit.
 - [ ] **P2** Add file history, selection history, and rename tracking.
@@ -206,12 +206,12 @@ Goal: make complex Git operations safe and understandable inside VS Code.
 
 - [ ] **P2** Add reflog browsing and restore-from-reflog actions.
 - [ ] **P2** Add safe reset modes with a precise preview of affected commits and files.
-- [ ] **P2** Preserve recovery metadata for IdeaGit-initiated destructive operations.
+- [ ] **P2** Preserve recovery metadata for Kivo Git-initiated destructive operations.
 - [ ] **P2** Add diagnostics that copy commands and non-sensitive logs for support.
 
 ## v0.6 — Intent-Aware Git
 
-Goal: make IdeaGit meaningfully better than existing Git clients while keeping the user in control.
+Goal: make Kivo Git meaningfully better than existing Git clients while keeping the user in control.
 
 - [ ] **P3** Suggest changelist groups based on dependency, directory, issue, and edit context.
 - [ ] **P3** Detect mixed-purpose files and recommend hunk-level separation.

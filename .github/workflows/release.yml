@@ -43,14 +43,14 @@ jobs:
         run: npm run package
       - name: Create checksum
         if: steps.existing.outputs.found == 'false'
-        run: sha256sum idea-git-*.vsix > idea-git-${{ steps.version.outputs.tag }}.vsix.sha256
+        run: sha256sum kivo-git-*.vsix > kivo-git-${{ steps.version.outputs.tag }}.vsix.sha256
       - uses: actions/upload-artifact@v4
         if: steps.existing.outputs.found == 'false'
         with:
           name: idea-git-${{ steps.version.outputs.tag }}
           path: |
-            idea-git-*.vsix
-            idea-git-*.vsix.sha256
+            kivo-git-*.vsix
+            kivo-git-*.vsix.sha256
       - name: Publish GitHub Release
         if: steps.existing.outputs.found == 'false'
         env:
@@ -65,5 +65,5 @@ jobs:
             git tag -a "$TAG" -m "IdeaGit $TAG"
             git push origin "$TAG"
           fi
-          gh release create "$TAG" idea-git-*.vsix idea-git-*.vsix.sha256 \
+          gh release create "$TAG" kivo-git-*.vsix kivo-git-*.vsix.sha256 \
             --title "IdeaGit $TAG" --generate-notes $prerelease

@@ -63,6 +63,34 @@ describe('GitClient integration', () => {
     expect(current).toMatchObject({ upstream: 'origin/main', ahead: 1, behind: 1 });
   });
 
+  it('builds a real multi-parent graph with branch refs and commit details', async () => {
+    const root = await createRepository();
+    await git(root, ['branch', 'feature/graph']);
+    await fs.appendFile(path.join(root, 'alpha.txt'), 'main line\n');
+    await git(root, ['add', 'alpha.txt']);
+    await git(root, ['commit', '-m', 'main line']);
+    await git(root, ['switch', 'feature/graph']);
+    await fs.writeFile(path.join(root, 'feature.txt'), 'feature line\n');
+    await git(root, ['add', 'feature.txt']);
+    await git(root, ['commit', '-m', 'feature line']);
+    await git(root, ['switch', 'main']);
+    await git(root, ['merge', '--no-ff', 'feature/graph', '-m', 'Merge feature graph']);
+
+    const client = new GitClient(root);
+    await client.initialize();
+    const snapshot = await client.snapshot();
+    const merge = snapshot.commits.find((commit) => commit.subject === 'Merge feature graph');
+    expect(merge).toMatchObject({ parents: expect.arrayContaining([expect.any(String)]) });
+    expect(merge?.parents).toHaveLength(2);
+    expect(merge?.parentLanes).toHaveLength(2);
+    expect(merge?.refs).toEqual(expect.arrayContaining([expect.objectContaining({ name: 'main', kind: 'local', current: true })]));
+
+    const feature = snapshot.commits.find((commit) => commit.subject === 'feature line');
+    expect(feature?.refs).toEqual(expect.arrayContaining([expect.objectContaining({ name: 'feature/graph', kind: 'local' })]));
+    const details = await client.commitDetails(feature!.hash);
+    expect(details.files).toEqual(expect.arrayContaining([expect.objectContaining({ path: 'feature.txt', status: 'A' })]));
+  });
+
   it('groups changes and commits selected files without consuming unrelated staged changes', async () => {
     const root = await createRepository();
     await fs.appendFile(path.join(root, 'alpha.txt'), 'changed\n');

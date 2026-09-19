@@ -3,7 +3,7 @@ import { promisify } from 'node:util';
 import path from 'node:path';
 import { ChangelistStore } from './ChangelistStore';
 import { parsePorcelainV2 } from './statusParser';
-import type { BranchSummary, CommitSummary, RepositorySnapshot } from './types';
+import type { BranchSummary, CommitDetails, CommitFile, CommitSummary, GitRef, RepositorySnapshot } from './types';
 
 const execFileAsync = promisify(execFile);
 
@@ -41,21 +41,21 @@ export class GitClient {
 
   async snapshot(): Promise<RepositorySnapshot> {
     if (!this.store) await this.initialize();
-    const [statusOutput, branches, commits, topLevel] = await Promise.all([
+    const [statusOutput, branches, topLevel] = await Promise.all([
       this.run(['status', '--porcelain=v2', '--branch', '-z', '--untracked-files=all']),
       this.getBranches(),
-      this.getCommits(),
       this.run(['rev-parse', '--show-toplevel'])
     ]);
     const parsed = parsePorcelainV2(statusOutput);
     const root = topLevel.trim();
+    const currentBranch = branches.find((branch) => branch.current && !branch.remote)?.name;
     return {
       repositoryName: path.basename(root),
       root,
       ...parsed,
       changelists: await this.store!.group(parsed.changes),
       branches,
-      commits
+      commits: await this.getCommits(currentBranch)
     };
   }
 
@@ -78,16 +78,117 @@ export class GitClient {
     }).filter((branch) => !branch.name.endsWith('/HEAD'));
   }
 
-  private async getCommits(): Promise<CommitSummary[]> {
+  private async getCommits(currentBranch?: string): Promise<CommitSummary[]> {
     try {
-      const output = await this.run(['log', '-n', '40', '--date=iso-strict', '--pretty=format:%H%x1f%h%x1f%an%x1f%aI%x1f%s%x1e']);
-      return output.split('\x1e').filter(Boolean).map((record) => {
-        const [hash = '', shortHash = '', author = '', date = '', subject = ''] = record.trim().split('\x1f');
-        return { hash, shortHash, author, date, subject };
+      const refs = await this.getRefs(currentBranch);
+      const output = await this.run(['log', '--all', '--topo-order', '-n', '80', '--date=iso-strict', '--pretty=format:%H%x1f%h%x1f%P%x1f%an%x1f%aI%x1f%s%x1e']);
+      const commits = output.split('\x1e').filter(Boolean).map((record) => {
+        const [hash = '', shortHash = '', parentText = '', author = '', date = '', subject = ''] = record.trim().split('\x1f');
+        return {
+          hash,
+          shortHash,
+          author,
+          date,
+          subject,
+          parents: parentText ? parentText.split(' ').filter(Boolean) : [],
+          refs: refs.get(hash) ?? [],
+          lane: 0,
+          incomingLanes: [],
+          parentLanes: []
+        };
       });
+      return this.layoutCommits(commits);
     } catch {
       return [];
     }
+  }
+
+  private async getRefs(currentBranch?: string): Promise<Map<string, GitRef[]>> {
+    const refs = new Map<string, GitRef[]>();
+    const add = (hash: string, ref: GitRef): void => {
+      if (!hash) return;
+      const current = refs.get(hash) ?? [];
+      if (!current.some((candidate) => candidate.name === ref.name && candidate.kind === ref.kind)) current.push(ref);
+      refs.set(hash, current);
+    };
+    const branches = await this.run(['for-each-ref', '--format=%(objectname)%09%(refname)%09%(refname:short)', 'refs/heads', 'refs/remotes']);
+    for (const line of branches.split('\n').filter(Boolean)) {
+      const [hash = '', fullName = '', shortName = ''] = line.split('\t');
+      if (shortName.endsWith('/HEAD')) continue;
+      add(hash, {
+        name: shortName,
+        kind: fullName.startsWith('refs/remotes/') ? 'remote' : 'local',
+        current: fullName === `refs/heads/${currentBranch}`
+      });
+    }
+    try {
+      const tags = await this.run(['show-ref', '--dereference', 'refs/tags']);
+      for (const line of tags.split('\n').filter(Boolean)) {
+        const [hash = '', rawName = ''] = line.split(' ');
+        if (!rawName.startsWith('refs/tags/')) continue;
+        const shortName = rawName.slice('refs/tags/'.length).replace(/\^\{\}$/, '');
+        add(hash, { name: shortName, kind: 'tag' });
+      }
+    } catch {
+      // Repositories without tags should still render their branch graph.
+    }
+    return refs;
+  }
+
+  private layoutCommits(commits: CommitSummary[]): CommitSummary[] {
+    const active: string[] = [];
+    return commits.map((commit) => {
+      const incomingLanes = active.map((_hash, index) => index);
+      let lane = active.indexOf(commit.hash);
+      if (lane < 0) {
+        lane = 0;
+        active.splice(lane, 0, commit.hash);
+      }
+      active.splice(lane, 1);
+      const parentLanes: number[] = [];
+      for (const [index, parent] of commit.parents.entries()) {
+        let parentLane = active.indexOf(parent);
+        if (parentLane < 0) {
+          parentLane = Math.min(lane + index, active.length);
+          active.splice(parentLane, 0, parent);
+        }
+        parentLanes.push(parentLane);
+      }
+      return { ...commit, lane, incomingLanes, parentLanes };
+    });
+  }
+
+  async commitDetails(hash: string): Promise<CommitDetails> {
+    if (!/^[0-9a-f]{7,40}$/i.test(hash)) throw new Error('Invalid commit hash.');
+    if (!this.store) await this.initialize();
+    const [metadata, body, parents, files, branches] = await Promise.all([
+      this.run(['show', '-s', '--format=%H%x1f%an%x1f%aI%x1f%s', hash]),
+      this.run(['show', '-s', '--format=%B', hash]),
+      this.run(['rev-list', '--parents', '-n', '1', hash]),
+      this.run(['diff-tree', '--root', '--no-commit-id', '--name-status', '-r', '-M', '-z', hash]),
+      this.getBranches()
+    ]);
+    const [fullHash = hash, author = '', date = '', subject = ''] = metadata.trim().split('\x1f');
+    const parentHashes = parents.trim().split(' ').slice(1).filter(Boolean);
+    const fileTokens = files.split('\0').filter(Boolean);
+    const changedFiles: CommitFile[] = [];
+    for (let index = 0; index < fileTokens.length;) {
+      const status = fileTokens[index++] ?? '';
+      const originalPath = status.startsWith('R') || status.startsWith('C') ? fileTokens[index++] : undefined;
+      const filePath = fileTokens[index++];
+      if (filePath) changedFiles.push({ path: filePath, status: status.slice(0, 1), originalPath });
+    }
+    const refMap = await this.getRefs(branches.find((branch) => branch.current && !branch.remote)?.name);
+    return {
+      hash: fullHash,
+      subject,
+      body: body.trim(),
+      author,
+      date,
+      parents: parentHashes,
+      refs: refMap.get(fullHash) ?? [],
+      files: changedFiles
+    };
   }
 
   async createChangelist(name: string): Promise<void> {
@@ -146,6 +247,15 @@ export class GitClient {
   async showHeadFile(filePath: string): Promise<string> {
     try {
       return await this.run(['show', `HEAD:${filePath}`]);
+    } catch {
+      return '';
+    }
+  }
+
+  async showFileAtRevision(revision: string, filePath: string): Promise<string> {
+    if (!/^[0-9a-f]{7,40}$/i.test(revision)) return '';
+    try {
+      return await this.run(['show', `${revision}:${filePath}`]);
     } catch {
       return '';
     }

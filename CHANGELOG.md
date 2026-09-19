@@ -2,6 +2,11 @@
 
 ## Unreleased
 
+## 0.2.0-beta.3 - 2026-09-19
+
+- Renamed the product to Kivo Git while preserving the internal extension and command IDs for upgrade compatibility.
+- Added a real multi-lane Git Graph with branch, remote, tag, and HEAD refs, merge topology, commit search, commit details, and file-level history diffs.
+
 ## 0.2.0-beta.2 - 2026-09-19
 
 - Reworked the repository header, changelists, popovers, and feedback states with a cohesive theme-aware visual system and VS Code Codicons.

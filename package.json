@@ -1,8 +1,8 @@
 {
   "name": "idea-git",
-  "displayName": "IdeaGit",
-  "description": "An IntelliJ IDEA-inspired Git workflow for Visual Studio Code.",
-  "version": "0.2.0-beta.2",
+  "displayName": "Kivo Git",
+  "description": "A tactile, graph-first Git workflow for Visual Studio Code.",
+  "version": "0.2.0-beta.3",
   "publisher": "keatonli",
   "license": "MIT",
   "repository": {
@@ -41,7 +41,7 @@
     "compile": "npm run sync-assets && node esbuild.mjs",
     "watch": "node esbuild.mjs --watch",
     "test": "vitest run",
-    "package": "npm run check && npm run test && npm run compile && vsce package",
+    "package": "npm run check && npm run test && npm run compile && vsce package --out kivo-git-${npm_package_version}.vsix",
     "release": "node scripts/release.mjs"
   },
   "contributes": {
@@ -49,7 +49,7 @@
       "activitybar": [
         {
           "id": "ideaGit",
-          "title": "IdeaGit",
+          "title": "Kivo Git",
           "icon": "media/logo.svg"
         }
       ]
@@ -59,18 +59,18 @@
         {
           "type": "webview",
           "id": "ideaGit.panel",
-          "name": "IdeaGit"
+          "name": "Kivo Git"
         }
       ]
     },
     "commands": [
       {
         "command": "ideaGit.refresh",
-        "title": "IdeaGit: Refresh"
+        "title": "Kivo Git: Refresh"
       },
       {
         "command": "ideaGit.focus",
-        "title": "IdeaGit: Open Git Tool Window"
+        "title": "Kivo Git: Open Git Tool Window"
       }
     ],
     "menus": {
@@ -83,18 +83,18 @@
       ]
     },
     "configuration": {
-      "title": "IdeaGit",
+      "title": "Kivo Git",
       "properties": {
         "ideaGit.autoRefreshInterval": {
           "type": "number",
           "default": 30000,
           "minimum": 5000,
-          "description": "Fallback refresh interval in milliseconds while the IdeaGit view is visible. File changes also trigger an immediate debounced refresh."
+          "description": "Fallback refresh interval in milliseconds while the Kivo Git view is visible. File changes also trigger an immediate debounced refresh."
         },
         "ideaGit.autoFetch": {
           "type": "boolean",
           "default": true,
-          "description": "Periodically fetch remote refs while the IdeaGit view is visible so incoming and outgoing commit counts stay current."
+          "description": "Periodically fetch remote refs while the Kivo Git view is visible so incoming and outgoing commit counts stay current."
         },
         "ideaGit.autoFetchInterval": {
           "type": "number",
