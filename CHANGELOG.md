@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+## 0.3.0-beta.10 - 2026-09-20
+
+- Added a visible native **Show Log** action beside Refresh in the left **Commit** view title. It directly focuses the separate bottom **Log** panel, so the Commit-to-History transition follows the requested IDEA-style mental model.
+
 ## 0.3.0-beta.9 - 2026-09-20
 
 - Rebuilt the left Activity Bar surface as an IDEA-style **Commit** tool window: compact operation strip, single blue **Changes** row, flat dense file list, and an anchored Amend/message/Commit/Commit-and-Push base.

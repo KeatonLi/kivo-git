@@ -2,7 +2,7 @@
   "name": "idea-git",
   "displayName": "Kivo Git",
   "description": "An IDEA-style Git workflow for VS Code: commit changes on the left, inspect history in the bottom Panel.",
-  "version": "0.3.0-beta.9",
+  "version": "0.3.0-beta.10",
   "publisher": "keatonli",
   "license": "MIT",
   "repository": {
@@ -98,15 +98,21 @@
       },
       {
         "command": "ideaGit.showLog",
-        "title": "Kivo Git: Show Log"
+        "title": "Kivo Git: Show Log",
+        "icon": "$(history)"
       }
     ],
     "menus": {
       "view/title": [
         {
+          "command": "ideaGit.showLog",
+          "when": "view == ideaGit.changes",
+          "group": "navigation@1"
+        },
+        {
           "command": "ideaGit.refresh",
           "when": "view == ideaGit.changes || view == ideaGit.history",
-          "group": "navigation"
+          "group": "navigation@2"
         }
       ]
     },

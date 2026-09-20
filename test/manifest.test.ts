@@ -31,7 +31,22 @@ describe('extension contribution model', () => {
     const manifest = JSON.parse(await readFile(path.join(root, 'package.json'), 'utf8'));
     expect(manifest.contributes.commands).toEqual(expect.arrayContaining([
       expect.objectContaining({ command: 'ideaGit.showChanges', title: 'Kivo Git: Show Changes' }),
-      expect.objectContaining({ command: 'ideaGit.showLog', title: 'Kivo Git: Show Log' })
+      expect.objectContaining({ command: 'ideaGit.showLog', title: 'Kivo Git: Show Log', icon: '$(history)' })
+    ]));
+  });
+
+  it('keeps a native History button in the Commit view title', async () => {
+    const manifest = JSON.parse(await readFile(path.join(root, 'package.json'), 'utf8'));
+    expect(manifest.contributes.menus['view/title']).toEqual(expect.arrayContaining([
+      expect.objectContaining({
+        command: 'ideaGit.showLog',
+        when: 'view == ideaGit.changes',
+        group: 'navigation@1'
+      }),
+      expect.objectContaining({
+        command: 'ideaGit.refresh',
+        group: 'navigation@2'
+      })
     ]));
   });
 });
