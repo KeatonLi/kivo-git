@@ -2,6 +2,15 @@
 
 ## Unreleased
 
+## 0.3.0-beta.9 - 2026-09-20
+
+- Rebuilt the left Activity Bar surface as an IDEA-style **Commit** tool window: compact operation strip, single blue **Changes** row, flat dense file list, and an anchored Amend/message/Commit/Commit-and-Push base.
+- Rebuilt the bottom Panel surface as **Log: &lt;branch&gt;** with a narrow action rail, searchable local/remote/tag tree, compact filter strip, **Author → Graph → Commit → Date** rows, and a nested Changed Files tree above commit details.
+- Changed the contributed View names from `Changes`/`History` to `Commit`/`Log`, and update the real VS Code Log title with the active branch.
+- Added a real **Commit and Push…** operation: the commit completes and clears the draft first; a later push failure remains visible without pretending that the commit failed.
+- Fixed a root incremental-rendering defect that stripped `#app` after the first snapshot and collapsed the full-height Log tool window.
+- Added Git integration coverage for commit-then-push, surface/manifest/layout contracts, a visual Webview fixture, and browser-fixture interaction checks.
+
 ## 0.3.0-beta.8 - 2026-09-19
 
 - Corrected the Git window architecture to match the requested IDEA mental model: **Changes** is a real left Activity Bar view, while **History** is a real bottom Panel view.

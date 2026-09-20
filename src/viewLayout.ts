@@ -30,6 +30,9 @@ const messagesBySurface: Record<KivoSurface, ReadonlySet<string>> = {
   changes: new Set([
     'openDiff',
     'commit',
+    'commitAndPush',
+    'showLog',
+    'openSettings',
     'createChangelist',
     'renameChangelist',
     'deleteChangelist',
@@ -39,7 +42,8 @@ const messagesBySurface: Record<KivoSurface, ReadonlySet<string>> = {
   history: new Set([
     'loadMoreCommits',
     'commitDetails',
-    'openCommitDiff'
+    'openCommitDiff',
+    'showChanges'
   ])
 };
 

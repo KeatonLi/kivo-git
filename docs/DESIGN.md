@@ -21,7 +21,7 @@ Kivo Git brings the Rebased/IntelliJ Git workflow to VS Code with the same two-s
 
 ## Visual language (parity mode)
 
-Kivo Git uses the host theme and Codicons for platform integration, but the composition is reference-led: a compact Changes sidebar for local files and commit, plus a dense bottom History Panel with branch navigator, filter strip, graph-first history table, and right-side details/files pane. Graph exists only as the first column of bottom History. Any Kivo-specific treatment is deferred until parity acceptance.
+Kivo Git uses the host theme and Codicons for platform integration, but the composition is reference-led: a compact Commit sidebar for local files and commit, plus a dense bottom Log Panel with an action rail, branch navigator, filter strip, graph-first history table, and right-side details/files pane. Graph exists only as the first column of bottom Log. Any Kivo-specific treatment is deferred until parity acceptance.
 
 ### Brand mark
 

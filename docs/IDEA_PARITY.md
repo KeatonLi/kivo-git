@@ -16,21 +16,21 @@ The reference is pinned so that “一致” has a stable meaning instead of cha
 
 Kivo Git is considered in **parity mode** when the following is true:
 
-1. **Changes** is opened from a VS Code **left Activity Bar** container. It owns local changes, changelists, file diffs, commit message, and Commit. It never renders a Graph.
-2. **History** is opened from a VS Code **bottom Panel** container. It owns Log/History only. The Graph is the first column of that Log; it is not a sidebar page or a peer tab next to Changes.
-3. The bottom History tool window has the same hierarchy and density as IDEA: branch/ref navigator on the left, compact filter/action strip above the history, dense commit rows in the center, and changed-files/commit details on the right.
+1. **Commit** is opened from a VS Code **left Activity Bar** container. It owns local changes, changelists, file diffs, commit message, and Commit. It never renders a Graph. Its content hierarchy is compact toolbar → blue `Changes` row → files → anchored commit base.
+2. **Log** is opened from a VS Code **bottom Panel** container. It owns history only. The Graph is the first column of that Log; it is not a sidebar page or a peer tab next to Commit.
+3. The bottom Log tool window has the same hierarchy and density as IDEA: narrow action rail, branch/ref navigator with search, compact filter strip, dense author/graph/commit/date rows in the center, and changed-files/commit details on the right.
 4. Graph rows are deterministic and branch-aware: commit order, lane reuse, merge joins, branch/tag/HEAD refs, selection, scrolling, and details must remain stable for the same Git repository state.
 5. User actions follow the reference mental model: selecting a commit updates details; double-click/Enter opens the native diff; keyboard arrows move through rows; filters affect History rather than creating a second custom view; branch/ref actions are available from the selected item.
-6. Both surfaces share one repository state: a commit, checkout, fetch, pull, or push updates the left Changes and bottom History surfaces without losing their local selection or scroll context.
+6. Both surfaces share one repository state: a commit, checkout, fetch, pull, or push updates the left Commit and bottom Log surfaces without losing their local selection or scroll context.
 7. Loading, empty, disabled, error, and reduced-motion states use host/IDE conventions. No decorative animation or count-morphing is part of the parity gate.
 
 ## Acceptance matrix
 
 | Area | Reference behavior | Kivo parity check | Gate |
 | --- | --- | --- | --- |
-| Placement | Commit surface separate from Git Log | Changes in Activity Bar; History in bottom Panel; no Graph sidebar | P0 |
-| Surface ownership | Changes owns files/commit; Log owns history | No Local Changes tab in History; no Graph in Changes | P0 |
-| Log structure | Branch navigator → history → details | Same regions and resize behavior | P0 |
+| Placement | Commit surface separate from Git Log | Commit in Activity Bar; Log in bottom Panel; no Graph sidebar | P0 |
+| Surface ownership | Commit owns files/commit; Log owns history | No Local Changes tab in Log; no Graph in Commit | P0 |
+| Log structure | Action rail → branch navigator → history → details | Same regions and resize behavior | P0 |
 | Filters | Text/hash, branch, user, date, paths | Same order, scope, clear/apply behavior | P0 |
 | Graph | Multi-lane DAG with merge continuity | Fixture screenshots and row-by-row topology match | P0 |
 | Refs | Local/remote branches, tags, HEAD | Labels and placement remain attached to the right commit | P0 |

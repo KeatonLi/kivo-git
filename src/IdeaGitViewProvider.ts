@@ -6,12 +6,13 @@ import { SnapshotCoordinator } from './SnapshotCoordinator';
 import { isMessageAllowedOnSurface, KivoViewTypes, type KivoSurface, surfaceForViewType } from './viewLayout';
 
 type WebviewMessage =
-  | { type: 'ready' | 'refresh' | 'fetch' | 'push' | 'loadMoreCommits' }
+  | { type: 'ready' | 'refresh' | 'fetch' | 'push' | 'loadMoreCommits' | 'showLog' | 'showChanges' | 'openSettings' }
   | { type: 'pull'; strategy: PullStrategy }
   | { type: 'commitDetails'; hash: string }
   | { type: 'openDiff'; path: string; originalPath?: string; kind?: string; preview?: boolean }
   | { type: 'openCommitDiff'; hash: string; path: string; originalPath?: string; kind?: string }
   | { type: 'commit'; message: string; paths: string[] }
+  | { type: 'commitAndPush'; message: string; paths: string[] }
   | { type: 'checkout'; branch: string; remote: boolean }
   | { type: 'createChangelist' }
   | { type: 'renameChangelist'; id: string; name: string }
@@ -46,6 +47,7 @@ export class IdeaGitViewProvider implements vscode.WebviewViewProvider, vscode.T
     () => this.getClient().then((client) => client.snapshot(this.commitLimit)),
     async (snapshot) => {
       this.lastSnapshot = snapshot;
+      this.updateViewTitles(snapshot);
       await this.postToReadyViews({ type: 'snapshot', payload: snapshot });
     },
     (error) => { void this.showEmpty(error); }
@@ -82,6 +84,7 @@ export class IdeaGitViewProvider implements vscode.WebviewViewProvider, vscode.T
     const surface = surfaceForViewType(view.viewType);
     if (!surface) throw new Error(`Unsupported Kivo Git view type: ${view.viewType}`);
     this.views.set(surface, view);
+    view.title = surface === 'changes' ? 'Commit' : 'Log';
     this.readyViews.delete(surface);
     view.webview.options = {
       enableScripts: true,
@@ -190,6 +193,18 @@ export class IdeaGitViewProvider implements vscode.WebviewViewProvider, vscode.T
       await this.refresh();
       return;
     }
+    if (message.type === 'showLog') {
+      await this.showLog();
+      return;
+    }
+    if (message.type === 'showChanges') {
+      await this.showChanges();
+      return;
+    }
+    if (message.type === 'openSettings') {
+      await vscode.commands.executeCommand('workbench.action.openSettings', '@ext:keatonli.idea-git');
+      return;
+    }
     try {
       const client = await this.getClient();
       switch (message.type) {
@@ -212,6 +227,9 @@ export class IdeaGitViewProvider implements vscode.WebviewViewProvider, vscode.T
           return;
         case 'commit':
           await this.operation('commit', 'Creating commit…', async () => client.commit(message.message, message.paths), 'Commit created', true);
+          return;
+        case 'commitAndPush':
+          await this.commitAndPush(client, message.message, message.paths);
           return;
         case 'checkout':
           await this.operation('checkout', `Switching to ${message.branch}…`, async () => client.checkout(message.branch, message.remote), `Switched to ${message.branch}`);
@@ -265,7 +283,13 @@ export class IdeaGitViewProvider implements vscode.WebviewViewProvider, vscode.T
     await this.operation('changelist', 'Deleting changelist…', () => client.deleteChangelist(id), 'Changelist deleted');
   }
 
-  private async operation(kind: OperationKind, label: string, action: () => Promise<void>, success: string, clearsCommit = false): Promise<void> {
+  private async commitAndPush(client: GitClient, message: string, paths: string[]): Promise<void> {
+    const committed = await this.operation('commit', 'Creating commit…', () => client.commit(message, paths), 'Commit created', true);
+    if (!committed) return;
+    await this.operation('push', 'Pushing new commit…', () => client.push(), 'Commit pushed');
+  }
+
+  private async operation(kind: OperationKind, label: string, action: () => Promise<void>, success: string, clearsCommit = false): Promise<boolean> {
     if (this.operationRunning) throw new Error('Another Git operation is already running.');
     this.operationRunning = true;
     const id = ++this.operationId;
@@ -278,10 +302,12 @@ export class IdeaGitViewProvider implements vscode.WebviewViewProvider, vscode.T
       await vscode.window.withProgress({ location: vscode.ProgressLocation.SourceControl, title: `${IdeaGitViewProvider.productName}: ${label}` }, action);
       if (kind === 'fetch' || kind === 'pull' || kind === 'push') await this.setSyncState('idle', Date.now());
       await this.postToReadyViews({ type: 'operation', id, kind, phase: 'success', message: success, clearsCommit });
+      return true;
     } catch (error) {
       this.coordinator.reset();
       if (kind === 'fetch' || kind === 'pull' || kind === 'push') await this.setSyncState('error', undefined, this.errorText(error));
       await this.postToReadyViews({ type: 'operation', id, kind, phase: 'error', message: this.errorText(error) });
+      return false;
     } finally {
       this.operationRunning = false;
       if (writeStarted) this.coordinator.endWrite();
@@ -354,6 +380,19 @@ export class IdeaGitViewProvider implements vscode.WebviewViewProvider, vscode.T
     if (fetchedAt !== undefined) this.lastFetchedAt = fetchedAt;
     this.syncError = error;
     await this.postToReadyViews({ type: 'syncStatus', phase, lastFetchedAt: this.lastFetchedAt, error: this.syncError });
+  }
+
+  private updateViewTitles(snapshot: RepositorySnapshot): void {
+    const changes = this.views.get('changes');
+    if (changes) {
+      changes.title = 'Commit';
+      changes.description = undefined;
+    }
+    const history = this.views.get('history');
+    if (history) {
+      history.title = `Log: ${snapshot.branch}`;
+      history.description = undefined;
+    }
   }
 
   private errorText(error: unknown): string {

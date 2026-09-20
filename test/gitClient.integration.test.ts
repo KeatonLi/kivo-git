@@ -148,6 +148,24 @@ describe('GitClient integration', () => {
     expect(await git(root, ['diff', '--cached', '--name-only'])).toBe('beta.txt');
   });
 
+  it('can commit selected work and push that exact commit to the configured upstream', async () => {
+    const root = await createRepository();
+    const remote = await fs.mkdtemp(path.join(os.tmpdir(), 'ideagit-commit-push-'));
+    temporaryRepositories.push(remote);
+    await git(remote, ['init', '--bare']);
+    await git(root, ['remote', 'add', 'origin', remote]);
+    await git(root, ['push', '-u', 'origin', 'main']);
+
+    await fs.appendFile(path.join(root, 'alpha.txt'), 'ready to ship\n');
+    const client = new GitClient(root);
+    await client.initialize();
+    await client.commit('feat: commit and push', ['alpha.txt']);
+    const localHead = await git(root, ['rev-parse', 'HEAD']);
+    await client.push();
+
+    expect(await git(remote, ['rev-parse', 'main'])).toBe(localHead);
+  });
+
   it('tracks an active changelist and supports rename and delete lifecycle', async () => {
     const root = await createRepository();
     const client = new GitClient(root);

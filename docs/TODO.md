@@ -4,7 +4,7 @@ Kivo Git is not a Source Control sidebar skin. It is a complete Git work system 
 
 ## Current release gate — strict Rebased / IntelliJ IDEA parity
 
-Before adding any Kivo-specific polish, finish [`IDEA_PARITY.md`](./IDEA_PARITY.md). The left Changes/Commit surface, bottom History/Log surface, dense Log layout, Graph topology, filters, selection, refs, details, and keyboard behavior are P0. The user must install and approve the parity VSIX before Marketplace publication.
+Before adding any Kivo-specific polish, finish [`IDEA_PARITY.md`](./IDEA_PARITY.md). The left Commit surface, bottom Log surface, dense Log layout, Graph topology, filters, selection, refs, details, and keyboard behavior are P0. The user must install and approve the parity VSIX before Marketplace publication.
 
 The older “motion”, “continuous feedback”, and “differentiating capability” items below are deferred when they would change the reference mental model. They may be reconsidered only after the parity gate passes.
 
@@ -119,7 +119,7 @@ Goal: reach strong IDE parity for the operations developers perform every day.
 ### Commit workflow
 
 - [ ] **P1** Commit selected files, a complete changelist, or selected hunks.
-- [ ] **P1** Add Commit and Push as a first-class action.
+- [x] **P1** Add Commit and Push as a first-class action.
 - [ ] **P1** Add Amend with a preview of the commit being replaced.
 - [ ] **P1** Add commit-message history and repository commit templates.
 - [ ] **P1** Show Git identity and provide a clear setup path when it is missing.
@@ -146,7 +146,7 @@ Goal: reach strong IDE parity for the operations developers perform every day.
 ### Remote synchronization
 
 - [x] **P1** Show clear incoming/outgoing commit counts and upstream state.
-- [ ] **P1** Let the user choose pull strategy: fast-forward only, merge, or rebase.
+- [x] **P1** Let the user choose pull strategy: fast-forward only, merge, or rebase.
 - [ ] **P1** Add a push preview listing commits, files, remote, and target branch.
 - [ ] **P1** Support setting upstream and selecting among multiple remotes.
 - [ ] **P1** Support tags and guarded `--force-with-lease`.
@@ -157,8 +157,8 @@ Goal: reach strong IDE parity for the operations developers perform every day.
 
 Goal: provide one coherent workspace for changes, history, review, and operations instead of forcing complex work into a narrow sidebar.
 
-- [x] **P1** Establish two IDEA-style Git surfaces: Changes/Commit in the Activity Bar and History/Log in the bottom Panel.
-- [x] **P1** Keep Graph exclusively in the bottom History surface, never in the Changes sidebar.
+- [x] **P1** Establish two IDEA-style Git surfaces: Commit in the Activity Bar and Log in the bottom Panel.
+- [x] **P1** Keep Graph exclusively in the bottom Log surface, never in the Commit sidebar.
 - [ ] **P1** Add a full-width Git Studio editor tab for complex workflows.
 - [ ] **P1** Create a resizable three-region layout: navigation, diff/content, and action/details.
 - [ ] **P1** Keep selection synchronized between sidebar, Git Studio, native diff, and source editor.
@@ -172,7 +172,7 @@ Goal: provide one coherent workspace for changes, history, review, and operation
 - [x] **P1** Parse and render a real multi-lane commit DAG.
 - [x] **P1** Present history as a dense, bottom-panel Log with graph, commit, author, and date columns.
 - [x] **P1** Render local branches, remote branches, tags, HEAD, and upstream labels.
-- [ ] **P1** Add filters for branch, author, date, path, repository, and commit text.
+- [x] **P1** Add filters for branch, author, date, path, and commit text.
 - [x] **P1** Add commit details, changed files, and immediate diff preview.
 - [ ] **P1** Add jump to hash/branch/tag and parent/child navigation.
 - [ ] **P1** Add context actions: checkout, new branch, tag, cherry-pick, revert, reset, and push up to commit.

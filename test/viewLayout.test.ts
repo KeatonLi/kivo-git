@@ -10,8 +10,11 @@ describe('Kivo Git two-surface routing', () => {
 
   it('keeps local-change operations out of the History panel', () => {
     expect(isMessageAllowedOnSurface('changes', 'commit')).toBe(true);
+    expect(isMessageAllowedOnSurface('changes', 'commitAndPush')).toBe(true);
+    expect(isMessageAllowedOnSurface('changes', 'showLog')).toBe(true);
     expect(isMessageAllowedOnSurface('changes', 'openDiff')).toBe(true);
     expect(isMessageAllowedOnSurface('history', 'commit')).toBe(false);
+    expect(isMessageAllowedOnSurface('history', 'commitAndPush')).toBe(false);
     expect(isMessageAllowedOnSurface('history', 'openDiff')).toBe(false);
   });
 
@@ -20,6 +23,8 @@ describe('Kivo Git two-surface routing', () => {
     expect(isMessageAllowedOnSurface('history', 'loadMoreCommits')).toBe(true);
     expect(isMessageAllowedOnSurface('changes', 'commitDetails')).toBe(false);
     expect(isMessageAllowedOnSurface('changes', 'loadMoreCommits')).toBe(false);
+    expect(isMessageAllowedOnSurface('history', 'showChanges')).toBe(true);
+    expect(isMessageAllowedOnSurface('changes', 'showChanges')).toBe(false);
   });
 
   it('allows synchronisation and branch operations from either surface', () => {

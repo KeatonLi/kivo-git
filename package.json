@@ -2,7 +2,7 @@
   "name": "idea-git",
   "displayName": "Kivo Git",
   "description": "An IDEA-style Git workflow for VS Code: commit changes on the left, inspect history in the bottom Panel.",
-  "version": "0.3.0-beta.8",
+  "version": "0.3.0-beta.9",
   "publisher": "keatonli",
   "license": "MIT",
   "repository": {
@@ -39,10 +39,11 @@
     "LICENSE"
   ],
   "scripts": {
-    "check": "tsc --noEmit && node --check media/main.js && node --check scripts/release.mjs && node --check scripts/sync-assets.mjs && node --check scripts/verify-vsix.mjs && node --check scripts/test-extension.mjs",
+    "check": "tsc --noEmit && node --check media/main.js && node --check scripts/release.mjs && node --check scripts/sync-assets.mjs && node --check scripts/verify-vsix.mjs && node --check scripts/test-extension.mjs && node --check scripts/visual-server.mjs",
     "sync-assets": "node scripts/sync-assets.mjs",
     "compile": "npm run sync-assets && node esbuild.mjs",
     "watch": "node esbuild.mjs --watch",
+    "dev": "node scripts/visual-server.mjs",
     "test": "vitest run",
     "test:extension": "npm run compile && node scripts/test-extension.mjs",
     "test:vsix": "node scripts/verify-vsix.mjs kivo-git-${npm_package_version}.vsix",
@@ -61,7 +62,7 @@
       "panel": [
         {
           "id": "ideaGitHistory",
-          "title": "Kivo Git History",
+          "title": "Kivo Git",
           "icon": "media/logo.svg"
         }
       ]
@@ -71,14 +72,14 @@
         {
           "type": "webview",
           "id": "ideaGit.changes",
-          "name": "Changes"
+          "name": "Commit"
         }
       ],
       "ideaGitHistory": [
         {
           "type": "webview",
           "id": "ideaGit.history",
-          "name": "History"
+          "name": "Log"
         }
       ]
     },
