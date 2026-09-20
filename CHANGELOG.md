@@ -2,6 +2,13 @@
 
 ## Unreleased
 
+## 0.3.0-beta.11 - 2026-09-20
+
+- Renamed the bottom Panel container to **Kivo Git History**, with the active branch retained as context instead of replacing the product name.
+- Added an IDEA-style draggable divider between the History branch tree and commit graph. It has a subtle host-theme hover/focus treatment, keyboard resizing, double-click reset, Escape cancellation, responsive collapse behavior, and saved width.
+- Changed files in the left Commit tool now resolve against the user's active VS Code file icon theme. Filename, parent-qualified filename, compound extension, parent-qualified extension, language, light, and high-contrast associations follow VS Code's documented precedence; image and font themes are both supported with a safe native fallback.
+- Added association-precedence tests plus browser-fixture checks for drag, keyboard resize, reset, and History layout.
+
 ## 0.3.0-beta.10 - 2026-09-20
 
 - Added a visible native **Show Log** action beside Refresh in the left **Commit** view title. It directly focuses the separate bottom **Log** panel, so the Commit-to-History transition follows the requested IDEA-style mental model.

@@ -2,7 +2,7 @@
 
 An IDE-inspired Git workflow with a better feel for VS Code.
 
-Kivo Git is for developers who want the familiar IDEA Git workflow in VS Code: a left **Commit** tool, persistent changelists, a useful branch popup, and a real branch-aware **Log** in the bottom Panel.
+Kivo Git is for developers who want the familiar IDEA Git workflow in VS Code: a left **Commit** tool, persistent changelists, a useful branch popup, and a real branch-aware **Kivo Git History** tool in the bottom Panel.
 
 ## Current MVP
 
@@ -15,7 +15,9 @@ Kivo Git is for developers who want the familiar IDEA Git workflow in VS Code: a
 - Native VS Code diff preview on single-click and a pinned editor on double-click
 - Arrow-key file navigation, Space toggle, and Shift range selection
 - Left Activity Bar **Commit** tool with an IDEA-style compact action strip, blue Changes row, local files, changelists, diffs, and an anchored commit base
-- Bottom Panel **Log** tool with the complete Log; Graph exists only as its first column
+- Bottom Panel **Kivo Git History** tool with the complete Git Log; Graph exists only as its first column
+- Draggable branch-tree / history divider, with keyboard resizing and a saved per-webview width
+- Changed-file icons resolved from the user's active VS Code file icon theme, including filename and compound-extension matching
 - Dense multi-lane Git Log with a narrow action rail, branch/tag tree, author/graph/commit/date columns, selected-commit details, and file-level history diffs
 - Incremental Log history loading with branch, author, time-window, and text filters
 - Explicit Pull strategies: fast-forward only, Rebase, and Merge
@@ -30,9 +32,9 @@ npm install
 npm run compile
 ```
 
-Open this folder in VS Code and press `F5` to launch the Extension Development Host. Open a Git repository there, then select **Kivo Git** in the left Activity Bar to open **Commit**. Open VS Code's bottom Panel (`View → Appearance → Panel`, or `Ctrl/Cmd+J`), select **Kivo Git**, then open **Log** to inspect history and Graph.
+Open this folder in VS Code and press `F5` to launch the Extension Development Host. Open a Git repository there, then select **Kivo Git** in the left Activity Bar to open **Commit**. Open VS Code's bottom Panel (`View → Appearance → Panel`, or `Ctrl/Cmd+J`) and select **Kivo Git History** to inspect history and Graph.
 
-Use **Kivo Git: Show Changes** or **Kivo Git: Show Log** from the Command Palette to focus the respective surface. Graph is a column inside bottom Log, never a sidebar or separate page.
+Use **Kivo Git: Show Changes** or **Kivo Git: Show History** from the Command Palette to focus the respective surface. Graph is a column inside bottom History, never a sidebar or separate page.
 
 Kivo Git checks remote refs in the background every five minutes while its view is visible. Configure `ideaGit.autoFetch` or `ideaGit.autoFetchInterval` when a repository needs a different network policy.
 
@@ -41,7 +43,7 @@ Kivo Git checks remote refs in the background every five minutes while its view 
 From a clean `main` branch, run:
 
 ```bash
-npm run release -- 0.3.0-beta.10
+npm run release -- 0.3.0-beta.11
 ```
 
 The release tool verifies the repository and version, promotes the Unreleased changelog, runs all checks and tests, packages the VSIX, and pushes a version commit. GitHub Actions then creates the matching tag and publishes the VSIX plus SHA-256 checksum to GitHub Releases. Pre-release semantic versions are published as GitHub pre-releases.

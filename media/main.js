@@ -3,6 +3,11 @@ const app = document.querySelector('#app');
 const toastRegion = document.querySelector('#toast-region');
 const persisted = vscode.getState?.() || {};
 const surface = document.body.dataset.surface === 'history' ? 'history' : 'changes';
+const LOG_BRANCH_MIN_WIDTH = 156;
+const LOG_BRANCH_MAX_WIDTH = 420;
+const LOG_BRANCH_DEFAULT_WIDTH = 240;
+const clamp = (value, minimum, maximum) => Math.max(minimum, Math.min(maximum, value));
+const restoredBranchWidth = Number(persisted.logBranchWidth);
 
 const ui = {
   snapshot: undefined,
@@ -12,6 +17,9 @@ const ui = {
   branchOpen: false,
   branchQuery: '',
   logBranchQuery: persisted.logBranchQuery || '',
+  logBranchWidth: Number.isFinite(restoredBranchWidth)
+    ? clamp(restoredBranchWidth, LOG_BRANCH_MIN_WIDTH, LOG_BRANCH_MAX_WIDTH)
+    : LOG_BRANCH_DEFAULT_WIDTH,
   busy: false,
   operationKind: undefined,
   operationId: 0,
@@ -41,6 +49,7 @@ let lastSnapshot = '';
 let previewTimer;
 let commitDetailTimer;
 let dragAvatar;
+let activeLogResize;
 const commandKey = /Mac|iPhone|iPad/.test(navigator.platform) ? '⌘' : 'Ctrl';
 
 const escapeHtml = (value = '') => String(value)
@@ -75,6 +84,7 @@ function persist() {
     graphAuthorFilter: ui.graphAuthorFilter,
     graphAgeFilter: ui.graphAgeFilter,
     logBranchQuery: ui.logBranchQuery,
+    logBranchWidth: ui.logBranchWidth,
     selectedCommitHash: ui.selectedCommitHash,
     focusedCommitHash: ui.focusedCommitHash,
     commitDetailsDismissed: ui.commitDetailsDismissed
@@ -317,7 +327,7 @@ function renderCommitToolbar(s) {
   return `<header class="commit-toolbar" aria-label="Commit tool window actions" aria-busy="${syncing}">
     <button class="idea-toolbar-button" data-action="refresh" aria-label="Refresh changes" title="Refresh changes" ${ui.busy ? 'disabled' : ''}>${icon('refresh')}</button>
     <span class="idea-toolbar-divider" aria-hidden="true"></span>
-    <button class="idea-toolbar-button" data-action="show-log" aria-label="Open Git Log in the bottom panel" title="Open Git Log">${icon('history')}</button>
+    <button class="idea-toolbar-button" data-action="show-log" aria-label="Open Kivo Git History in the bottom panel" title="Open Kivo Git History">${icon('history')}</button>
     <button class="idea-toolbar-button" data-action="branches" aria-label="Git branches, current branch ${escapeHtml(s.branch)}" title="Branches: ${escapeHtml(s.branch)}" aria-haspopup="dialog" aria-expanded="${ui.branchOpen}">${icon('git-branch')}</button>
     <button class="idea-toolbar-button ${syncing ? 'working' : ''}" data-action="fetch" aria-label="${syncing ? 'Checking remote' : 'Fetch remote updates'}" title="${syncing ? 'Checking remote' : 'Fetch remote updates'}" ${ui.busy || syncing ? 'disabled' : ''}>${icon(fetchIcon, syncing || ui.operationKind === 'fetch' ? 'codicon-modifier-spin' : '')}</button>
     <div class="sync-action-wrap compact-sync-action">
@@ -382,10 +392,23 @@ function renderFile(change) {
   return `<div class="file-row ${checked ? 'selected' : ''} ${ui.focusedPath === change.path ? 'focused' : ''}" draggable="${!ui.busy}" data-path="${escapeHtml(change.path)}" title="${escapeHtml(change.path)}">
     <label class="check"><input type="checkbox" aria-label="Select ${escapeHtml(change.path)}" data-select="${escapeHtml(change.path)}" ${checked ? 'checked' : ''} ${ui.busy ? 'disabled' : ''}><span></span></label>
     <button class="file-main" data-diff="${escapeHtml(change.path)}" data-original-path="${escapeHtml(change.originalPath || '')}" data-kind="${escapeHtml(change.kind)}" tabindex="${ui.focusedPath === change.path ? '0' : '-1'}" aria-label="Preview diff for ${escapeHtml(change.path)}">
-      <span class="file-name">${escapeHtml(filename)}</span>${parent ? `<span class="file-parent">${escapeHtml(parent)}</span>` : ''}
+      ${renderFileTypeIcon(change)}<span class="file-name">${escapeHtml(filename)}</span>${parent ? `<span class="file-parent">${escapeHtml(parent)}</span>` : ''}
     </button>
     <span class="status ${change.kind}">${iconFor(change.kind)}</span>
   </div>`;
+}
+
+function renderFileTypeIcon(change) {
+  const fileIcon = ui.snapshot?.fileIcons?.[change.path];
+  if (fileIcon?.kind === 'image' && fileIcon.uri) {
+    return `<img class="file-type-icon" src="${escapeHtml(fileIcon.uri)}" alt="" aria-hidden="true">`;
+  }
+  if (fileIcon?.kind === 'font' && fileIcon.character && /^[a-zA-Z0-9_-]+$/.test(fileIcon.fontFamily || '')) {
+    const color = /^#[0-9a-f]{3,8}$/i.test(fileIcon.color || '') ? `color:${fileIcon.color};` : '';
+    const fontSize = /^\d+(?:\.\d+)?%$/.test(fileIcon.fontSize || '') ? `font-size:${fileIcon.fontSize};` : '';
+    return `<span class="file-type-icon file-type-glyph" aria-hidden="true" style="font-family:${fileIcon.fontFamily};${color}${fontSize}">${escapeHtml(fileIcon.character)}</span>`;
+  }
+  return icon('file-code', 'file-type-icon file-type-icon-fallback');
 }
 
 function renderRef(ref) {
@@ -460,7 +483,7 @@ function renderCommitFileTree(node, depth = 0) {
 }
 
 function renderCommitDetails(s) {
-  const toolbar = `<div class="commit-detail-toolbar"><button class="idea-toolbar-button" data-action="refresh" aria-label="Refresh Log" title="Refresh Log">${icon('refresh')}</button><span class="toolbar-spacer"></span>${ui.selectedCommitHash ? `<button class="idea-toolbar-button" data-action="close-commit" aria-label="Clear selected commit" title="Clear selection">${icon('close')}</button>` : ''}</div>`;
+  const toolbar = `<div class="commit-detail-toolbar"><button class="idea-toolbar-button" data-action="refresh" aria-label="Refresh History" title="Refresh History">${icon('refresh')}</button><span class="toolbar-spacer"></span>${ui.selectedCommitHash ? `<button class="idea-toolbar-button" data-action="close-commit" aria-label="Clear selected commit" title="Clear selection">${icon('close')}</button>` : ''}</div>`;
   if (!ui.selectedCommitHash) {
     return `<aside class="commit-detail commit-detail-empty" aria-label="Commit details">${toolbar}<div class="commit-detail-empty-copy"><div class="detail-empty-mark">${icon('git-commit')}</div><strong>Select a commit</strong><span>Its changed files and commit message appear here.</span></div></aside>`;
   }
@@ -499,7 +522,7 @@ function renderLogBranchPane(s) {
   const current = s.branches.find((branch) => branch.current && !branch.remote);
   const root = current && matches(current) ? `<button class="log-branch-row current ${ui.graphBranchFilter === current.name ? 'selected' : ''}" data-log-branch="${escapeHtml(current.name)}" aria-pressed="${ui.graphBranchFilter === current.name}" title="Show ${escapeHtml(current.name)} history">${icon('git-branch')}<span>${escapeHtml(current.name)}</span><small>HEAD</small></button>` : '';
   const group = (label, tree, emptyLabel) => `<section class="log-branch-group"><div class="log-branch-group-title">${icon('chevron-down')}<span>${label}</span></div>${tree || `<div class="branch-tree-empty">${emptyLabel}</div>`}</section>`;
-  return `<aside class="log-branch-pane" aria-label="Log branches">
+  return `<aside class="log-branch-pane" id="kivo-log-branches" aria-label="History branches">
     <label class="log-branch-search">${icon('search')}<input id="log-branch-search" aria-label="Branch or tag" placeholder="Branch or tag" value="${escapeHtml(ui.logBranchQuery)}"></label>
     <div class="log-branch-tree">
       <section class="log-branch-group log-head-group"><div class="log-branch-group-title"><span>HEAD (Current Branch)</span></div>${root || '<div class="branch-tree-empty">No current branch</div>'}</section>
@@ -511,12 +534,12 @@ function renderLogBranchPane(s) {
 }
 
 function renderLogActionRail() {
-  return `<aside class="log-action-rail" aria-label="Log actions">
+  return `<aside class="log-action-rail" aria-label="History actions">
     <button class="idea-toolbar-button" data-action="show-changes" aria-label="Open Commit tool window" title="Open Commit tool window">${icon('source-control')}</button>
-    <button class="idea-toolbar-button" data-action="refresh" aria-label="Refresh Log" title="Refresh Log">${icon('refresh')}</button>
+    <button class="idea-toolbar-button" data-action="refresh" aria-label="Refresh History" title="Refresh History">${icon('refresh')}</button>
     <button class="idea-toolbar-button" data-action="fetch" aria-label="Fetch remote updates" title="Fetch remote updates" ${ui.busy || ui.syncPhase === 'fetching' ? 'disabled' : ''}>${icon(ui.syncPhase === 'fetching' ? 'loading' : 'cloud-download', ui.syncPhase === 'fetching' ? 'codicon-modifier-spin' : '')}</button>
     <span class="idea-toolbar-divider" aria-hidden="true"></span>
-    <button class="idea-toolbar-button" data-action="clear-graph-filters" aria-label="Clear Log filters" title="Clear Log filters">${icon('clear-all')}</button>
+    <button class="idea-toolbar-button" data-action="clear-graph-filters" aria-label="Clear History filters" title="Clear History filters">${icon('clear-all')}</button>
   </aside>`;
 }
 
@@ -545,11 +568,13 @@ function renderGraph(s) {
     ? ui.focusedCommitHash
     : commits[0]?.hash;
   const filtersActive = Boolean(ui.graphBranchFilter || ui.graphAuthorFilter || ui.graphAgeFilter !== 'all' || ui.graphQuery.trim() || ui.graphPathFilter.trim());
-  return `<div class="graph-view log-view" role="tabpanel" aria-label="Git Log">
-    <div class="log-workspace">
+  const branchWidth = Math.round(clamp(ui.logBranchWidth, LOG_BRANCH_MIN_WIDTH, LOG_BRANCH_MAX_WIDTH));
+  return `<div class="graph-view log-view" role="tabpanel" aria-label="Kivo Git History">
+    <div class="log-workspace" style="--log-branch-width:${branchWidth}px">
       ${renderLogActionRail()}
       ${renderLogBranchPane(s)}
-      <section class="log-history-pane" aria-label="Commit history">
+      <div class="log-splitter" data-log-splitter role="separator" aria-label="Resize History branch tree" aria-controls="kivo-log-branches kivo-log-history" aria-orientation="vertical" aria-valuemin="${LOG_BRANCH_MIN_WIDTH}" aria-valuemax="${LOG_BRANCH_MAX_WIDTH}" aria-valuenow="${branchWidth}" tabindex="0" title="Drag to resize the branch tree. Double-click to reset."></div>
+      <section class="log-history-pane" id="kivo-log-history" aria-label="Commit history">
         ${renderLogFilterBar(s, commits, filtersActive)}
         <div class="log-column-header" aria-hidden="true" style="--graph-width:${graphWidth}px"><span>AUTHOR</span><span>GRAPH</span><span>COMMIT</span><span>DATE</span></div>
         <div class="graph-list" role="listbox" aria-label="Commit history" style="--lane-count:${laneCount};--graph-width:${graphWidth}px">${commits.length ? commits.map((commit, index) => `<article class="graph-row ${commit.parents.length > 1 ? 'merge-row' : ''} ${ui.selectedCommitHash === commit.hash ? 'selected' : ''}" data-commit="${escapeHtml(commit.hash)}" data-hash="${escapeHtml(commit.hash)}" role="option" aria-selected="${ui.selectedCommitHash === commit.hash}" tabindex="${focusHash === commit.hash ? '0' : '-1'}" style="--delay:${Math.min(index * 5, 90)}ms">
@@ -560,6 +585,94 @@ function renderGraph(s) {
       ${renderCommitDetails(s)}
     </div>
   </div>`;
+}
+
+function logBranchBounds(splitter) {
+  const workspace = splitter.closest('.log-workspace');
+  const compact = window.matchMedia('(max-width: 860px)').matches;
+  const narrow = window.matchMedia('(max-width: 1180px)').matches;
+  const railWidth = compact || narrow ? 30 : 32;
+  const detailWidth = compact ? 0 : narrow ? 222 : 274;
+  const historyMinimum = compact ? 220 : 300;
+  const availableWidth = workspace?.clientWidth || 0;
+  const maximum = availableWidth
+    ? Math.min(LOG_BRANCH_MAX_WIDTH, Math.max(LOG_BRANCH_MIN_WIDTH, availableWidth - railWidth - 6 - detailWidth - historyMinimum))
+    : LOG_BRANCH_MAX_WIDTH;
+  return { minimum: LOG_BRANCH_MIN_WIDTH, maximum };
+}
+
+function applyLogBranchWidth(splitter, width) {
+  const workspace = splitter.closest('.log-workspace');
+  const { minimum, maximum } = logBranchBounds(splitter);
+  const next = Math.round(clamp(width, minimum, maximum));
+  ui.logBranchWidth = next;
+  workspace?.style.setProperty('--log-branch-width', `${next}px`);
+  splitter.setAttribute('aria-valuemin', String(minimum));
+  splitter.setAttribute('aria-valuemax', String(maximum));
+  splitter.setAttribute('aria-valuenow', String(next));
+  return next;
+}
+
+function finishLogResize(commit = true) {
+  const resize = activeLogResize;
+  if (!resize) return;
+  resize.splitter.removeEventListener('pointermove', resize.move);
+  resize.splitter.removeEventListener('pointerup', resize.complete);
+  resize.splitter.removeEventListener('pointercancel', resize.cancel);
+  if (resize.splitter.hasPointerCapture?.(resize.pointerId)) resize.splitter.releasePointerCapture?.(resize.pointerId);
+  document.body.classList.remove('log-resizing');
+  activeLogResize = undefined;
+  if (commit) persist();
+  else applyLogBranchWidth(resize.splitter, resize.initialWidth);
+}
+
+function startLogResize(event) {
+  if (event.button !== 0 || activeLogResize) return;
+  const splitter = event.currentTarget;
+  const workspace = splitter.closest('.log-workspace');
+  if (!workspace || getComputedStyle(splitter).display === 'none') return;
+  event.preventDefault();
+  const initialWidth = applyLogBranchWidth(splitter, ui.logBranchWidth);
+  const pointerId = event.pointerId;
+  const move = (pointerEvent) => {
+    if (pointerEvent.pointerId !== pointerId) return;
+    const railWidth = app.querySelector('.log-action-rail')?.getBoundingClientRect().width || 32;
+    const dividerWidth = splitter.getBoundingClientRect().width || 6;
+    applyLogBranchWidth(splitter, pointerEvent.clientX - workspace.getBoundingClientRect().left - railWidth - dividerWidth / 2);
+  };
+  const complete = (pointerEvent) => {
+    if (pointerEvent.pointerId === pointerId) finishLogResize(true);
+  };
+  const cancel = (pointerEvent) => {
+    if (pointerEvent.pointerId === pointerId) finishLogResize(false);
+  };
+  activeLogResize = { splitter, pointerId, initialWidth, move, complete, cancel };
+  splitter.setPointerCapture?.(pointerId);
+  splitter.addEventListener('pointermove', move);
+  splitter.addEventListener('pointerup', complete);
+  splitter.addEventListener('pointercancel', cancel);
+  document.body.classList.add('log-resizing');
+}
+
+function resetLogBranchWidth(event) {
+  const splitter = event.currentTarget;
+  applyLogBranchWidth(splitter, LOG_BRANCH_DEFAULT_WIDTH);
+  persist();
+}
+
+function adjustLogBranchWidth(event) {
+  const splitter = event.currentTarget;
+  const { minimum, maximum } = logBranchBounds(splitter);
+  const step = event.shiftKey ? 24 : 12;
+  let width;
+  if (event.key === 'ArrowLeft') width = ui.logBranchWidth - step;
+  if (event.key === 'ArrowRight') width = ui.logBranchWidth + step;
+  if (event.key === 'Home') width = minimum;
+  if (event.key === 'End') width = maximum;
+  if (width === undefined) return;
+  event.preventDefault();
+  applyLogBranchWidth(splitter, width);
+  persist();
 }
 
 function renderBranchPopup(s) {
@@ -667,6 +780,9 @@ function bind() {
     persist();
     render();
   });
+  once('[data-log-splitter]', 'pointerdown', startLogResize);
+  once('[data-log-splitter]', 'dblclick', resetLogBranchWidth);
+  once('[data-log-splitter]', 'keydown', adjustLogBranchWidth);
   once('[data-pull-strategy]', 'click', (event) => {
     event.stopPropagation();
     if (ui.busy) return;
@@ -947,6 +1063,10 @@ function dismissToast(element) {
 
 window.addEventListener('message', (event) => {
   const message = event.data;
+  if (message.type === 'fileIconCss') {
+    const style = document.querySelector('#kivo-file-icon-fonts');
+    if (style) style.textContent = typeof message.css === 'string' ? message.css : '';
+  }
   if (message.type === 'snapshot') {
     const fingerprint = JSON.stringify(message.payload);
     if (fingerprint === lastSnapshot) return;
@@ -1030,6 +1150,11 @@ window.addEventListener('message', (event) => {
 
 document.addEventListener('keydown', (event) => {
   if (event.key !== 'Escape') return;
+  if (activeLogResize) {
+    event.preventDefault();
+    finishLogResize(false);
+    return;
+  }
   if (ui.pullMenuOpen) {
     event.preventDefault();
     ui.pullMenuOpen = false;

@@ -115,9 +115,12 @@ button:disabled { cursor: default !important; }
 .check input:focus-visible + span { outline: 1px solid var(--accent); outline-offset: 2px; }
 .check input:active + span { transform: scale(.88); }
 .check input:checked + span { background: var(--vscode-checkbox-selectBackground, var(--accent)); border-color: var(--accent); box-shadow: inset 0 0 0 2px var(--vscode-sideBar-background); }
-.file-main { min-width: 0; flex: 1; display: flex; align-items: baseline; gap: 6px; padding: 3px 0; background: none; text-align: left; cursor: default; }
+.file-main { min-width: 0; flex: 1; display: flex; align-items: center; gap: 6px; padding: 3px 0; background: none; text-align: left; cursor: default; }
 .file-main:focus-visible { outline: none; }
 .file-row:has(.file-main:focus-visible) { box-shadow: inset 0 0 0 1px var(--accent); }
+.file-type-icon { width: 16px; height: 16px; flex: 0 0 16px; display: inline-flex; align-items: center; justify-content: center; object-fit: contain; overflow: hidden; line-height: 1; }
+.file-type-glyph { font-style: normal; font-weight: normal; }
+.file-type-icon-fallback { color: var(--vscode-icon-foreground, var(--muted)); font-size: 14px; }
 .file-name { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .file-parent { color: var(--muted); font-size: 10px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .status { width: 16px; text-align: center; font-weight: 700; font-size: 10px; }
@@ -252,7 +255,7 @@ body[data-surface="changes"] .changes-toolbar .toolbar-actions { flex: 0 0 auto;
 .log-filter-bar .graph-filters { flex: 1 1 auto; }
 .log-filter-bar .graph-filter { height: 24px; border-radius: 3px; }
 .log-filter-bar .graph-search { height: 24px; flex: 0 1 176px; border-radius: 3px; }
-.log-workspace { flex: 1; min-height: 0; display: grid; grid-template-columns: minmax(176px, 210px) minmax(420px, 1fr) minmax(252px, 320px); background: var(--surface-base); }
+.log-workspace { flex: 1; min-height: 0; display: grid; grid-template-columns: minmax(176px, 210px) 6px minmax(420px, 1fr) minmax(252px, 320px); background: var(--surface-base); }
 .log-branch-pane { min-width: 0; overflow: auto; padding: 5px; border-right: 1px solid var(--vscode-panel-border); background: color-mix(in srgb, var(--surface-base) 98%, var(--vscode-foreground) 2%); }
 .log-branch-heading { display: flex; justify-content: space-between; align-items: center; padding: 3px 6px 5px; color: var(--vscode-foreground); font-size: 11px; font-weight: 600; }
 .log-branch-group { margin-top: 7px; }
@@ -264,6 +267,14 @@ body[data-surface="changes"] .changes-toolbar .toolbar-actions { flex: 0 0 auto;
 .log-branch-row > span { min-width: 0; flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 10px; }
 .log-branch-row small { color: inherit; opacity: .75; font-size: 8px; font-weight: 650; }
 .log-branch-row.all { margin-bottom: 3px; }
+.log-splitter { position: relative; min-width: 6px; cursor: col-resize; touch-action: none; z-index: 3; }
+.log-splitter::after { content: ''; position: absolute; inset: 0 auto 0 2px; width: 1px; background: var(--vscode-panel-border, var(--border-subtle)); transition: background 100ms ease, width 100ms ease; }
+.log-splitter:hover::after,
+.log-splitter:focus-visible::after,
+body.log-resizing .log-splitter::after { left: 1px; width: 3px; background: var(--vscode-focusBorder, var(--accent)); }
+.log-splitter:focus-visible { outline: none; }
+body.log-resizing,
+body.log-resizing * { cursor: col-resize !important; user-select: none; }
 .log-history-pane { min-width: 0; min-height: 0; display: flex; flex-direction: column; }
 .log-history-pane .log-column-header { flex: 0 0 auto; }
 .log-history-pane .graph-list { min-height: 0; }
@@ -299,7 +310,9 @@ body[data-surface="changes"] .changes-toolbar .toolbar-actions { flex: 0 0 auto;
 .parity-mode .commit-file { min-height: 22px; }
 
 @media (max-width: 1040px) {
-  .log-workspace { grid-template-columns: minmax(142px, 166px) minmax(0, 1fr); grid-template-rows: minmax(135px, 1fr) minmax(116px, 34%); }
+  .log-workspace { grid-template-columns: minmax(142px, 166px) 6px minmax(0, 1fr); grid-template-rows: minmax(135px, 1fr) minmax(116px, 34%); }
+  .log-splitter { grid-column: 2; grid-row: 1 / -1; }
+  .log-history-pane { grid-column: 3; grid-row: 1; }
   .log-workspace .commit-detail { grid-column: 1 / -1; border-top: 1px solid var(--vscode-panel-border); border-left: 0; }
 }
 
@@ -308,6 +321,7 @@ body[data-surface="changes"] .changes-toolbar .toolbar-actions { flex: 0 0 auto;
   .tool-window-toolbar .upstream, .tool-window-toolbar .sync-freshness { display: none; }
   .log-workspace { grid-template-columns: minmax(0, 1fr); }
   .log-branch-pane { display: none; }
+  .log-splitter { display: none; }
   .log-workspace .commit-detail { grid-column: auto; }
 }
 
@@ -598,7 +612,7 @@ body[data-surface="history"] .content { min-width: 0; background: var(--vscode-p
   flex: 1;
   min-height: 0;
   display: grid;
-  grid-template-columns: 32px minmax(208px, 258px) minmax(430px, 1fr) minmax(274px, 338px);
+  grid-template-columns: 32px minmax(156px, min(var(--log-branch-width, 240px), 36%)) 6px minmax(430px, 1fr) minmax(274px, 338px);
   grid-template-rows: minmax(0, 1fr);
   background: var(--vscode-panel-background, var(--surface-base));
 }
@@ -614,11 +628,12 @@ body[data-surface="history"] .content { min-width: 0; background: var(--vscode-p
 }
 .parity-mode .log-action-rail .idea-toolbar-divider { width: 18px; height: 1px; margin: 2px 0; }
 .parity-mode .log-branch-pane {
+  grid-column: 2;
   min-width: 0;
   display: flex;
   flex-direction: column;
   padding: 0;
-  border-right: 1px solid var(--vscode-panel-border, var(--border-subtle));
+  border-right: 0;
   background: var(--vscode-sideBar-background, var(--surface-base));
   overflow: hidden;
 }
@@ -674,7 +689,8 @@ body[data-surface="history"] .content { min-width: 0; background: var(--vscode-p
 .parity-mode .log-branch-row > span { font-size: 11px; }
 .parity-mode .log-branch-row small { font-size: 8px; }
 .parity-mode .branch-tree-empty { padding: 2px 7px; color: var(--muted); font-size: 10px; }
-.parity-mode .log-history-pane { min-width: 0; min-height: 0; display: flex; flex-direction: column; }
+.parity-mode .log-splitter { grid-column: 3; grid-row: 1; }
+.parity-mode .log-history-pane { grid-column: 4; min-width: 0; min-height: 0; display: flex; flex-direction: column; }
 .parity-mode .log-filter-bar {
   flex: 0 0 38px;
   display: flex;
@@ -737,6 +753,7 @@ body[data-surface="history"] .content { min-width: 0; background: var(--vscode-p
 .parity-mode .graph-ref.local.current { background: transparent; }
 .parity-mode .load-more { border-radius: 3px; }
 .parity-mode .log-workspace .commit-detail {
+  grid-column: 5;
   min-width: 0;
   min-height: 0;
   max-height: none;
@@ -797,20 +814,22 @@ body[data-surface="history"] .content { min-width: 0; background: var(--vscode-p
 .parity-mode .commit-detail-empty { align-items: stretch; justify-content: flex-start; text-align: left; }
 
 @media (max-width: 1180px) {
-  .parity-mode .log-workspace { grid-template-columns: 30px minmax(174px, 212px) minmax(0, 1fr) minmax(222px, 282px); }
+  .parity-mode .log-workspace { grid-template-columns: 30px minmax(156px, min(var(--log-branch-width, 212px), 36%)) 6px minmax(0, 1fr) minmax(222px, 282px); }
   .parity-mode .log-column-header,
   .parity-mode .graph-row { grid-template-columns: 80px var(--graph-width) minmax(0, 1fr) 106px; }
 }
 @media (max-width: 860px) {
-  .parity-mode .log-workspace { grid-template-columns: 30px minmax(148px, 190px) minmax(0, 1fr); grid-template-rows: minmax(0, 1fr) minmax(132px, 36%); }
-  .parity-mode .log-workspace .commit-detail { grid-column: 3; grid-row: 2; border-top: 1px solid var(--vscode-panel-border, var(--border-subtle)); border-left: 0; }
-  .parity-mode .log-history-pane { grid-column: 3; grid-row: 1; }
+  .parity-mode .log-workspace { grid-template-columns: 30px minmax(148px, min(var(--log-branch-width, 190px), 42%)) 6px minmax(0, 1fr); grid-template-rows: minmax(0, 1fr) minmax(132px, 36%); }
+  .parity-mode .log-workspace .commit-detail { grid-column: 4; grid-row: 2; border-top: 1px solid var(--vscode-panel-border, var(--border-subtle)); border-left: 0; }
+  .parity-mode .log-history-pane { grid-column: 4; grid-row: 1; }
+  .parity-mode .log-splitter { grid-column: 3; grid-row: 1 / -1; }
   .parity-mode .log-branch-pane { grid-row: 1 / -1; }
   .parity-mode .log-action-rail { grid-row: 1 / -1; }
 }
 @media (max-width: 620px) {
   .parity-mode .log-workspace { grid-template-columns: 30px minmax(0, 1fr); }
   .parity-mode .log-branch-pane { display: none; }
+  .parity-mode .log-splitter { display: none; }
   .parity-mode .log-history-pane { grid-column: 2; }
   .parity-mode .log-workspace .commit-detail { grid-column: 2; }
   .parity-mode .log-column-header,

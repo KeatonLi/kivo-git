@@ -35,11 +35,15 @@ state:
   - Fix: align with IDEA's actionable Commit control: it enables after files are selected and validates a missing message on activation. Browser interaction confirmed both **Commit** and **Commit and Push…** enable after selecting a file and remain enabled while typing.
 - [P2, fixed] Checkbox automation and keyboard-equivalent state changes could bypass the click-only file-selection listener.
   - Fix: retain Shift-click behavior while also accepting the checkbox `change` event.
+- [P1, fixed] The branch tree and Graph had a fixed boundary, even though the reference Log gives the user control over the tree width.
+  - Fix: inserted a real vertical separator between the branch tree and the history table. Browser-fixture interaction verified mouse drag from 240 px to 335 px, `ArrowLeft` keyboard resizing, double-click reset to 240 px, and cleanup of the drag state after release. The separator hides with the branch tree in narrow panels.
+- [P1, fixed] Changed-file rows used one generic code icon, obscuring file type in the Commit surface.
+  - Fix: resolve the active VS Code file-icon theme on the extension-host side and send only CSP-safe image/font resources to the Commit webview. The matcher covers VS Code filename, parent-path, compound-extension, language, light, and high-contrast precedence, with a generic native fallback when a theme cannot supply an icon.
 
 ## Current visual review
 
 - Commit composition now follows the reference hierarchy: compact icon strip, a single blue **Changes** row, flat dense file rows, then a bottom-anchored Amend/message/Commit/Commit-and-Push base. The native View title is `Commit`.
-- Log composition now follows the reference hierarchy: action rail, searchable branch/tag tree, compact filters, **Author → Graph → Commit → Date** rows, and a right-hand Changed Files tree above commit text. The native View title is `Log: <branch>`.
+- The bottom container is now named **Kivo Git History**. Its content follows the reference hierarchy: action rail, searchable branch/tag tree, a draggable tree/history divider, compact filters, **Author → Graph → Commit → Date** rows, and a right-hand Changed Files tree above commit text. The branch is retained as native View context.
 - The browser fixture exercised selection, text/hash filtering, Commit enablement, Commit-and-Push enablement, initial details loading, and nested file-tree rendering. The only browser-console errors belonged to the cloud browser's own extension metadata bridge; none referenced Kivo Git media code.
 
 ## Findings
@@ -68,6 +72,7 @@ state:
 
 1. Browser fixture pass found a P1 root-layout collapse and two interaction-state defects; all three were fixed.
 2. Browser fixture recheck confirmed full-height Log, anchored Commit base, Commit/Commit-and-Push enablement, commit selection, Log text filtering, and no Kivo media console errors.
-3. Real Extension Host and source-image comparison remain unavailable in this workspace; the local Extension Host download fails before launch because this filesystem rejects archive ownership restoration.
+3. Browser-fixture recheck confirmed the History divider drag, keyboard resize, reset behavior, and release cleanup alongside the existing selection/filter/detail interactions.
+4. Real Extension Host and source-image comparison remain unavailable in this workspace; the local Extension Host download fails before launch because this filesystem rejects archive ownership restoration.
 
 final result: blocked

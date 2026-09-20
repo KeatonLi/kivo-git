@@ -1,5 +1,6 @@
 import * as vscode from 'vscode';
 import path from 'node:path';
+import { FileIconThemeResolver, type WebviewFileIcon } from './FileIconThemeResolver';
 import { GitClient } from './git/GitClient';
 import type { PullStrategy, RepositorySnapshot } from './git/types';
 import { SnapshotCoordinator } from './SnapshotCoordinator';
@@ -20,6 +21,7 @@ type WebviewMessage =
   | { type: 'setActiveChangelist'; id: string }
   | { type: 'moveFiles'; paths: string[]; listId: string };
 type OperationKind = 'commit' | 'checkout' | 'changelist' | 'move' | 'fetch' | 'pull' | 'push';
+type WebviewRepositorySnapshot = RepositorySnapshot & { fileIcons: Record<string, WebviewFileIcon> };
 
 export class IdeaGitViewProvider implements vscode.WebviewViewProvider, vscode.TextDocumentContentProvider, vscode.Disposable {
   static readonly changesViewType = KivoViewTypes.changes;
@@ -43,12 +45,14 @@ export class IdeaGitViewProvider implements vscode.WebviewViewProvider, vscode.T
   private syncGeneration = 0;
   private commitLimit = 80;
   private lastSnapshot?: RepositorySnapshot;
+  private readonly fileIconTheme = new FileIconThemeResolver();
+  private fileIconThemeRefresh?: Promise<void>;
   private readonly coordinator = new SnapshotCoordinator(
     () => this.getClient().then((client) => client.snapshot(this.commitLimit)),
     async (snapshot) => {
       this.lastSnapshot = snapshot;
       this.updateViewTitles(snapshot);
-      await this.postToReadyViews({ type: 'snapshot', payload: snapshot });
+      await this.postSnapshotToReadyViews(snapshot);
     },
     (error) => { void this.showEmpty(error); }
   );
@@ -63,7 +67,9 @@ export class IdeaGitViewProvider implements vscode.WebviewViewProvider, vscode.T
       vscode.workspace.onDidRenameFiles(() => this.scheduleRefresh()),
       vscode.workspace.onDidChangeConfiguration((event) => {
         if (event.affectsConfiguration('ideaGit')) this.configurePolling();
+        if (event.affectsConfiguration('workbench.iconTheme')) void this.refreshFileIconTheme();
       }),
+      vscode.window.onDidChangeActiveColorTheme(() => void this.refreshFileIconTheme()),
       vscode.workspace.onDidChangeWorkspaceFolders(() => {
         this.client = undefined;
         this.watchedRoot = undefined;
@@ -80,16 +86,14 @@ export class IdeaGitViewProvider implements vscode.WebviewViewProvider, vscode.T
     );
   }
 
-  resolveWebviewView(view: vscode.WebviewView): void {
+  async resolveWebviewView(view: vscode.WebviewView): Promise<void> {
     const surface = surfaceForViewType(view.viewType);
     if (!surface) throw new Error(`Unsupported Kivo Git view type: ${view.viewType}`);
     this.views.set(surface, view);
-    view.title = surface === 'changes' ? 'Commit' : 'Log';
+    view.title = surface === 'changes' ? 'Commit' : 'History';
     this.readyViews.delete(surface);
-    view.webview.options = {
-      enableScripts: true,
-      localResourceRoots: [vscode.Uri.joinPath(this.context.extensionUri, 'media')]
-    };
+    await this.refreshFileIconTheme();
+    this.configureWebviewResources(view);
     view.webview.html = this.html(view.webview, surface);
     view.webview.onDidReceiveMessage((message: WebviewMessage) => void this.handle(surface, message));
     view.onDidChangeVisibility(() => this.configurePolling());
@@ -151,6 +155,23 @@ export class IdeaGitViewProvider implements vscode.WebviewViewProvider, vscode.T
     await this.views.get(surface)?.webview.postMessage(message);
   }
 
+  private async postSnapshotToReadyViews(snapshot: RepositorySnapshot): Promise<void> {
+    await Promise.all([...this.readyViews].map((surface) => this.postSnapshotToView(surface, snapshot)));
+  }
+
+  private async postSnapshotToView(surface: KivoSurface, snapshot: RepositorySnapshot): Promise<void> {
+    if (!this.readyViews.has(surface)) return;
+    const view = this.views.get(surface);
+    if (!view) return;
+    const payload: WebviewRepositorySnapshot = {
+      ...snapshot,
+      fileIcons: surface === 'changes'
+        ? this.fileIconTheme.iconsFor(view.webview, snapshot.changes.map((change) => change.path))
+        : {}
+    };
+    await view.webview.postMessage({ type: 'snapshot', payload });
+  }
+
   private async getClient(): Promise<GitClient> {
     const workspace = vscode.workspace.workspaceFolders?.[0];
     if (!workspace) throw new Error('Open a folder containing a Git repository.');
@@ -185,7 +206,7 @@ export class IdeaGitViewProvider implements vscode.WebviewViewProvider, vscode.T
     if (message.type === 'ready') {
       this.readyViews.add(surface);
       await this.setSyncState(this.autoFetchPromise ? 'fetching' : this.syncError ? 'error' : 'idle', undefined, this.syncError);
-      if (this.lastSnapshot) await this.postToView(surface, { type: 'snapshot', payload: this.lastSnapshot });
+      if (this.lastSnapshot) await this.postSnapshotToView(surface, this.lastSnapshot);
       await this.refresh(true);
       return;
     }
@@ -390,8 +411,35 @@ export class IdeaGitViewProvider implements vscode.WebviewViewProvider, vscode.T
     }
     const history = this.views.get('history');
     if (history) {
-      history.title = `Log: ${snapshot.branch}`;
-      history.description = undefined;
+      history.title = 'History';
+      history.description = snapshot.branch;
+    }
+  }
+
+  private configureWebviewResources(view: vscode.WebviewView): void {
+    const roots = [
+      vscode.Uri.joinPath(this.context.extensionUri, 'media'),
+      ...this.fileIconTheme.localResourceRoots
+    ].filter((uri, index, values) => values.findIndex((candidate) => candidate.toString() === uri.toString()) === index);
+    view.webview.options = { enableScripts: true, localResourceRoots: roots };
+  }
+
+  private async refreshFileIconTheme(): Promise<void> {
+    if (this.fileIconThemeRefresh) return this.fileIconThemeRefresh;
+    const refresh = (async () => {
+      await this.fileIconTheme.refresh();
+      for (const view of this.views.values()) this.configureWebviewResources(view);
+      await Promise.all([...this.readyViews].map(async (surface) => {
+        const view = this.views.get(surface);
+        if (view) await this.postToView(surface, { type: 'fileIconCss', css: this.fileIconTheme.fontCss(view.webview) });
+      }));
+      if (this.lastSnapshot) await this.postSnapshotToReadyViews(this.lastSnapshot);
+    })();
+    this.fileIconThemeRefresh = refresh;
+    try {
+      await refresh;
+    } finally {
+      if (this.fileIconThemeRefresh === refresh) this.fileIconThemeRefresh = undefined;
     }
   }
 
@@ -409,9 +457,10 @@ export class IdeaGitViewProvider implements vscode.WebviewViewProvider, vscode.T
       <head>
         <meta charset="UTF-8">
         <meta name="viewport" content="width=device-width, initial-scale=1.0">
-        <meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src ${webview.cspSource}; font-src ${webview.cspSource}; script-src 'nonce-${nonce}';">
+        <meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src ${webview.cspSource} 'nonce-${nonce}'; font-src ${webview.cspSource}; img-src ${webview.cspSource} data:; script-src 'nonce-${nonce}';">
         <link rel="stylesheet" href="${codiconUri}">
         <link rel="stylesheet" href="${cssUri}">
+        <style id="kivo-file-icon-fonts" nonce="${nonce}">${this.fileIconTheme.fontCss(webview)}</style>
         <title>${IdeaGitViewProvider.productName}</title>
       </head>
       <body class="parity-mode" data-surface="${surface}">
