@@ -15,12 +15,13 @@ type WebviewMessage =
   | { type: 'commit'; message: string; paths: string[] }
   | { type: 'commitAndPush'; message: string; paths: string[] }
   | { type: 'checkout'; branch: string; remote: boolean }
+  | { type: 'createBranch'; startPoint: string }
   | { type: 'createChangelist' }
   | { type: 'renameChangelist'; id: string; name: string }
   | { type: 'deleteChangelist'; id: string; name: string }
   | { type: 'setActiveChangelist'; id: string }
   | { type: 'moveFiles'; paths: string[]; listId: string };
-type OperationKind = 'commit' | 'checkout' | 'changelist' | 'move' | 'fetch' | 'pull' | 'push';
+type OperationKind = 'commit' | 'checkout' | 'branch' | 'changelist' | 'move' | 'fetch' | 'pull' | 'push';
 type WebviewRepositorySnapshot = RepositorySnapshot & { fileIcons: Record<string, WebviewFileIcon> };
 
 export class IdeaGitViewProvider implements vscode.WebviewViewProvider, vscode.TextDocumentContentProvider, vscode.Disposable {
@@ -255,6 +256,9 @@ export class IdeaGitViewProvider implements vscode.WebviewViewProvider, vscode.T
         case 'checkout':
           await this.operation('checkout', `Switching to ${message.branch}…`, async () => client.checkout(message.branch, message.remote), `Switched to ${message.branch}`);
           return;
+        case 'createBranch':
+          await this.createBranch(client, message.startPoint);
+          return;
         case 'createChangelist':
           await this.createChangelist(client);
           return;
@@ -290,6 +294,19 @@ export class IdeaGitViewProvider implements vscode.WebviewViewProvider, vscode.T
     const name = await vscode.window.showInputBox({ title: 'Create Changelist', prompt: 'Changes made afterward will be assigned to this active changelist.', placeHolder: 'Changelist name', validateInput: (value) => value.trim() ? undefined : 'Enter a changelist name.' });
     if (name === undefined) return;
     await this.operation('changelist', 'Creating changelist…', () => client.createChangelist(name), `Created and activated ${name.trim()}`);
+  }
+
+  private async createBranch(client: GitClient, startPoint: string): Promise<void> {
+    const name = await vscode.window.showInputBox({
+      title: 'New Branch',
+      prompt: `Create and checkout a new branch from ${startPoint}.`,
+      placeHolder: 'feature/my-change',
+      ignoreFocusOut: true,
+      validateInput: (value) => value.trim() ? undefined : 'Enter a branch name.'
+    });
+    if (name === undefined) return;
+    const branch = name.trim();
+    await this.operation('branch', `Creating ${branch} from ${startPoint}…`, () => client.createBranch(branch, startPoint), `Created and switched to ${branch}`);
   }
 
   private async renameChangelist(client: GitClient, id: string, currentName: string): Promise<void> {

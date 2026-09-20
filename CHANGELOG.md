@@ -2,6 +2,11 @@
 
 ## Unreleased
 
+## 0.3.0-beta.12 - 2026-09-20
+
+- Added a real branch context menu to Kivo Git History. Right-click any local branch, remote ref, or tag to create and check out a new branch from that exact ref, check out an existing branch, or focus its history.
+- Added Git ref validation and integration coverage proving a new branch starts at the selected branch commit instead of the current HEAD.
+
 ## 0.3.0-beta.11 - 2026-09-20
 
 - Renamed the bottom Panel container to **Kivo Git History**, with the active branch retained as context instead of replacing the product name.

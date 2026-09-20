@@ -120,6 +120,23 @@ describe('GitClient integration', () => {
     expect(details.files).toEqual(expect.arrayContaining([expect.objectContaining({ path: 'feature.txt', status: 'A' })]));
   });
 
+  it('creates and checks out a new branch from the selected branch ref', async () => {
+    const root = await createRepository();
+    await git(root, ['branch', 'release/base']);
+    const selectedBranchHead = await git(root, ['rev-parse', 'release/base']);
+    await fs.appendFile(path.join(root, 'alpha.txt'), 'main moved on\n');
+    await git(root, ['add', 'alpha.txt']);
+    await git(root, ['commit', '-m', 'main moved on']);
+
+    const client = new GitClient(root);
+    await client.initialize();
+    await client.createBranch('feature/from-release', 'release/base');
+
+    expect(await git(root, ['branch', '--show-current'])).toBe('feature/from-release');
+    expect(await git(root, ['rev-parse', 'HEAD'])).toBe(selectedBranchHead);
+    expect((await client.snapshot()).branch).toBe('feature/from-release');
+  });
+
   it('groups changes and commits selected files without consuming unrelated staged changes', async () => {
     const root = await createRepository();
     await fs.appendFile(path.join(root, 'alpha.txt'), 'changed\n');

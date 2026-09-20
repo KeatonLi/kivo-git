@@ -23,7 +23,8 @@ const sharedMessages = new Set([
   'fetch',
   'pull',
   'push',
-  'checkout'
+  'checkout',
+  'createBranch'
 ]);
 
 const messagesBySurface: Record<KivoSurface, ReadonlySet<string>> = {

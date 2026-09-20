@@ -27,6 +27,7 @@ const ui = {
   lastFetchedAt: undefined,
   syncError: undefined,
   branchMotion: undefined,
+  branchContextMenu: undefined,
   listMenuId: undefined,
   focusedPath: persisted.focusedPath,
   selectionAnchor: undefined,
@@ -508,9 +509,15 @@ function renderCommitDetails(s) {
   </aside>`;
 }
 
+function renderLogBranchRow(branch, depth = 0) {
+  const kind = branch.kind === 'tag' ? 'tag' : 'branch';
+  const label = branch.leaf || branch.name;
+  return `<button class="log-branch-row ${branch.current ? 'current' : ''} ${ui.graphBranchFilter === branch.name ? 'selected' : ''}" style="--tree-indent:${depth * 13}px" data-log-branch="${escapeHtml(branch.name)}" data-branch-ref="${escapeHtml(branch.name)}" data-branch-remote="${branch.remote ? 'true' : 'false'}" data-branch-kind="${kind}" aria-pressed="${ui.graphBranchFilter === branch.name}" aria-haspopup="menu" title="Show ${escapeHtml(branch.name)} history · Right-click for ${kind} actions">${icon(branch.remote ? 'cloud' : kind === 'tag' ? 'tag' : 'git-branch')}<span>${escapeHtml(label)}</span>${branch.current ? '<small>HEAD</small>' : ''}</button>`;
+}
+
 function renderLogBranchTree(node, depth = 0) {
   const folders = [...node.directories.entries()].sort(([left], [right]) => left.localeCompare(right));
-  return `${folders.map(([name, child]) => `<div class="log-branch-folder" style="--tree-indent:${depth * 13}px">${icon('chevron-down')} ${icon('folder')}<span>${escapeHtml(name)}</span></div>${renderLogBranchTree(child, depth + 1)}`).join('')}${node.leaves.sort((left, right) => left.leaf.localeCompare(right.leaf)).map((branch) => `<button class="log-branch-row ${branch.current ? 'current' : ''} ${ui.graphBranchFilter === branch.name ? 'selected' : ''}" style="--tree-indent:${depth * 13}px" data-log-branch="${escapeHtml(branch.name)}" aria-pressed="${ui.graphBranchFilter === branch.name}" title="Show ${escapeHtml(branch.name)} history">${icon(branch.remote ? 'cloud' : 'git-branch')}<span>${escapeHtml(branch.leaf)}</span>${branch.current ? '<small>HEAD</small>' : ''}</button>`).join('')}`;
+  return `${folders.map(([name, child]) => `<div class="log-branch-folder" style="--tree-indent:${depth * 13}px">${icon('chevron-down')} ${icon('folder')}<span>${escapeHtml(name)}</span></div>${renderLogBranchTree(child, depth + 1)}`).join('')}${node.leaves.sort((left, right) => left.leaf.localeCompare(right.leaf)).map((branch) => renderLogBranchRow(branch, depth)).join('')}`;
 }
 
 function renderLogBranchPane(s) {
@@ -518,9 +525,9 @@ function renderLogBranchPane(s) {
   const matches = (item) => !query || item.name.toLowerCase().includes(query);
   const local = s.branches.filter((branch) => !branch.remote && matches(branch));
   const remote = s.branches.filter((branch) => branch.remote && matches(branch));
-  const tags = (s.tags || []).filter(matches).map((tag) => ({ ...tag, path: tag.name, name: tag.name, remote: false }));
+  const tags = (s.tags || []).filter(matches).map((tag) => ({ ...tag, path: tag.name, name: tag.name, remote: false, kind: 'tag' }));
   const current = s.branches.find((branch) => branch.current && !branch.remote);
-  const root = current && matches(current) ? `<button class="log-branch-row current ${ui.graphBranchFilter === current.name ? 'selected' : ''}" data-log-branch="${escapeHtml(current.name)}" aria-pressed="${ui.graphBranchFilter === current.name}" title="Show ${escapeHtml(current.name)} history">${icon('git-branch')}<span>${escapeHtml(current.name)}</span><small>HEAD</small></button>` : '';
+  const root = current && matches(current) ? renderLogBranchRow({ ...current, leaf: current.name }) : '';
   const group = (label, tree, emptyLabel) => `<section class="log-branch-group"><div class="log-branch-group-title">${icon('chevron-down')}<span>${label}</span></div>${tree || `<div class="branch-tree-empty">${emptyLabel}</div>`}</section>`;
   return `<aside class="log-branch-pane" id="kivo-log-branches" aria-label="History branches">
     <label class="log-branch-search">${icon('search')}<input id="log-branch-search" aria-label="Branch or tag" placeholder="Branch or tag" value="${escapeHtml(ui.logBranchQuery)}"></label>
@@ -531,6 +538,22 @@ function renderLogBranchPane(s) {
       ${tags.length ? group('Tags', renderLogBranchTree(buildPathTree(tags)), 'No tags') : ''}
     </div>
   </aside>`;
+}
+
+function renderBranchContextMenu() {
+  const menu = ui.branchContextMenu;
+  if (!menu) return '';
+  const width = 248;
+  const height = menu.kind === 'tag' || menu.current ? 106 : 138;
+  const left = clamp(menu.x, 8, Math.max(8, window.innerWidth - width - 8));
+  const top = clamp(menu.y, 8, Math.max(8, window.innerHeight - height - 8));
+  const refLabel = menu.kind === 'tag' ? 'tag' : 'branch';
+  return `<div class="branch-context-menu" data-branch-context role="menu" aria-label="Actions for ${escapeHtml(menu.ref)}" style="left:${left}px;top:${top}px">
+    <div class="branch-context-title"><span>${icon(menu.remote ? 'cloud' : menu.kind === 'tag' ? 'tag' : 'git-branch')}</span><strong title="${escapeHtml(menu.ref)}">${escapeHtml(menu.ref)}</strong></div>
+    <button role="menuitem" data-branch-context-action="new" ${ui.busy ? 'disabled' : ''}>${icon('git-branch-create')}<span>New Branch from this ${refLabel}…</span></button>
+    ${menu.kind === 'branch' && !menu.current ? `<button role="menuitem" data-branch-context-action="checkout" ${ui.busy ? 'disabled' : ''}>${icon('check')}<span>Checkout</span></button>` : ''}
+    <button role="menuitem" data-branch-context-action="filter">${icon('filter')}<span>Show History</span></button>
+  </div>`;
 }
 
 function renderLogActionRail() {
@@ -584,6 +607,7 @@ function renderGraph(s) {
       </section>
       ${renderCommitDetails(s)}
     </div>
+    ${renderBranchContextMenu()}
   </div>`;
 }
 
@@ -658,6 +682,39 @@ function resetLogBranchWidth(event) {
   const splitter = event.currentTarget;
   applyLogBranchWidth(splitter, LOG_BRANCH_DEFAULT_WIDTH);
   persist();
+}
+
+function openBranchContextMenu(event) {
+  event.preventDefault();
+  const row = event.currentTarget;
+  const ref = row.dataset.branchRef;
+  if (!ref) return;
+  ui.branchContextMenu = {
+    ref,
+    remote: row.dataset.branchRemote === 'true',
+    current: row.classList.contains('current'),
+    kind: row.dataset.branchKind === 'tag' ? 'tag' : 'branch',
+    x: event.clientX,
+    y: event.clientY
+  };
+  render();
+  requestAnimationFrame(() => app.querySelector('[data-branch-context-action="new"]')?.focus());
+}
+
+function runBranchContextAction(event) {
+  event.preventDefault();
+  event.stopPropagation();
+  const menu = ui.branchContextMenu;
+  const action = event.currentTarget.dataset.branchContextAction;
+  if (!menu || !action) return;
+  ui.branchContextMenu = undefined;
+  if (action === 'new' && !ui.busy) post('createBranch', { startPoint: menu.ref });
+  if (action === 'checkout' && !ui.busy) post('checkout', { branch: menu.ref, remote: menu.remote });
+  if (action === 'filter') {
+    ui.graphBranchFilter = menu.ref;
+    persist();
+  }
+  render();
 }
 
 function adjustLogBranchWidth(event) {
@@ -780,6 +837,8 @@ function bind() {
     persist();
     render();
   });
+  once('[data-log-branch]', 'contextmenu', openBranchContextMenu);
+  once('[data-branch-context-action]', 'click', runBranchContextAction);
   once('[data-log-splitter]', 'pointerdown', startLogResize);
   once('[data-log-splitter]', 'dblclick', resetLogBranchWidth);
   once('[data-log-splitter]', 'keydown', adjustLogBranchWidth);
@@ -1155,6 +1214,12 @@ document.addEventListener('keydown', (event) => {
     finishLogResize(false);
     return;
   }
+  if (ui.branchContextMenu) {
+    event.preventDefault();
+    ui.branchContextMenu = undefined;
+    render();
+    return;
+  }
   if (ui.pullMenuOpen) {
     event.preventDefault();
     ui.pullMenuOpen = false;
@@ -1191,6 +1256,11 @@ document.addEventListener('keydown', (event) => {
 });
 
 document.addEventListener('click', (event) => {
+  if (ui.branchContextMenu && !event.target.closest('[data-branch-context]')) {
+    ui.branchContextMenu = undefined;
+    render();
+    return;
+  }
   if (ui.pullMenuOpen && !event.target.closest('.sync-action-wrap')) {
     ui.pullMenuOpen = false;
     render();

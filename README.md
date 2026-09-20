@@ -10,6 +10,7 @@ Kivo Git is for developers who want the familiar IDEA Git workflow in VS Code: a
 - IDE-style named changelists with drag-and-drop assignment
 - Selective commits without forcing a staged/unstaged workflow
 - Local and remote branch popup with checkout
+- IDEA-style branch context menu: create and checkout a new branch from any local branch, remote ref, or tag
 - Ahead/behind state plus fetch, pull, and push actions
 - Quiet background auto-fetch with explicit incoming and outgoing commit counts
 - Native VS Code diff preview on single-click and a pinned editor on double-click
@@ -43,7 +44,7 @@ Kivo Git checks remote refs in the background every five minutes while its view 
 From a clean `main` branch, run:
 
 ```bash
-npm run release -- 0.3.0-beta.11
+npm run release -- 0.3.0-beta.12
 ```
 
 The release tool verifies the repository and version, promotes the Unreleased changelog, runs all checks and tests, packages the VSIX, and pushes a version commit. GitHub Actions then creates the matching tag and publishes the VSIX plus SHA-256 checksum to GitHub Releases. Pre-release semantic versions are published as GitHub pre-releases.

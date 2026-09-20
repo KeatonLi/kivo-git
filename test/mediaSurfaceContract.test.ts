@@ -23,6 +23,9 @@ describe('webview surface composition', () => {
     expect(main).toContain('class="log-branch-pane"');
     expect(main).toContain('data-log-splitter');
     expect(main).toContain('Resize History branch tree');
+    expect(main).toContain('data-branch-context-action="new"');
+    expect(main).toContain("once('[data-log-branch]', 'contextmenu', openBranchContextMenu)");
+    expect(main).toContain("post('createBranch', { startPoint: menu.ref })");
     expect(main).toContain('<span>AUTHOR</span><span>GRAPH</span><span>COMMIT</span><span>DATE</span>');
     expect(main).toContain('class="commit-files file-tree"');
     expect(main).toContain("const target = document.createElement('main');");

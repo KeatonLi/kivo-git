@@ -281,6 +281,21 @@ export class GitClient {
     await this.run(['switch', '--track', '-c', localName, branchName]);
   }
 
+  /**
+   * Create a local branch at the selected local or remote ref, then make it
+   * current. This is deliberately not a tracking-branch operation: "New
+   * Branch from…" should preserve the selected ref as the start point without
+   * silently inheriting an upstream.
+   */
+  async createBranch(branchName: string, startPoint: string): Promise<void> {
+    const name = branchName.trim();
+    if (!name) throw new Error('Enter a branch name.');
+    if (!startPoint) throw new Error('Choose a branch or tag to start from.');
+    await this.run(['check-ref-format', '--branch', name]);
+    await this.run(['rev-parse', '--verify', '--quiet', `${startPoint}^{commit}`]);
+    await this.run(['switch', '-c', name, startPoint]);
+  }
+
   async fetch(background = false): Promise<void> {
     await this.run(['fetch', '--all', '--prune'], 8 * 1024 * 1024, background
       ? { timeout: 30000, env: { GIT_TERMINAL_PROMPT: '0', GCM_INTERACTIVE: 'Never' } }

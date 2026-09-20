@@ -28,7 +28,7 @@ describe('Kivo Git two-surface routing', () => {
   });
 
   it('allows synchronisation and branch operations from either surface', () => {
-    for (const message of ['ready', 'refresh', 'fetch', 'pull', 'push', 'checkout']) {
+    for (const message of ['ready', 'refresh', 'fetch', 'pull', 'push', 'checkout', 'createBranch']) {
       expect(isMessageAllowedOnSurface('changes', message)).toBe(true);
       expect(isMessageAllowedOnSurface('history', message)).toBe(true);
     }

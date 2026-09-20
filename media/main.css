@@ -342,6 +342,14 @@ body.log-resizing * { cursor: col-resize !important; user-select: none; }
 .branch-row.current { color: var(--accent); }
 .branch-row-name { flex: 1; overflow: hidden; text-overflow: ellipsis; }
 .branch-row small { color: var(--muted); }
+.branch-context-menu { position: fixed; z-index: 18; width: min(248px, calc(100vw - 16px)); padding: 4px; border: 1px solid var(--vscode-widget-border, var(--border-subtle)); border-radius: 5px; background: var(--vscode-menu-background, var(--vscode-editorWidget-background)); box-shadow: var(--shadow-popover); animation: branch-context-in 110ms var(--ease); }
+.branch-context-title { min-width: 0; display: flex; align-items: center; gap: 6px; padding: 5px 7px 6px; border-bottom: 1px solid color-mix(in srgb, var(--vscode-panel-border, var(--border-subtle)) 62%, transparent); color: var(--muted); }
+.branch-context-title .codicon { color: var(--vscode-icon-foreground, var(--muted)); font-size: 13px; }
+.branch-context-title strong { min-width: 0; overflow: hidden; color: var(--vscode-foreground); text-overflow: ellipsis; white-space: nowrap; font-size: 11px; font-weight: 600; }
+.branch-context-menu button { width: 100%; min-height: 27px; display: flex; align-items: center; gap: 7px; padding: 0 7px; border-radius: 3px; background: transparent; color: var(--vscode-menu-foreground, var(--vscode-foreground)); text-align: left; cursor: pointer; }
+.branch-context-menu button .codicon { width: 14px; color: var(--vscode-icon-foreground, var(--muted)); font-size: 13px; }
+.branch-context-menu button:hover:not(:disabled), .branch-context-menu button:focus-visible { outline: none; background: var(--vscode-menu-selectionBackground, var(--vscode-list-hoverBackground)); color: var(--vscode-menu-selectionForeground, var(--vscode-foreground)); }
+.branch-context-menu button:disabled { opacity: .5; }
 .no-results, .inline-empty { color: var(--muted); padding: 8px 12px; }
 
 .empty-state { height: 100%; display: grid; align-content: center; justify-items: center; padding: 30px; text-align: center; color: var(--muted); }
@@ -367,6 +375,7 @@ body.log-resizing * { cursor: col-resize !important; user-select: none; }
 @keyframes toast-out { to { opacity: 0; transform: translateY(5px) scale(.98); } }
 @keyframes drop-ready { to { box-shadow: inset 0 0 0 1px var(--accent), 0 0 0 2px color-mix(in srgb, var(--accent) 14%, transparent); } }
 @keyframes float { 50% { transform: translateY(-4px); } }
+@keyframes branch-context-in { from { opacity: 0; transform: translateY(-3px) scale(.985); } }
 
 @media (max-width: 620px) {
   .graph-toolbar-head { flex-wrap: wrap; }
