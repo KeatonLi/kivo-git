@@ -2,6 +2,11 @@
 
 ## Unreleased
 
+## 0.3.0-beta.13 - 2026-09-20
+
+- Added the Kivo visual layer without changing the IDEA-style layout: restrained cyan-violet accents, clearer sync direction badges, focused branch and commit states, file status signals, tactile toolbar/commit controls, and Kivo Graph/Changes marks at the two surface entrances.
+- Preserved the compact density and reduced-motion behavior while adding state-driven hover, focus, selected-row, and detail feedback.
+
 ## 0.3.0-beta.12 - 2026-09-20
 
 - Added a real branch context menu to Kivo Git History. Right-click any local branch, remote ref, or tag to create and check out a new branch from that exact ref, check out an existing branch, or focus its history.

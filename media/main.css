@@ -17,6 +17,11 @@
   --surface-soft: color-mix(in srgb, var(--surface-base) 94%, var(--vscode-foreground) 6%);
   --surface-accent: color-mix(in srgb, var(--surface-base) 88%, var(--accent) 12%);
   --shadow-popover: 0 14px 36px rgba(0,0,0,.28), 0 2px 8px rgba(0,0,0,.18);
+  --kivo-cyan: #5fe3ff;
+  --kivo-violet: #9b8cff;
+  --kivo-accent: color-mix(in srgb, var(--accent) 72%, var(--kivo-cyan));
+  --kivo-accent-soft: color-mix(in srgb, var(--kivo-accent) 11%, transparent);
+  --kivo-line: color-mix(in srgb, var(--kivo-accent) 34%, var(--vscode-panel-border));
 }
 
 * { box-sizing: border-box; }
@@ -429,6 +434,7 @@ body.log-resizing * { cursor: col-resize !important; user-select: none; }
 .parity-mode .idea-toolbar-button:focus-visible { box-shadow: inset 0 0 0 1px var(--accent); }
 .parity-mode .idea-toolbar-button:disabled { opacity: .42; }
 .parity-mode .idea-toolbar-button .codicon { font-size: 14px; }
+.parity-mode .idea-toolbar-button .kivo-toolbar-mark { width: 14px; height: 14px; color: var(--kivo-accent); stroke-width: 1.8; }
 .parity-mode .idea-toolbar-divider {
   width: 1px;
   height: 17px;
@@ -479,6 +485,8 @@ body[data-surface="changes"] .content { background: var(--vscode-sideBar-backgro
   font-size: 11px;
   font-weight: 650;
 }
+.parity-mode .changes-heading-label { min-width: 0; display: inline-flex; align-items: center; gap: 5px; }
+.parity-mode .changes-heading-icon { width: 13px; height: 13px; color: color-mix(in srgb, var(--kivo-cyan) 82%, currentColor); stroke-width: 1.8; }
 .parity-mode .commit-changes-heading small {
   min-width: 12px;
   color: inherit;
@@ -846,3 +854,158 @@ body[data-surface="history"] .content { min-width: 0; background: var(--vscode-p
   .parity-mode .log-column-header > span:first-child,
   .parity-mode .graph-row .log-author { display: none; }
 }
+
+/* Kivo visual layer ------------------------------------------------------
+ * The IDEA geometry stays intact. This layer gives the same tool windows a
+ * recognisable Kivo signature through restrained spectral accents, clearer
+ * state hierarchy, and tactile controls instead of new panels or cards.
+ */
+.parity-mode .commit-toolbar,
+.parity-mode .log-filter-bar,
+.parity-mode .commit-detail-toolbar {
+  position: relative;
+  background: linear-gradient(100deg, color-mix(in srgb, var(--kivo-cyan) 3%, var(--surface-base)), var(--surface-base) 46%, color-mix(in srgb, var(--kivo-violet) 3%, var(--surface-base)));
+}
+.parity-mode .commit-toolbar::after,
+.parity-mode .log-filter-bar::after,
+.parity-mode .commit-detail-toolbar::after {
+  content: '';
+  position: absolute;
+  right: 0;
+  bottom: -1px;
+  left: 0;
+  height: 1px;
+  background: linear-gradient(90deg, color-mix(in srgb, var(--kivo-cyan) 52%, transparent), transparent 46%, color-mix(in srgb, var(--kivo-violet) 46%, transparent));
+  opacity: .72;
+  pointer-events: none;
+}
+.parity-mode .idea-toolbar-button {
+  transition: background 120ms ease, color 120ms ease, transform 90ms var(--ease), box-shadow 120ms ease;
+}
+.parity-mode .idea-toolbar-button::after {
+  content: '';
+  position: absolute;
+  inset: 3px;
+  border: 1px solid color-mix(in srgb, var(--kivo-accent) 45%, transparent);
+  border-radius: 3px;
+  opacity: 0;
+  transform: scale(.82);
+  transition: opacity 120ms ease, transform 140ms var(--ease);
+  pointer-events: none;
+}
+.parity-mode .idea-toolbar-button:hover:not(:disabled)::after,
+.parity-mode .idea-toolbar-button:focus-visible::after { opacity: 1; transform: scale(1); }
+.parity-mode .idea-toolbar-button:active:not(:disabled) { transform: translateY(1px) scale(.94); }
+.parity-mode .idea-toolbar-button.incoming-count .codicon { color: var(--warning); }
+.parity-mode .idea-toolbar-button.outgoing-count .codicon { color: var(--kivo-accent); }
+.parity-mode .tool-count {
+  animation: kivo-count-in 180ms var(--ease) both;
+  border: 1px solid color-mix(in srgb, currentColor 35%, transparent);
+  box-shadow: 0 1px 5px color-mix(in srgb, currentColor 22%, transparent);
+}
+.parity-mode .incoming-count .tool-count { background: color-mix(in srgb, var(--warning) 80%, var(--vscode-badge-background)); color: var(--vscode-badge-foreground, #fff); }
+.parity-mode .outgoing-count .tool-count { background: linear-gradient(135deg, var(--kivo-cyan), var(--kivo-violet)); color: #111827; }
+
+.parity-mode .commit-changes-heading {
+  position: relative;
+  background: linear-gradient(100deg, color-mix(in srgb, var(--idea-selection) 88%, var(--kivo-cyan) 12%), var(--idea-selection));
+  box-shadow: inset 2px 0 0 var(--kivo-cyan), 0 1px 7px color-mix(in srgb, var(--kivo-accent) 13%, transparent);
+}
+.parity-mode .active-list .list-heading {
+  background: linear-gradient(90deg, var(--kivo-accent-soft), transparent 78%);
+  box-shadow: inset 2px 0 0 color-mix(in srgb, var(--kivo-accent) 70%, transparent);
+}
+.parity-mode .file-row {
+  transition: background 120ms ease, box-shadow 120ms ease, transform 120ms var(--ease), opacity 130ms ease;
+}
+.parity-mode .file-row:hover { transform: translateX(1px); box-shadow: inset 2px 0 0 color-mix(in srgb, var(--kivo-accent) 58%, transparent); }
+.parity-mode .file-row.selected { background: linear-gradient(90deg, color-mix(in srgb, var(--idea-selection) 60%, transparent), transparent 92%); }
+.parity-mode .file-row .status {
+  min-width: 15px;
+  width: 15px;
+  height: 15px;
+  display: inline-grid;
+  place-items: center;
+  border-radius: 4px;
+  font-size: 8px;
+  line-height: 1;
+  background: color-mix(in srgb, currentColor 12%, transparent);
+}
+.parity-mode .file-row .status.modified,
+.parity-mode .file-row .status.renamed { background: color-mix(in srgb, var(--warning) 14%, transparent); }
+.parity-mode .file-row .status.added,
+.parity-mode .file-row .status.untracked { background: color-mix(in srgb, var(--success) 14%, transparent); }
+.parity-mode .file-row .status.deleted,
+.parity-mode .file-row .status.conflict { background: color-mix(in srgb, var(--danger) 14%, transparent); }
+.parity-mode .commit-panel {
+  background: linear-gradient(100deg, color-mix(in srgb, var(--kivo-cyan) 2%, var(--surface-base)), var(--surface-base) 52%, color-mix(in srgb, var(--kivo-violet) 3%, var(--surface-base)));
+}
+.parity-mode .commit-panel textarea {
+  transition: border-color 140ms ease, box-shadow 140ms ease, background 140ms ease;
+}
+.parity-mode .commit-panel textarea:focus {
+  border-color: var(--kivo-accent);
+  background: color-mix(in srgb, var(--vscode-input-background) 95%, var(--kivo-accent) 5%);
+  box-shadow: 0 0 0 1px color-mix(in srgb, var(--kivo-accent) 44%, transparent), 0 4px 18px color-mix(in srgb, var(--kivo-accent) 8%, transparent);
+}
+.parity-mode .primary-button {
+  border: 1px solid color-mix(in srgb, var(--kivo-accent) 38%, var(--vscode-button-background));
+  background: linear-gradient(135deg, color-mix(in srgb, var(--vscode-button-background) 84%, var(--kivo-cyan) 16%), var(--vscode-button-background));
+  box-shadow: 0 2px 8px color-mix(in srgb, var(--kivo-accent) 14%, transparent);
+  transition: background 130ms ease, box-shadow 130ms ease, transform 90ms var(--ease), opacity 130ms ease;
+}
+.parity-mode .primary-button:hover:not(:disabled) { background: linear-gradient(135deg, color-mix(in srgb, var(--vscode-button-hoverBackground) 80%, var(--kivo-cyan) 20%), var(--vscode-button-hoverBackground)); box-shadow: 0 4px 14px color-mix(in srgb, var(--kivo-accent) 22%, transparent); }
+.parity-mode .primary-button:active:not(:disabled) { transform: translateY(1px) scale(.98); }
+
+.parity-mode .log-workspace {
+  background: radial-gradient(ellipse 50% 32% at 48% 0%, color-mix(in srgb, var(--kivo-cyan) 4%, transparent), transparent 70%), var(--vscode-panel-background, var(--surface-base));
+}
+.parity-mode .log-action-rail {
+  background: linear-gradient(180deg, color-mix(in srgb, var(--kivo-cyan) 3%, var(--vscode-sideBar-background)), var(--vscode-sideBar-background) 50%, color-mix(in srgb, var(--kivo-violet) 3%, var(--vscode-sideBar-background)));
+}
+.parity-mode .log-action-rail .idea-toolbar-button:hover:not(:disabled) { transform: translateX(1px); }
+.parity-mode .log-branch-pane {
+  background: linear-gradient(90deg, var(--vscode-sideBar-background), color-mix(in srgb, var(--kivo-cyan) 2%, var(--vscode-sideBar-background)));
+}
+.parity-mode .log-branch-search { transition: border-color 140ms ease, box-shadow 140ms ease, background 140ms ease; }
+.parity-mode .log-branch-search:focus-within {
+  border-color: var(--kivo-accent);
+  background: color-mix(in srgb, var(--vscode-input-background) 96%, var(--kivo-accent) 4%);
+  box-shadow: 0 0 0 1px color-mix(in srgb, var(--kivo-accent) 28%, transparent), 0 4px 14px color-mix(in srgb, var(--kivo-accent) 7%, transparent);
+}
+.parity-mode .log-branch-row { transition: background 120ms ease, color 120ms ease, box-shadow 120ms ease, transform 120ms var(--ease); }
+.parity-mode .log-branch-row:hover { transform: translateX(1px); box-shadow: inset 2px 0 0 color-mix(in srgb, var(--kivo-accent) 48%, transparent); }
+.parity-mode .log-branch-row.current:not(.selected) { color: var(--kivo-accent); box-shadow: inset 2px 0 0 var(--kivo-accent); }
+.parity-mode .log-branch-row.selected {
+  background: linear-gradient(90deg, color-mix(in srgb, var(--idea-selection) 82%, var(--kivo-cyan) 18%), var(--idea-selection));
+  box-shadow: inset 2px 0 0 var(--kivo-cyan), 0 1px 8px color-mix(in srgb, var(--kivo-accent) 10%, transparent);
+}
+.parity-mode .log-splitter::after { background: linear-gradient(180deg, transparent, var(--kivo-line) 20%, var(--kivo-line) 80%, transparent); }
+.parity-mode .log-splitter:hover::after,
+.parity-mode .log-splitter:focus-visible::after,
+.parity-mode.log-resizing .log-splitter::after { background: linear-gradient(180deg, transparent, var(--kivo-accent) 18%, var(--kivo-violet) 82%, transparent); box-shadow: 0 0 8px color-mix(in srgb, var(--kivo-accent) 40%, transparent); }
+.parity-mode .graph-row { transition: background 120ms ease, box-shadow 120ms ease, color 120ms ease; }
+.parity-mode .graph-row:hover { background: linear-gradient(90deg, color-mix(in srgb, var(--kivo-accent) 5%, transparent), var(--vscode-list-hoverBackground) 72%); }
+.parity-mode .graph-row.selected {
+  background: linear-gradient(90deg, color-mix(in srgb, var(--idea-selection) 86%, var(--kivo-cyan) 14%), var(--idea-selection));
+  box-shadow: inset 2px 0 0 var(--kivo-cyan), 0 1px 10px color-mix(in srgb, var(--kivo-accent) 8%, transparent);
+}
+.parity-mode .graph-row.selected .graph-node { filter: drop-shadow(0 0 3px color-mix(in srgb, var(--kivo-accent) 55%, transparent)); }
+.parity-mode .graph-node.merge { filter: drop-shadow(0 0 3px color-mix(in srgb, var(--kivo-violet) 35%, transparent)); }
+.parity-mode .graph-ref.local.current { color: var(--kivo-accent); }
+.parity-mode .graph-ref.remote { color: color-mix(in srgb, var(--vscode-textLink-foreground) 78%, var(--kivo-cyan)); }
+.parity-mode .graph-ref.tag { color: color-mix(in srgb, var(--warning) 82%, var(--kivo-violet)); }
+.parity-mode .commit-detail {
+  background: linear-gradient(180deg, color-mix(in srgb, var(--kivo-violet) 2%, var(--vscode-panel-background)), var(--vscode-panel-background));
+}
+.parity-mode .details-section-heading { border-bottom: 1px solid color-mix(in srgb, var(--kivo-line) 45%, transparent); }
+.parity-mode .details-count { padding: 1px 5px; border: 1px solid color-mix(in srgb, var(--kivo-accent) 26%, transparent); border-radius: 7px; background: var(--kivo-accent-soft); color: var(--kivo-accent); }
+.parity-mode .commit-file { transition: background 120ms ease, box-shadow 120ms ease, transform 120ms var(--ease); }
+.parity-mode .commit-file:hover,
+.parity-mode .commit-file:focus-visible { box-shadow: inset 2px 0 0 color-mix(in srgb, var(--kivo-accent) 52%, transparent); transform: translateX(1px); }
+.parity-mode .commit-body { border-left: 2px solid var(--kivo-accent); border-radius: 0 3px 3px 0; background: color-mix(in srgb, var(--kivo-accent) 4%, transparent); }
+.parity-mode .load-more { background: linear-gradient(100deg, color-mix(in srgb, var(--kivo-cyan) 7%, var(--vscode-input-background)), color-mix(in srgb, var(--kivo-violet) 6%, var(--vscode-input-background))); transition: background 130ms ease, border-color 130ms ease, box-shadow 130ms ease, transform 90ms var(--ease); }
+.parity-mode .load-more:hover:not(:disabled),
+.parity-mode .load-more:focus-visible { border-color: var(--kivo-accent); box-shadow: 0 3px 12px color-mix(in srgb, var(--kivo-accent) 12%, transparent); }
+
+@keyframes kivo-count-in { from { opacity: 0; transform: translateY(-3px) scale(.78); } to { opacity: 1; transform: translateY(0) scale(1); } }

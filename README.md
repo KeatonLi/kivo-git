@@ -44,7 +44,7 @@ Kivo Git checks remote refs in the background every five minutes while its view 
 From a clean `main` branch, run:
 
 ```bash
-npm run release -- 0.3.0-beta.12
+npm run release -- 0.3.0-beta.13
 ```
 
 The release tool verifies the repository and version, promotes the Unreleased changelog, runs all checks and tests, packages the VSIX, and pushes a version commit. GitHub Actions then creates the matching tag and publishes the VSIX plus SHA-256 checksum to GitHub Releases. Pre-release semantic versions are published as GitHub pre-releases.

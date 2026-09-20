@@ -39,6 +39,8 @@ state:
   - Fix: inserted a real vertical separator between the branch tree and the history table. Browser-fixture interaction verified mouse drag from 240 px to 335 px, `ArrowLeft` keyboard resizing, double-click reset to 240 px, and cleanup of the drag state after release. The separator hides with the branch tree in narrow panels.
 - [P1, fixed] Right-clicking a History branch opened the browser's Cut/Copy/Paste menu, so a branch could not be used as the start point for a new branch.
   - Fix: the webview now owns the branch context menu and sends a validated `createBranch` operation to Git. The new branch is created from the selected local/remote ref and checked out immediately.
+- [P1, fixed] The parity layout was structurally correct but visually indistinguishable from a plain host theme, with weak state hierarchy between sync, selection, and detail regions.
+  - Fix: added a restrained Kivo visual layer for accents, directional sync badges, selected rows, current branches, file status signals, tactile controls, and Kivo Graph/Changes entry marks without changing the IDEA geometry.
 - [P1, fixed] Changed-file rows used one generic code icon, obscuring file type in the Commit surface.
   - Fix: resolve the active VS Code file-icon theme on the extension-host side and send only CSP-safe image/font resources to the Commit webview. The matcher covers VS Code filename, parent-path, compound-extension, language, light, and high-contrast precedence, with a generic native fallback when a theme cannot supply an icon.
 

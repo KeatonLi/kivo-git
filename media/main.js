@@ -328,14 +328,14 @@ function renderCommitToolbar(s) {
   return `<header class="commit-toolbar" aria-label="Commit tool window actions" aria-busy="${syncing}">
     <button class="idea-toolbar-button" data-action="refresh" aria-label="Refresh changes" title="Refresh changes" ${ui.busy ? 'disabled' : ''}>${icon('refresh')}</button>
     <span class="idea-toolbar-divider" aria-hidden="true"></span>
-    <button class="idea-toolbar-button" data-action="show-log" aria-label="Open Kivo Git History in the bottom panel" title="Open Kivo Git History">${icon('history')}</button>
+    <button class="idea-toolbar-button" data-action="show-log" aria-label="Open Kivo Git History in the bottom panel" title="Open Kivo Git History">${kivoIcon('graph', 'kivo-toolbar-mark')}</button>
     <button class="idea-toolbar-button" data-action="branches" aria-label="Git branches, current branch ${escapeHtml(s.branch)}" title="Branches: ${escapeHtml(s.branch)}" aria-haspopup="dialog" aria-expanded="${ui.branchOpen}">${icon('git-branch')}</button>
     <button class="idea-toolbar-button ${syncing ? 'working' : ''}" data-action="fetch" aria-label="${syncing ? 'Checking remote' : 'Fetch remote updates'}" title="${syncing ? 'Checking remote' : 'Fetch remote updates'}" ${ui.busy || syncing ? 'disabled' : ''}>${icon(fetchIcon, syncing || ui.operationKind === 'fetch' ? 'codicon-modifier-spin' : '')}</button>
     <div class="sync-action-wrap compact-sync-action">
-      <button class="idea-toolbar-button ${s.behind ? 'has-count' : ''}" data-action="pull-menu" aria-label="${escapeHtml(pullTitle)}" title="${escapeHtml(pullTitle)}" aria-haspopup="menu" aria-expanded="${ui.pullMenuOpen}" ${!hasUpstream || !s.behind || ui.busy || syncing ? 'disabled' : ''}>${icon('arrow-down')}${s.behind ? `<span class="tool-count">${s.behind}</span>` : ''}</button>
+    <button class="idea-toolbar-button ${s.behind ? 'has-count incoming-count' : ''}" data-action="pull-menu" aria-label="${escapeHtml(pullTitle)}" title="${escapeHtml(pullTitle)}" aria-haspopup="menu" aria-expanded="${ui.pullMenuOpen}" ${!hasUpstream || !s.behind || ui.busy || syncing ? 'disabled' : ''}>${icon('arrow-down')}${s.behind ? `<span class="tool-count">${s.behind}</span>` : ''}</button>
       ${renderPullMenu()}
     </div>
-    <button class="idea-toolbar-button ${s.ahead ? 'has-count' : ''}" data-action="push" aria-label="${escapeHtml(pushTitle)}" title="${escapeHtml(pushTitle)}" ${!hasUpstream || !s.ahead || ui.busy || syncing ? 'disabled' : ''}>${icon('arrow-up')}${s.ahead ? `<span class="tool-count">${s.ahead}</span>` : ''}</button>
+    <button class="idea-toolbar-button ${s.ahead ? 'has-count outgoing-count' : ''}" data-action="push" aria-label="${escapeHtml(pushTitle)}" title="${escapeHtml(pushTitle)}" ${!hasUpstream || !s.ahead || ui.busy || syncing ? 'disabled' : ''}>${icon('arrow-up')}${s.ahead ? `<span class="tool-count">${s.ahead}</span>` : ''}</button>
     <span class="toolbar-spacer"></span>
     <button class="idea-toolbar-button" data-action="new-list" aria-label="Create changelist" title="Create changelist" ${ui.busy ? 'disabled' : ''}>${icon('add')}</button>
     <button class="idea-toolbar-button" data-action="collapse-all" aria-label="Collapse all changelists" title="Collapse all">${icon('chevron-up')}</button>
@@ -369,7 +369,7 @@ function renderChanges(s) {
   const canCommit = Boolean(selectedCount && !ui.busy);
   return `
     ${renderCommitToolbar(s)}
-    <div class="commit-changes-heading" role="heading" aria-level="2"><span>Changes</span><small>${s.changes.length || ''}</small></div>
+    <div class="commit-changes-heading" role="heading" aria-level="2"><span class="changes-heading-label">${kivoIcon('changes', 'changes-heading-icon')}<span>Changes</span></span><small>${s.changes.length || ''}</small></div>
     <div class="lists commit-changes-tree">${lists || '<div class="commit-empty-list">No changes</div>'}</div>
     <footer class="commit-panel">
       <div class="amend-row" title="Amend is intentionally disabled until the selective amend workflow is implemented.">
@@ -558,7 +558,7 @@ function renderBranchContextMenu() {
 
 function renderLogActionRail() {
   return `<aside class="log-action-rail" aria-label="History actions">
-    <button class="idea-toolbar-button" data-action="show-changes" aria-label="Open Commit tool window" title="Open Commit tool window">${icon('source-control')}</button>
+    <button class="idea-toolbar-button" data-action="show-changes" aria-label="Open Commit tool window" title="Open Commit tool window">${kivoIcon('changes', 'kivo-toolbar-mark')}</button>
     <button class="idea-toolbar-button" data-action="refresh" aria-label="Refresh History" title="Refresh History">${icon('refresh')}</button>
     <button class="idea-toolbar-button" data-action="fetch" aria-label="Fetch remote updates" title="Fetch remote updates" ${ui.busy || ui.syncPhase === 'fetching' ? 'disabled' : ''}>${icon(ui.syncPhase === 'fetching' ? 'loading' : 'cloud-download', ui.syncPhase === 'fetching' ? 'codicon-modifier-spin' : '')}</button>
     <span class="idea-toolbar-divider" aria-hidden="true"></span>
