@@ -616,7 +616,8 @@ export class IdeaGitViewProvider implements vscode.WebviewViewProvider, vscode.T
       this.coordinator.beginWrite();
       writeStarted = true;
       await vscode.window.withProgress({ location: vscode.ProgressLocation.SourceControl, title: `${IdeaGitViewProvider.productName}: ${label}` }, action);
-      if (kind === 'fetch' || kind === 'pull' || kind === 'push') await this.setSyncState('idle', Date.now());
+      if (kind === 'fetch') await this.setSyncState('idle', Date.now());
+      else if (kind === 'pull' || kind === 'push') await this.setSyncState('idle');
       await this.postToReadyViews({ type: 'operation', id, kind, phase: 'success', message: success, clearsCommit });
       return true;
     } catch (error) {

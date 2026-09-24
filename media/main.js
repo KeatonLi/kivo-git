@@ -676,7 +676,7 @@ function renderChanges(s) {
   return `
     ${renderCommitToolbar(s)}
     <div class="commit-changes-heading" role="heading" aria-level="2"><span class="changes-heading-label">${kivoIcon('changes', 'changes-heading-icon')}<span>Changes</span></span><small>${s.changes.length || ''}</small></div>
-    <div class="lists commit-changes-tree" id="kivo-commit-changes">${lists || '<div class="commit-empty-list">No changes</div>'}</div>
+    <div class="lists commit-changes-tree" id="kivo-commit-changes">${lists || '<div class="commit-empty-list">No changes</div>'}${renderWorkspaceBrief(s)}</div>
     <div class="commit-panel-splitter" data-commit-panel-splitter role="separator" aria-label="Resize changes and commit message" aria-controls="kivo-commit-changes kivo-commit-message" aria-orientation="horizontal" aria-valuemin="${COMMIT_PANEL_MIN_HEIGHT}" aria-valuenow="${Math.round(ui.commitPanelHeight)}" tabindex="0" title="Drag to resize. Double-click to reset."></div>
     <footer class="commit-panel" id="kivo-commit-message" style="--commit-panel-height:${Math.round(ui.commitPanelHeight)}px">
       <textarea id="commit-message" rows="4" placeholder="Commit Message" aria-label="Commit Message" spellcheck="true" ${ui.operationKind === 'commit' ? 'disabled' : ''}>${escapeHtml(ui.commitMessage)}</textarea>
@@ -687,6 +687,33 @@ function renderChanges(s) {
       </div>
     </footer>
     ${renderFileContextMenu()}`;
+}
+
+function renderWorkspaceBrief(s) {
+  const syncing = ui.syncPhase === 'fetching' || ui.operationKind === 'fetch';
+  const hasUpstream = Boolean(s.upstream);
+  const changes = s.changes.length;
+  const status = changes ? `${changes} changed file${changes === 1 ? '' : 's'}` : 'Working tree clean';
+  const freshness = syncing ? 'Checking remote…' : ui.syncPhase === 'error' ? 'Remote check failed' : ui.lastFetchedAt ? updatedLabel(ui.lastFetchedAt) : 'Check remote for updates';
+  const comparison = hasUpstream
+    ? `<div class="workspace-brief-metrics" aria-label="${s.behind} commits behind and ${s.ahead} commits ahead of ${escapeHtml(s.upstream)}">
+        <div><span class="workspace-brief-direction">${icon('arrow-down')} INCOMING</span><strong>${s.behind}</strong><small>to pull</small></div>
+        <div><span class="workspace-brief-direction">${icon('arrow-up')} OUTGOING</span><strong>${s.ahead}</strong><small>to push</small></div>
+      </div>`
+    : '<p class="workspace-brief-untracked">No upstream branch. Set one to compare local and remote commits.</p>';
+  const syncSummary = s.behind && s.ahead ? 'Local and remote have diverged'
+    : s.behind ? 'New commits available on remote'
+      : s.ahead ? 'Local commits ready to push' : 'In sync with fetched refs';
+  return `<section class="workspace-brief" aria-label="Repository status">
+    <div class="workspace-brief-label"><span class="workspace-brief-mark" aria-hidden="true"></span><span>REPOSITORY STATUS</span></div>
+    <strong class="workspace-brief-state">${icon(changes ? 'diff' : 'check')}<span>${status}</span></strong>
+    <code class="workspace-brief-branch" title="${escapeHtml(s.branch)}">${escapeHtml(s.branch)}</code>
+    <div class="workspace-brief-divider"></div>
+    <div class="workspace-brief-heading"><span>SYNC WITH REMOTE</span>${hasUpstream ? `<code title="${escapeHtml(s.upstream)}">${escapeHtml(s.upstream)}</code>` : ''}</div>
+    ${comparison}
+    ${hasUpstream ? `<p class="workspace-brief-summary">${syncSummary}</p>` : ''}
+    <div class="workspace-brief-footer"><span class="${ui.syncPhase === 'error' ? 'workspace-brief-error' : ''}" title="${escapeHtml(ui.syncError || '')}">${escapeHtml(freshness)}</span><button data-action="fetch" aria-label="Check remote and update commit counts" title="Fetch remote refs and update counts" ${ui.busy || syncing ? 'disabled' : ''}>${icon(syncing ? 'loading' : 'refresh', syncing ? 'codicon-modifier-spin' : '')}<span>${syncing ? 'Checking' : 'Check remote'}</span></button></div>
+  </section>`;
 }
 
 function renderFile(change, listId) {

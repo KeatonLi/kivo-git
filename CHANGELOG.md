@@ -2,6 +2,12 @@
 
 ## Unreleased
 
+## 0.3.0-beta.25 - 2026-09-24
+
+- Added a restrained Repository Status summary beneath Changelists, using real working-tree and upstream counts to explain whether the branch is in sync, ahead, behind, or diverged.
+- Showed the tracked branch and last remote check state, with a direct fetch action and clear missing-upstream or fetch-error messages.
+- Kept the displayed remote-check timestamp tied to fetches, so push and pull do not claim a new fetch happened.
+
 ## 0.3.0-beta.24 - 2026-09-24
 
 - Removed the extra space between branch icons and names in the History branch tree.

@@ -609,6 +609,46 @@ body[data-surface="changes"] .content { background: var(--vscode-sideBar-backgro
   text-align: center;
 }
 .parity-mode .commit-empty-list { padding: 8px 13px; color: var(--muted); font-size: 11px; }
+.parity-mode .workspace-brief {
+  margin: 22px 12px 16px;
+  padding: 1px 2px 2px 14px;
+  border-left: 2px solid color-mix(in srgb, var(--kivo-violet) 72%, var(--vscode-panel-border));
+  color: var(--vscode-foreground);
+}
+.parity-mode .workspace-brief-label,
+.parity-mode .workspace-brief-heading {
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  color: var(--muted);
+  font-size: 9px;
+  font-weight: 650;
+  letter-spacing: .45px;
+}
+.parity-mode .workspace-brief-mark { width: 5px; height: 5px; background: var(--kivo-violet); }
+.parity-mode .workspace-brief-state { display: flex; align-items: center; gap: 7px; margin: 10px 0 0; font-size: 12px; font-weight: 550; }
+.parity-mode .workspace-brief-state .codicon { color: var(--success); font-size: 13px; }
+.parity-mode .workspace-brief-branch { display: block; max-width: 100%; overflow: hidden; margin: 3px 0 0 20px; color: var(--muted); font-size: 10px; text-overflow: ellipsis; white-space: nowrap; }
+.parity-mode .workspace-brief-divider { height: 1px; margin: 14px 0 12px; background: color-mix(in srgb, var(--vscode-foreground) 10%, transparent); }
+.parity-mode .workspace-brief-heading { justify-content: space-between; gap: 10px; }
+.parity-mode .workspace-brief-heading > span { flex: 0 0 auto; }
+.parity-mode .workspace-brief-heading code { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--muted); font-size: 10px; font-weight: 400; letter-spacing: 0; }
+.parity-mode .workspace-brief-metrics { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; margin: 12px 0 10px; }
+.parity-mode .workspace-brief-metrics > div { min-width: 0; display: flex; flex-direction: column; align-items: flex-start; }
+.parity-mode .workspace-brief-direction { display: inline-flex; align-items: center; gap: 3px; color: var(--muted); font-size: 9px; font-weight: 600; letter-spacing: .25px; }
+.parity-mode .workspace-brief-direction .codicon { color: var(--vscode-textLink-foreground, var(--accent)); font-size: 11px; }
+.parity-mode .workspace-brief-metrics strong { margin: 2px 0 0; font: 500 23px/1.2 var(--vscode-editor-font-family, monospace); font-variant-numeric: tabular-nums; }
+.parity-mode .workspace-brief-metrics small { color: var(--muted); font-size: 10px; }
+.parity-mode .workspace-brief-summary { margin: 0; color: var(--vscode-foreground); font-size: 10px; }
+.parity-mode .workspace-brief-untracked { margin: 11px 0; color: var(--muted); font-size: 11px; line-height: 1.5; }
+.parity-mode .workspace-brief-footer { min-width: 0; display: flex; align-items: center; justify-content: space-between; gap: 7px; margin-top: 12px; color: var(--muted); font-size: 10px; }
+.parity-mode .workspace-brief-footer > span { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.parity-mode .workspace-brief-error { color: var(--vscode-errorForeground, var(--danger)); }
+.parity-mode .workspace-brief-footer button { flex: 0 0 auto; display: inline-flex; align-items: center; gap: 4px; padding: 3px 5px; border-radius: 3px; background: transparent; color: var(--vscode-textLink-foreground, var(--accent)); cursor: pointer; font-size: 10px; }
+.parity-mode .workspace-brief-footer button:hover:not(:disabled),
+.parity-mode .workspace-brief-footer button:focus-visible { outline: none; background: var(--vscode-toolbar-hoverBackground); }
+.parity-mode .workspace-brief-footer button:disabled { opacity: .55; }
 .parity-mode .commit-panel {
   flex: 0 0 var(--commit-panel-height, 188px);
   padding: 8px 12px 10px;
