@@ -3,7 +3,7 @@ import { promises as fs } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { promisify } from 'node:util';
-import { afterEach, describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 import { GitClient, pullArgs } from '../src/git/GitClient';
 
 const execFileAsync = promisify(execFile);
@@ -53,6 +53,55 @@ describe('GitClient integration', () => {
     const complete = await client.snapshot(20);
     expect(complete.commitsHasMore).toBe(false);
     expect(complete.commits.length).toBeGreaterThan(first.commits.length);
+  });
+
+  it('opens an older branch even when its tip is outside the all-branches history window', async () => {
+    const root = await createRepository();
+    const initial = await git(root, ['rev-parse', 'HEAD']);
+    await git(root, ['branch', 'master']);
+    for (let index = 0; index < 8; index += 1) {
+      await git(root, ['commit', '--allow-empty', '-m', `later ${index}`]);
+    }
+    const client = new GitClient(root);
+    await client.initialize();
+    const recent = await client.snapshot(5);
+    expect(recent.commits.some((commit) => commit.hash === initial)).toBe(false);
+    const master = await client.snapshot(5, 'master');
+    expect(master.commits.map((commit) => commit.hash)).toEqual([initial]);
+    expect(master.commitsHasMore).toBe(false);
+  });
+
+  it('keeps a detached HEAD commit visible and handles repositories without commits', async () => {
+    const emptyRoot = await fs.mkdtemp(path.join(os.tmpdir(), 'ideagit-empty-'));
+    temporaryRepositories.push(emptyRoot);
+    await git(emptyRoot, ['init', '-b', 'main']);
+    const emptyClient = new GitClient(emptyRoot);
+    await emptyClient.initialize();
+    expect((await emptyClient.snapshot()).commits).toEqual([]);
+
+    const root = await createRepository();
+    await git(root, ['checkout', '--detach']);
+    await git(root, ['commit', '--allow-empty', '-m', 'detached revision']);
+    const client = new GitClient(root);
+    await client.initialize();
+    expect((await client.snapshot()).commits[0]?.subject).toBe('detached revision');
+  });
+
+  it('reuses history on file changes and refreshes it when Git refs move', async () => {
+    const root = await createRepository();
+    const client = new GitClient(root);
+    await client.initialize();
+    const run = vi.spyOn(client as never, 'run');
+    await client.snapshot();
+    const logCalls = () => run.mock.calls.filter(([args]) => (args as string[])[0] === 'log').length;
+    expect(logCalls()).toBe(1);
+    await fs.appendFile(path.join(root, 'alpha.txt'), 'working tree only\n');
+    expect((await client.snapshot()).changes.length).toBeGreaterThan(0);
+    expect(logCalls()).toBe(1);
+    await git(root, ['add', 'alpha.txt']);
+    await git(root, ['commit', '-m', 'move branch tip']);
+    expect((await client.snapshot()).commits[0]?.subject).toBe('move branch tip');
+    expect(logCalls()).toBe(2);
   });
 
   it('refreshes upstream ahead and behind counts after fetching remote refs', async () => {

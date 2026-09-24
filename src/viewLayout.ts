@@ -48,6 +48,7 @@ const messagesBySurface: Record<KivoSurface, ReadonlySet<string>> = {
   ]),
   history: new Set([
     'loadMoreCommits',
+    'setHistoryRef',
     'commitDetails',
     'openCommitDiff',
     'showChanges',

@@ -659,6 +659,7 @@ body[data-surface="changes"] .content { background: var(--vscode-sideBar-backgro
 body[data-surface="history"] .content { min-width: 0; background: var(--vscode-panel-background, var(--surface-base)); }
 .parity-mode .graph-view { min-width: 0; background: var(--vscode-panel-background, var(--surface-base)); }
 .parity-mode .log-workspace {
+  --idea-row: 30px;
   flex: 1;
   min-height: 0;
   display: grid;
@@ -768,27 +769,28 @@ body[data-surface="history"] .content { min-width: 0; background: var(--vscode-p
 .parity-mode .log-history-pane { grid-column: 4; min-width: 0; min-height: 0; display: flex; flex-direction: column; }
 .parity-mode .log-detail-splitter { grid-column: 5; grid-row: 1; }
 .parity-mode .log-filter-bar {
-  flex: 0 0 38px;
+  flex: 0 0 auto;
+  min-height: 42px;
   display: flex;
   align-items: center;
-  padding: 3px 7px;
+  padding: 7px 10px;
   border-bottom: 1px solid var(--vscode-panel-border, var(--border-subtle));
   background: var(--vscode-panel-background, var(--surface-base));
 }
-.parity-mode .log-filter-bar .graph-toolbar-head { width: 100%; gap: 6px; }
+.parity-mode .log-filter-bar .graph-toolbar-head { width: 100%; flex-wrap: wrap; gap: 7px 10px; }
 .parity-mode .log-filter-bar .graph-search {
-  flex: 0 1 215px;
-  height: 27px;
+  flex: 1 1 220px;
+  height: 29px;
   border-radius: 4px;
   font-size: 11px;
 }
-.parity-mode .log-filter-bar .graph-filters { gap: 3px; }
-.parity-mode .log-filter-bar .graph-filter { height: 26px; padding: 0 5px; border-radius: 3px; }
+.parity-mode .log-filter-bar .graph-filters { order: 3; flex: 1 0 100%; gap: 7px; overflow-x: auto; }
+.parity-mode .log-filter-bar .graph-filter { height: 27px; padding: 0 7px; border-radius: 4px; }
 .parity-mode .log-filter-bar .graph-filter span { font-size: 10px; font-weight: 500; letter-spacing: 0; }
 .parity-mode .log-filter-bar .graph-filter select,
 .parity-mode .log-filter-bar .graph-filter input { font-size: 10px; }
-.parity-mode .log-filter-bar .path-filter input { width: 58px; }
-.parity-mode .log-result-count { padding-left: 5px; border-left: 0; font-size: 10px; }
+.parity-mode .log-filter-bar .path-filter input { width: 96px; }
+.parity-mode .log-result-count { margin-left: auto; padding-left: 5px; border-left: 0; font-size: 11px; }
 .parity-mode .log-column-header,
 .parity-mode .graph-row {
   grid-template-columns: minmax(88px, 108px) var(--graph-width) minmax(0, 1fr) 142px;
@@ -796,7 +798,7 @@ body[data-surface="history"] .content { min-width: 0; background: var(--vscode-p
   padding: 0 8px 0 0;
 }
 .parity-mode .log-column-header {
-  height: 24px;
+  height: 28px;
   background: var(--vscode-panel-background, var(--surface-base));
   font-size: 9px;
   font-weight: 600;
@@ -822,14 +824,25 @@ body[data-surface="history"] .content { min-width: 0; background: var(--vscode-p
 .parity-mode .graph-node { stroke-width: 1.45; }
 .parity-mode .graph-node.merge { stroke-width: 2.1; }
 .parity-mode .log-author,
-.parity-mode .log-date { padding-left: 8px; font-size: 10px; }
+.parity-mode .log-date { padding-left: 8px; font-size: 11px; }
 .parity-mode .log-date { text-align: left; }
 .parity-mode .graph-commit { gap: 5px; padding: 0 6px; }
-.parity-mode .graph-commit strong { font-size: 11px; font-weight: 450; }
-.parity-mode .log-meta { font-size: 9px; }
+.parity-mode .graph-commit strong { font-size: 12px; font-weight: 450; }
+.parity-mode .log-meta { font-size: 10px; }
 .parity-mode .graph-ref { max-width: 120px; padding: 0 2px; border: 0; border-radius: 0; background: transparent; line-height: 14px; font-size: 9px; }
 .parity-mode .graph-ref.local.current { background: transparent; }
-.parity-mode .load-more { border-radius: 3px; }
+.parity-mode .graph-list > .inline-empty {
+  display: flex;
+  min-height: 120px;
+  align-items: center;
+  justify-content: center;
+  padding: 24px;
+  text-align: center;
+  line-height: 1.5;
+  font-size: 12px;
+}
+.parity-mode .graph-list > .inline-empty .codicon { margin-right: 8px; }
+.parity-mode .load-more { min-height: 30px; margin: 10px auto; padding: 5px 11px; border-radius: 4px; font-size: 11px; }
 .parity-mode .log-workspace .commit-detail {
   grid-column: 6;
   min-width: 0;
@@ -865,11 +878,11 @@ body[data-surface="history"] .content { min-width: 0; background: var(--vscode-p
 }
 .parity-mode .commit-file-folder .codicon { color: var(--muted); font-size: 12px; }
 .parity-mode .commit-file {
-  min-height: 22px;
+  min-height: 26px;
   gap: 4px;
   padding: 0 4px 0 calc(5px + var(--tree-indent, 0px));
   border-radius: 2px;
-  font-size: 10px;
+  font-size: 11px;
 }
 .parity-mode .commit-file .codicon { color: var(--muted); font-size: 12px; }
 .parity-mode .commit-file .status { width: 11px; font-size: 8px; }

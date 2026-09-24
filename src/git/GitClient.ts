@@ -15,6 +15,7 @@ export function pullArgs(strategy: PullStrategy): string[] {
 
 export class GitClient {
   private store?: ChangelistStore;
+  private historyCache?: { key: string; commits: CommitSummary[]; hasMore: boolean };
 
   constructor(readonly workspaceRoot: string) {}
 
@@ -45,7 +46,7 @@ export class GitClient {
     this.store = new ChangelistStore(gitDirectory);
   }
 
-  async snapshot(commitLimit = 80): Promise<RepositorySnapshot> {
+  async snapshot(commitLimit = 80, historyRef?: string): Promise<RepositorySnapshot> {
     if (!this.store) await this.initialize();
     const [statusOutput, branches, tags, topLevel] = await Promise.all([
       this.run(['status', '--porcelain=v2', '--branch', '-z', '--untracked-files=all']),
@@ -56,7 +57,12 @@ export class GitClient {
     const parsed = parsePorcelainV2(statusOutput);
     const root = topLevel.trim();
     const currentBranch = branches.find((branch) => branch.current && !branch.remote)?.name;
-    const commitWindow = await this.getCommits(currentBranch, commitLimit);
+    const selectedBranch = branches.find((branch) => branch.name === historyRef);
+    const selectedTag = tags.find((tag) => tag.name === historyRef);
+    const exactRef = selectedBranch
+      ? `refs/${selectedBranch.remote ? 'remotes' : 'heads'}/${selectedBranch.name}`
+      : selectedTag ? `refs/tags/${selectedTag.name}` : undefined;
+    const commitWindow = await this.getCommits(currentBranch, commitLimit, exactRef);
     return {
       repositoryName: path.basename(root),
       root,
@@ -97,45 +103,54 @@ export class GitClient {
     }
   }
 
-  private async getCommits(currentBranch?: string, limit = 80): Promise<{ commits: CommitSummary[]; hasMore: boolean }> {
-    try {
-      const refs = await this.getRefs(currentBranch);
-      const safeLimit = Math.max(1, Math.floor(limit));
-      const output = await this.run(['log', '--all', '--topo-order', '-n', String(safeLimit + 1), '--date=iso-strict', '--name-only', '-z', '--pretty=format:%H%x1f%h%x1f%P%x1f%an%x1f%aI%x1f%s%x1e']);
-      const recordPattern = /([0-9a-f]{40})\x1f([0-9a-f]{7,40})\x1f([^\x1f]*)\x1f([^\x1f]*)\x1f([^\x1f]*)\x1f([^\x1e]*)\x1e/g;
-      const matches = [...output.matchAll(recordPattern)];
-      const commits = matches.map((match, index) => {
-        const hash = match[1] ?? '';
-        const shortHash = match[2] ?? '';
-        const parentText = match[3] ?? '';
-        const author = match[4] ?? '';
-        const date = match[5] ?? '';
-        const subject = match[6] ?? '';
-        const start = (match.index ?? 0) + match[0].length;
-        const end = matches[index + 1]?.index ?? output.length;
-        const paths = output.slice(start, end)
-          .replace(/^\n+/, '')
-          .split('\0')
-          .map((filePath) => filePath.trim())
-          .filter(Boolean);
-        return {
-          hash,
-          shortHash,
-          author,
-          date,
-          subject,
-          parents: parentText ? parentText.split(' ').filter(Boolean) : [],
-          paths,
-          refs: refs.get(hash) ?? [],
-          lane: 0,
-          incomingLanes: [],
-          parentLanes: []
-        };
-      });
-      return { commits: this.layoutCommits(commits.slice(0, safeLimit)), hasMore: commits.length > safeLimit };
-    } catch {
-      return { commits: [], hasMore: false };
+  private async getCommits(currentBranch?: string, limit = 80, exactRef?: string): Promise<{ commits: CommitSummary[]; hasMore: boolean }> {
+    const safeLimit = Math.max(1, Math.floor(limit));
+    const [refState, head] = await Promise.all([
+      this.run(['for-each-ref', '--format=%(refname)%09%(objectname)%09%(*objectname)']),
+      this.run(['rev-parse', '--verify', 'HEAD']).catch(() => '')
+    ]);
+    const key = `${safeLimit}\0${currentBranch || ''}\0${exactRef || ''}\0${head}\0${refState}`;
+    if (this.historyCache?.key === key) return this.historyCache;
+    if (!head.trim() && !refState.trim()) {
+      const empty = { key, commits: [], hasMore: false };
+      this.historyCache = empty;
+      return empty;
     }
+    const refs = await this.getRefs(currentBranch);
+    const output = await this.run(['log', ...(exactRef ? [exactRef] : head.trim() ? ['--all', 'HEAD'] : ['--all']), '--topo-order', '-n', String(safeLimit + 1), '--date=iso-strict', '--name-only', '-z', '--pretty=format:%H%x1f%h%x1f%P%x1f%an%x1f%aI%x1f%s%x1e']);
+    const recordPattern = /([0-9a-f]{40})\x1f([0-9a-f]{7,40})\x1f([^\x1f]*)\x1f([^\x1f]*)\x1f([^\x1f]*)\x1f([^\x1e]*)\x1e/g;
+    const matches = [...output.matchAll(recordPattern)];
+    const commits = matches.map((match, index) => {
+      const hash = match[1] ?? '';
+      const shortHash = match[2] ?? '';
+      const parentText = match[3] ?? '';
+      const author = match[4] ?? '';
+      const date = match[5] ?? '';
+      const subject = match[6] ?? '';
+      const start = (match.index ?? 0) + match[0].length;
+      const end = matches[index + 1]?.index ?? output.length;
+      const paths = output.slice(start, end)
+        .replace(/^\n+/, '')
+        .split('\0')
+        .map((filePath) => filePath.trim())
+        .filter(Boolean);
+      return {
+        hash,
+        shortHash,
+        author,
+        date,
+        subject,
+        parents: parentText ? parentText.split(' ').filter(Boolean) : [],
+        paths,
+        refs: refs.get(hash) ?? [],
+        lane: 0,
+        incomingLanes: [],
+        parentLanes: []
+      };
+    });
+    const result = { key, commits: this.layoutCommits(commits.slice(0, safeLimit)), hasMore: commits.length > safeLimit };
+    this.historyCache = result;
+    return result;
   }
 
   private async getRefs(currentBranch?: string): Promise<Map<string, GitRef[]>> {

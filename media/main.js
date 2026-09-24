@@ -25,7 +25,7 @@ const COMMIT_PANEL_DEFAULT_HEIGHT = 188;
 const BRANCH_PAGE_SIZE = 36;
 const GRAPH_MAX_WIDTH = 176;
 const GRAPH_MIN_WIDTH = 64;
-const GRAPH_ROW_HEIGHT = 26;
+const GRAPH_ROW_HEIGHT = 30;
 const GRAPH_LOAD_THRESHOLD = 180;
 const GRAPH_VIRTUAL_OVERSCAN = 12;
 const clamp = (value, minimum, maximum) => Math.max(minimum, Math.min(maximum, value));
@@ -85,6 +85,7 @@ const ui = {
   graphAuthorFilter: initialRepositoryState.graphAuthorFilter || '',
   graphAgeFilter: initialRepositoryState.graphAgeFilter || 'all',
   graphLoadingMore: false,
+  historyRefLoading: false,
   graphViewportWidth: 0,
   graphViewportHeight: 0,
   graphScrollTop: Number(initialRepositoryState.graphScrollTop) || 0,
@@ -198,6 +199,7 @@ function restoreRepositoryState(root, state = {}) {
   ui.graphScrollTop = Number(state.graphScrollTop) || 0;
   ui.graphViewportWidth = 0;
   ui.graphViewportHeight = 0;
+  ui.historyRefLoading = false;
   ui.selectedCommitHash = state.selectedCommitHash;
   ui.focusedCommitHash = state.focusedCommitHash || state.selectedCommitHash;
   ui.commitDetailsDismissed = state.commitDetailsDismissed || false;
@@ -229,6 +231,45 @@ function graphCommits() {
     const ageMatches = !after || new Date(commit.date).getTime() >= after;
     return textMatches && pathMatches && branchMatches && authorMatches && ageMatches;
   });
+}
+
+function reconcileHistorySelection() {
+  if (surface !== 'history' || !ui.snapshot || ui.historyRefLoading) return;
+  const commits = graphCommits();
+  if (commits.some((commit) => commit.hash === ui.selectedCommitHash)) {
+    if (!ui.commitDetails && !ui.commitDetailsLoading && !ui.commitDetailsError && !ui.commitDetailsDismissed) {
+      ui.commitDetailsLoading = true;
+      postCommitDetails(ui.selectedCommitHash, false);
+    }
+    return;
+  }
+  clearTimeout(commitDetailTimer);
+  ui.selectedCommitHash = undefined;
+  ui.focusedCommitHash = undefined;
+  ui.commitDetails = undefined;
+  ui.commitDetailsError = undefined;
+  ui.commitDetailsLoading = false;
+  if (!ui.commitDetailsDismissed && commits[0]) {
+    ui.selectedCommitHash = commits[0].hash;
+    ui.focusedCommitHash = commits[0].hash;
+    ui.commitDetailsLoading = true;
+    postCommitDetails(commits[0].hash, false);
+  }
+}
+
+function setHistoryRef(branch) {
+  if (ui.graphBranchFilter === branch) return;
+  ui.graphBranchFilter = branch;
+  ui.graphScrollTop = 0;
+  ui.historyRefLoading = true;
+  clearTimeout(commitDetailTimer);
+  ui.selectedCommitHash = undefined;
+  ui.focusedCommitHash = undefined;
+  ui.commitDetails = undefined;
+  ui.commitDetailsLoading = false;
+  persist();
+  render();
+  post('setHistoryRef', { branch });
 }
 
 function graphWidthBudget() {
@@ -281,7 +322,7 @@ function restoreGraphScroll(scrollTop) {
 }
 
 function requestMoreHistory(scrollTop) {
-  if (!ui.snapshot?.commitsHasMore || ui.graphLoadingMore || ui.busy) return false;
+  if (!ui.snapshot?.commitsHasMore || ui.graphLoadingMore || ui.historyRefLoading || ui.busy) return false;
   ui.graphLoadingMore = true;
   render();
   restoreGraphScroll(scrollTop);
@@ -911,11 +952,11 @@ function renderLogActionRail() {
 function renderLogFilterBar(s, commits, filtersActive) {
   const branchOptions = [...new Set([...s.branches, ...(s.tags || [])].map((branch) => branch.name))].sort((a, b) => a.localeCompare(b));
   const authorOptions = [...new Set(s.commits.map((commit) => commit.author))].sort((a, b) => a.localeCompare(b));
-  const countLabel = filtersActive ? `${commits.length} of ${s.commits.length}` : `${s.commits.length}`;
+  const countLabel = filtersActive ? `${commits.length} of ${s.commits.length}${s.commitsHasMore ? ' loaded' : ''}` : `${s.commits.length}${s.commitsHasMore ? '+ loaded' : ''}`;
   return `<div class="log-filter-bar"><div class="graph-toolbar-head">
-    <label class="graph-search log-search">${icon('search')}<input id="graph-search" aria-label="Search by text or hash" placeholder="Text or hash" value="${escapeHtml(ui.graphQuery)}"></label>
+    <label class="graph-search log-search">${icon('search')}<input id="graph-search" aria-label="Search by text or hash" placeholder="Search commits or hash" value="${escapeHtml(ui.graphQuery)}"></label>
     <div class="graph-filters" aria-label="History filters">
-      <label class="graph-filter"><span>Ref:</span><select data-graph-filter="branch" aria-label="Filter by branch or tag"><option value="">All refs</option>${branchOptions.map((branch) => `<option value="${escapeHtml(branch)}" ${ui.graphBranchFilter === branch ? 'selected' : ''}>${escapeHtml(branch)}</option>`).join('')}</select></label>
+      <label class="graph-filter"><span>Ref</span><select data-graph-filter="branch" aria-label="Filter by branch or tag"><option value="">All refs</option>${branchOptions.map((branch) => `<option value="${escapeHtml(branch)}" ${ui.graphBranchFilter === branch ? 'selected' : ''}>${escapeHtml(branch)}</option>`).join('')}</select></label>
       <label class="graph-filter"><span>User</span><select data-graph-filter="author" aria-label="Filter by author"><option value="">All</option>${authorOptions.map((author) => `<option value="${escapeHtml(author)}" ${ui.graphAuthorFilter === author ? 'selected' : ''}>${escapeHtml(author)}</option>`).join('')}</select></label>
       <label class="graph-filter"><span>Date</span><select data-graph-filter="age" aria-label="Filter by date"><option value="all" ${ui.graphAgeFilter === 'all' ? 'selected' : ''}>All</option><option value="7d" ${ui.graphAgeFilter === '7d' ? 'selected' : ''}>7 days</option><option value="30d" ${ui.graphAgeFilter === '30d' ? 'selected' : ''}>30 days</option><option value="90d" ${ui.graphAgeFilter === '90d' ? 'selected' : ''}>90 days</option></select></label>
       <label class="graph-filter path-filter"><span>Paths</span><input id="graph-path" aria-label="Filter by path" placeholder="Any" value="${escapeHtml(ui.graphPathFilter)}"></label>
@@ -949,10 +990,10 @@ function renderGraph(s) {
       <section class="log-history-pane" id="kivo-log-history" aria-label="Commit history">
         ${renderLogFilterBar(s, commits, filtersActive)}
         <div class="log-column-header" aria-hidden="true" style="--graph-width:${graphWidth}px"><span>AUTHOR</span><span>GRAPH</span><span>COMMIT</span><span>DATE</span></div>
-        <div class="graph-list ${graph.compressed ? 'graph-compressed' : ''} ${ui.graphLoadingMore ? 'is-loading' : ''}" data-graph-list role="listbox" aria-label="Commit history${graph.compressed ? `, compact ${laneCount}-lane topology` : ''}" aria-busy="${ui.graphLoadingMore}" aria-setsize="${commits.length}" style="--lane-count:${laneCount};--graph-width:${graphWidth}px;--graph-row-height:${GRAPH_ROW_HEIGHT}px">${commits.length ? `${windowed.topSpacer ? `<div class="graph-virtual-spacer" aria-hidden="true" style="height:${windowed.topSpacer}px"></div>` : ''}${visibleCommits.map((commit, index) => `<article class="graph-row ${commit.parents.length > 1 ? 'merge-row' : ''} ${ui.selectedCommitHash === commit.hash ? 'selected' : ''}" data-commit="${escapeHtml(commit.hash)}" data-hash="${escapeHtml(commit.hash)}" role="option" aria-selected="${ui.selectedCommitHash === commit.hash}" aria-posinset="${windowed.start + index + 1}" tabindex="${focusHash === commit.hash ? '0' : '-1'}">
+        <div class="graph-list ${graph.compressed ? 'graph-compressed' : ''} ${ui.graphLoadingMore ? 'is-loading' : ''}" data-graph-list role="listbox" aria-label="Commit history${graph.compressed ? `, compact ${laneCount}-lane topology` : ''}" aria-busy="${ui.graphLoadingMore || ui.historyRefLoading}" aria-setsize="${commits.length}" style="--lane-count:${laneCount};--graph-width:${graphWidth}px;--graph-row-height:${GRAPH_ROW_HEIGHT}px">${ui.historyRefLoading ? `<div class="inline-empty" role="status">${icon('loading', 'codicon-modifier-spin')} Loading branch history…</div>` : commits.length ? `${windowed.topSpacer ? `<div class="graph-virtual-spacer" aria-hidden="true" style="height:${windowed.topSpacer}px"></div>` : ''}${visibleCommits.map((commit, index) => `<article class="graph-row ${commit.parents.length > 1 ? 'merge-row' : ''} ${ui.selectedCommitHash === commit.hash ? 'selected' : ''}" data-commit="${escapeHtml(commit.hash)}" data-hash="${escapeHtml(commit.hash)}" role="option" aria-selected="${ui.selectedCommitHash === commit.hash}" aria-posinset="${windowed.start + index + 1}" tabindex="${focusHash === commit.hash ? '0' : '-1'}">
           <span class="log-author" title="${escapeHtml(commit.author)}">${escapeHtml(commit.author)}</span><div class="graph-canvas">${renderGraphSvg(commit, graph)}</div><div class="graph-commit"><div class="log-subject"><strong>${escapeHtml(commit.subject)}</strong>${(commit.refs || []).slice(0, 3).map(renderRef).join('')}</div><span class="log-meta"><code>${escapeHtml(commit.shortHash)}</code>${commit.parents?.length > 1 ? '<span class="merge-note">Merge</span>' : ''}</span></div><time class="log-date" title="${escapeHtml(commit.date)}">${relativeTime(commit.date)}</time>
-        </article>`).join('')}${windowed.bottomSpacer ? `<div class="graph-virtual-spacer" aria-hidden="true" style="height:${windowed.bottomSpacer}px"></div>` : ''}` : `<div class="inline-empty">${s.commits.length ? 'No matching commits' : 'No commits yet'}</div>`}${ui.graphLoadingMore ? `<div class="graph-loading-row" role="status">${icon('loading', 'codicon-modifier-spin')}<span>Loading more history…</span></div>` : ''}</div>
-        ${s.commitsHasMore && !ui.graphLoadingMore ? `<button class="load-more" data-action="load-more-commits" ${ui.busy ? 'disabled' : ''}>${icon('history')}<span>Load more history</span><small>Loaded ${s.commits.length} · Scroll for more</small></button>` : ''}
+        </article>`).join('')}${windowed.bottomSpacer ? `<div class="graph-virtual-spacer" aria-hidden="true" style="height:${windowed.bottomSpacer}px"></div>` : ''}` : `<div class="inline-empty" role="status">${s.commitsHasMore ? `No matches in ${s.commits.length} loaded commits. Load more to search older history.` : s.commits.length ? 'No matching commits' : 'No commits yet'}</div>`}${ui.graphLoadingMore ? `<div class="graph-loading-row" role="status">${icon('loading', 'codicon-modifier-spin')}<span>Loading more history…</span></div>` : ''}</div>
+        ${s.commitsHasMore && !ui.graphLoadingMore && !ui.historyRefLoading ? `<button class="load-more" data-action="load-more-commits" ${ui.busy ? 'disabled' : ''}>${icon('history')}<span>Load more history</span><small>Loaded ${s.commits.length} · Scroll for more</small></button>` : ''}
       </section>
       <div class="log-detail-splitter" data-log-detail-splitter role="separator" aria-label="Resize commit history and details" aria-controls="kivo-log-history kivo-log-details" aria-orientation="${detailUsesRows ? 'horizontal' : 'vertical'}" aria-valuemin="${detailMinimum}" aria-valuemax="${detailMaximum}" aria-valuenow="${detailSize}" tabindex="0" title="Drag to resize. Double-click to reset."></div>
       ${renderCommitDetails(s)}
@@ -1198,9 +1239,8 @@ function runBranchContextAction(event) {
   if (action === 'filter') {
     if (menu.fromPopup) post('showBranchHistory', { branch: menu.ref });
     else {
-      ui.graphBranchFilter = menu.ref;
-      ui.graphScrollTop = 0;
-      persist();
+      setHistoryRef(menu.ref);
+      return;
     }
   }
   render();
@@ -1568,6 +1608,7 @@ function bind() {
     graphSearch.__ideaGitListeners = new Set(['search']);
     graphSearch.addEventListener('input', () => {
       ui.graphQuery = graphSearch.value;
+      reconcileHistorySelection();
       persist();
       render();
       requestAnimationFrame(() => {
@@ -1582,6 +1623,7 @@ function bind() {
     graphPath.__ideaGitListeners = new Set(['path-search']);
     graphPath.addEventListener('input', () => {
       ui.graphPathFilter = graphPath.value;
+      reconcileHistorySelection();
       persist();
       render();
       requestAnimationFrame(() => {
@@ -1623,16 +1665,19 @@ function bind() {
   });
   once('[data-graph-filter]', 'change', (event) => {
     const select = event.currentTarget;
-    if (select.dataset.graphFilter === 'branch') ui.graphBranchFilter = select.value;
+    if (select.dataset.graphFilter === 'branch') {
+      setHistoryRef(select.value);
+      requestAnimationFrame(() => app.querySelector('[data-graph-filter="branch"]')?.focus());
+      return;
+    }
     if (select.dataset.graphFilter === 'author') ui.graphAuthorFilter = select.value;
     if (select.dataset.graphFilter === 'age') ui.graphAgeFilter = select.value || 'all';
+    reconcileHistorySelection();
     persist();
     render();
   });
   once('[data-log-branch]', 'click', (event) => {
-    ui.graphBranchFilter = event.currentTarget.dataset.logBranch || '';
-    persist();
-    render();
+    setHistoryRef(event.currentTarget.dataset.logBranch || '');
   });
   once('[data-log-branch]', 'keydown', (event) => {
     if (event.key !== 'ContextMenu' && !(event.shiftKey && event.key === 'F10')) return;
@@ -1913,9 +1958,16 @@ function handleAction(action) {
   if (action === 'clear-graph-filters') {
     ui.graphQuery = '';
     ui.graphPathFilter = '';
+    const hadRef = Boolean(ui.graphBranchFilter);
     ui.graphBranchFilter = '';
     ui.graphAuthorFilter = '';
     ui.graphAgeFilter = 'all';
+    if (hadRef) {
+      ui.historyRefLoading = true;
+      ui.selectedCommitHash = undefined;
+      ui.commitDetails = undefined;
+      post('setHistoryRef', { branch: '' });
+    } else reconcileHistorySelection();
     persist();
     render();
   }
@@ -1997,8 +2049,12 @@ window.addEventListener('message', (event) => {
     ui.graphAgeFilter = 'all';
     ui.graphQuery = '';
     ui.graphScrollTop = 0;
+    ui.historyRefLoading = true;
+    ui.selectedCommitHash = undefined;
+    ui.commitDetails = undefined;
     persist();
     render();
+    post('setHistoryRef', { branch: '' });
     restoreGraphScroll(0);
     requestAnimationFrame(() => app.querySelector('#graph-path')?.focus());
   }
@@ -2009,8 +2065,12 @@ window.addEventListener('message', (event) => {
     ui.graphAuthorFilter = '';
     ui.graphAgeFilter = 'all';
     ui.graphScrollTop = 0;
+    ui.historyRefLoading = true;
+    ui.selectedCommitHash = undefined;
+    ui.commitDetails = undefined;
     persist();
     render();
+    post('setHistoryRef', { branch: ui.graphBranchFilter });
     restoreGraphScroll(0);
     requestAnimationFrame(() => app.querySelector('[data-graph-filter="branch"]')?.focus());
   }
@@ -2045,6 +2105,7 @@ window.addEventListener('message', (event) => {
     ui.emptyMessage = undefined;
     ui.snapshot = message.payload;
     ui.graphLoadingMore = false;
+    ui.historyRefLoading = false;
     if (ui.selectedCommitHash && !message.payload.commits.some((commit) => commit.hash === ui.selectedCommitHash)) {
       clearTimeout(commitDetailTimer);
       ui.selectedCommitHash = undefined;
@@ -2053,22 +2114,13 @@ window.addEventListener('message', (event) => {
       ui.commitDetailsError = undefined;
       ui.commitDetailsLoading = false;
     }
-    let autoSelectedCommit;
-    if (surface === 'history' && !ui.selectedCommitHash && !ui.commitDetailsDismissed && message.payload.commits[0]) {
-      autoSelectedCommit = message.payload.commits[0].hash;
-      ui.selectedCommitHash = autoSelectedCommit;
-      ui.focusedCommitHash = autoSelectedCommit;
-      ui.commitDetails = undefined;
-      ui.commitDetailsError = undefined;
-      ui.commitDetailsLoading = true;
-    }
+    reconcileHistorySelection();
     const valid = new Set(message.payload.changes.map((change) => change.path));
     ui.selected = new Set([...ui.selected].filter((path) => valid.has(path)));
     if (!valid.has(ui.focusedPath)) ui.focusedPath = message.payload.changes[0]?.path;
     persist();
     render();
     restoreGraphScroll(ui.graphScrollTop);
-    if (autoSelectedCommit) postCommitDetails(autoSelectedCommit);
     if (ui.branchMotion && message.payload.branch === ui.branchMotion.branch) {
       if (!window.matchMedia('(prefers-reduced-motion: reduce)').matches) {
         const { x, y } = ui.branchMotion;
@@ -2244,5 +2296,5 @@ setInterval(() => {
   if (ui.snapshot && ui.lastFetchedAt && ui.syncPhase !== 'fetching') render();
 }, 60000);
 
-post('ready');
+post('ready', { historyRef: surface === 'history' ? ui.graphBranchFilter : undefined });
 render();

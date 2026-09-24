@@ -2,6 +2,13 @@
 
 ## Unreleased
 
+## 0.3.0-beta.22 - 2026-09-24
+
+- Loaded History from the selected branch or tag directly, including tips beyond the recent all-ref window; retained clear partial-result messaging when searching older history.
+- Kept commit details aligned with active filters and restored selected commit details when reopening History.
+- Cached parsed Git history until HEAD, refs, or the requested window changes so working-tree refreshes avoid repeating Git log.
+- Improved History filter spacing, commit row legibility, empty states, and the load-more action; included detached HEAD commits in the all-ref view.
+
 ## 0.3.0-beta.21 - 2026-09-23
 
 - Fixed Show History from the Commit branch popup to open and filter the History panel, including tags and newly opened History views.
