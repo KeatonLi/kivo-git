@@ -2,6 +2,11 @@
 
 ## Unreleased
 
+## 0.3.0-beta.24 - 2026-09-24
+
+- Removed the extra space between branch icons and names in the History branch tree.
+- Displayed the current branch's behind and ahead counts beside a remote check action in History; counts update after fetching and show an explicit state without an upstream.
+
 ## 0.3.0-beta.23 - 2026-09-24
 
 - Fixed History getting stuck loading when switching between refs with identical commit windows.

@@ -274,7 +274,8 @@ body[data-surface="changes"] .changes-toolbar .toolbar-actions { flex: 0 0 auto;
 .log-branch-row:hover, .log-branch-row:focus-visible { outline: none; background: var(--vscode-list-hoverBackground); }
 .log-branch-row.selected { background: var(--vscode-list-activeSelectionBackground, color-mix(in srgb, var(--accent) 16%, transparent)); color: var(--vscode-list-activeSelectionForeground, var(--vscode-foreground)); }
 .log-branch-row.current:not(.selected) { color: var(--accent); }
-.log-branch-row > span { min-width: 0; flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 10px; }
+.log-branch-row > span:not(.codicon) { min-width: 0; flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 10px; }
+.log-branch-row > .codicon { flex: 0 0 auto; }
 .log-branch-row small { color: inherit; opacity: .75; font-size: 8px; font-weight: 650; }
 .log-branch-row.all { margin-bottom: 3px; }
 .log-splitter,
@@ -745,7 +746,7 @@ body[data-surface="history"] .content { min-width: 0; background: var(--vscode-p
 .parity-mode .log-branch-row:focus-visible { outline: none; background: var(--vscode-list-hoverBackground); }
 .parity-mode .log-branch-row.selected { background: var(--idea-selection); color: var(--idea-selection-foreground); }
 .parity-mode .log-branch-row.current:not(.selected) { color: var(--vscode-foreground); }
-.parity-mode .log-branch-row > span { font-size: 11px; }
+.parity-mode .log-branch-row > span:not(.codicon) { font-size: 11px; }
 .parity-mode .log-branch-row small { font-size: 8px; }
 .parity-mode .branch-tree-empty { padding: 2px 7px; color: var(--muted); font-size: 10px; }
 .parity-mode .branch-pane-footer {
@@ -763,6 +764,14 @@ body[data-surface="history"] .content { min-width: 0; background: var(--vscode-p
 .parity-mode .branch-pane-current > span { min-width: 0; display: flex; flex-direction: column; gap: 1px; }
 .parity-mode .branch-pane-current small { color: var(--muted); font-size: 8px; letter-spacing: .35px; line-height: 1; }
 .parity-mode .branch-pane-current strong { overflow: hidden; color: var(--vscode-foreground); text-overflow: ellipsis; white-space: nowrap; font-size: 10px; font-weight: 600; }
+.parity-mode .branch-pane-sync { min-width: 0; display: flex; align-items: center; gap: 4px; margin-top: 3px; }
+.parity-mode .branch-sync-values { min-width: 0; flex: 1; display: flex; align-items: center; gap: 9px; color: var(--vscode-foreground); font-size: 10px; white-space: nowrap; }
+.parity-mode .branch-sync-count { display: inline-flex; align-items: center; gap: 2px; }
+.parity-mode .branch-sync-count .codicon { color: var(--vscode-textLink-foreground, var(--accent)); font-size: 11px; }
+.parity-mode .branch-sync-untracked,
+.parity-mode .branch-sync-error { color: var(--muted); font-size: 10px; }
+.parity-mode .branch-sync-error { color: var(--vscode-errorForeground, var(--danger)); }
+.parity-mode .branch-pane-sync .idea-toolbar-button { width: 22px; height: 22px; flex: 0 0 auto; }
 .parity-mode .branch-pane-stats { display: flex; align-items: center; gap: 6px; min-width: 0; color: var(--muted); font-size: 9px; }
 .parity-mode .branch-pane-stats span + span { padding-left: 6px; border-left: 1px solid var(--vscode-panel-border, var(--border-subtle)); }
 .parity-mode .log-splitter { grid-column: 3; grid-row: 1; }

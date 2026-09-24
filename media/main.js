@@ -865,6 +865,10 @@ function renderLogBranchPane(s) {
   const localCount = s.branches.filter((branch) => !branch.remote).length;
   const remoteCount = s.branches.filter((branch) => branch.remote).length;
   const tagCount = (s.tags || []).length;
+  const checkingRemote = ui.syncPhase === 'fetching' || ui.operationKind === 'fetch';
+  const syncLabel = s.upstream
+    ? `<span class="branch-sync-count" title="${escapeHtml(s.behind)} behind ${escapeHtml(s.upstream)}">${icon('arrow-down')} ${s.behind} behind</span><span class="branch-sync-count" title="${escapeHtml(s.ahead)} ahead of ${escapeHtml(s.upstream)}">${icon('arrow-up')} ${s.ahead} ahead</span>`
+    : '<span class="branch-sync-untracked">No upstream branch</span>';
   const root = current && matches(current) ? renderLogBranchRow({ ...current, leaf: current.name }) : '';
   const group = (key, label, items, emptyLabel) => {
     const expanded = Boolean(query) || ui.branchGroupsExpanded[key];
@@ -887,6 +891,11 @@ function renderLogBranchPane(s) {
     </div>
     <footer class="branch-pane-footer" aria-label="Branch summary">
       <div class="branch-pane-current" title="${escapeHtml(current?.name || s.branch || 'No current branch')}">${icon('git-branch')}<span><small>HEAD</small><strong>${escapeHtml(current?.name || s.branch || 'Detached HEAD')}</strong></span></div>
+      <div class="branch-pane-sync" aria-live="polite" title="${s.upstream ? `Compared with the last fetched ${escapeHtml(s.upstream)}` : 'Set an upstream branch to track ahead and behind counts'}">
+        <div class="branch-sync-values">${syncLabel}</div>
+        <button class="idea-toolbar-button" data-action="fetch" aria-label="${checkingRemote ? 'Checking remote' : 'Check remote for new commits'}" title="${checkingRemote ? 'Checking remote…' : 'Fetch and refresh ahead/behind counts'}" ${ui.busy || checkingRemote ? 'disabled' : ''}>${icon(checkingRemote ? 'loading' : 'refresh', checkingRemote ? 'codicon-modifier-spin' : '')}</button>
+      </div>
+      ${ui.syncPhase === 'error' ? `<div class="branch-sync-error" role="status" title="${escapeHtml(ui.syncError || '')}">Remote check failed · Retry with refresh</div>` : ''}
       <div class="branch-pane-stats"><span>${localCount} local</span><span>${remoteCount} remote</span>${tagCount ? `<span>${tagCount} tag${tagCount === 1 ? '' : 's'}</span>` : ''}</div>
     </footer>
   </aside>`;
