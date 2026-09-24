@@ -227,7 +227,7 @@ export class IdeaGitViewProvider implements vscode.WebviewViewProvider, vscode.T
       this.pendingHistoryPathFilter = undefined;
       await this.postToView(surface, { type: 'applyPathFilter', path: filePath });
     }
-    if (surface === 'history' && this.pendingHistoryBranchFilter) {
+    if (surface === 'history' && this.pendingHistoryBranchFilter !== undefined) {
       const branch = this.pendingHistoryBranchFilter;
       this.pendingHistoryBranchFilter = undefined;
       await this.postToView(surface, { type: 'applyBranchFilter', branch });
@@ -311,7 +311,7 @@ export class IdeaGitViewProvider implements vscode.WebviewViewProvider, vscode.T
       return;
     }
     if (message.type === 'ready') {
-      if (surface === 'history' && !this.pendingHistoryBranchFilter && !this.pendingHistoryPathFilter) {
+      if (surface === 'history' && this.pendingHistoryBranchFilter === undefined && !this.pendingHistoryPathFilter) {
         this.historyRef = message.historyRef || undefined;
       }
       this.readyViews.add(surface);
@@ -347,6 +347,8 @@ export class IdeaGitViewProvider implements vscode.WebviewViewProvider, vscode.T
         case 'setHistoryRef':
           this.historyRef = message.branch || undefined;
           this.commitLimit = HISTORY_PAGE_SIZE;
+          // A different ref can produce byte-identical commits; still acknowledge the selection.
+          this.coordinator.reset();
           await this.refresh(true);
           return;
         case 'commitDetails':
@@ -531,7 +533,9 @@ export class IdeaGitViewProvider implements vscode.WebviewViewProvider, vscode.T
     });
     if (name === undefined || name.trim() === currentName) return;
     const nextName = name.trim();
-    await this.operation('branch', `Renaming ${currentName}…`, () => client.renameBranch(currentName, nextName), `Renamed ${currentName} to ${nextName}`);
+    if (await this.operation('branch', `Renaming ${currentName}…`, () => client.renameBranch(currentName, nextName), `Renamed ${currentName} to ${nextName}`)) {
+      await this.retargetHistoryRef(currentName, nextName);
+    }
   }
 
   private async deleteBranch(client: GitClient, branch: string, remote: boolean): Promise<void> {
@@ -545,7 +549,19 @@ export class IdeaGitViewProvider implements vscode.WebviewViewProvider, vscode.T
       'Delete Branch'
     );
     if (choice !== 'Delete Branch') return;
-    await this.operation('branch', `Deleting ${branch}…`, () => client.deleteBranch(branch, remote), `Deleted ${branch}`);
+    if (await this.operation('branch', `Deleting ${branch}…`, () => client.deleteBranch(branch, remote), `Deleted ${branch}`)) {
+      await this.retargetHistoryRef(branch, '');
+    }
+  }
+
+  private async retargetHistoryRef(previous: string, next: string): Promise<void> {
+    if (this.historyRef !== previous) return;
+    this.historyRef = next || undefined;
+    this.commitLimit = HISTORY_PAGE_SIZE;
+    this.coordinator.reset();
+    this.pendingHistoryBranchFilter = next;
+    await this.deliverPendingNavigation('history');
+    await this.refresh(true);
   }
 
   private async renameChangelist(client: GitClient, id: string, currentName: string): Promise<void> {

@@ -2093,7 +2093,7 @@ window.addEventListener('message', (event) => {
   }
   if (message.type === 'snapshot') {
     const fingerprint = JSON.stringify(message.payload);
-    if (fingerprint === lastSnapshot) return;
+    if (fingerprint === lastSnapshot && !ui.historyRefLoading && !ui.graphLoadingMore) return;
     const previousRoot = ui.snapshot?.root;
     const nextRoot = message.payload.root;
     if (previousRoot && previousRoot !== nextRoot) saveRepositoryState(previousRoot);

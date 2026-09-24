@@ -2,7 +2,7 @@
   "name": "idea-git",
   "displayName": "Kivo Git",
   "description": "An IDEA-style Git workflow for VS Code: commit changes on the left, inspect history in the bottom Panel.",
-  "version": "0.3.0-beta.22",
+  "version": "0.3.0-beta.23",
   "publisher": "keatonli",
   "license": "MIT",
   "repository": {

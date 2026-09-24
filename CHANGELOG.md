@@ -2,6 +2,12 @@
 
 ## Unreleased
 
+## 0.3.0-beta.23 - 2026-09-24
+
+- Fixed History getting stuck loading when switching between refs with identical commit windows.
+- Showed changed files for merge commits by comparing against the first parent.
+- Kept the selected History ref in sync after renaming or deleting that branch.
+
 ## 0.3.0-beta.22 - 2026-09-24
 
 - Loaded History from the selected branch or tag directly, including tips beyond the recent all-ref window; retained clear partial-result messaging when searching older history.

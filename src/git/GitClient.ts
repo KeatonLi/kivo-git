@@ -221,15 +221,17 @@ export class GitClient {
   async commitDetails(hash: string): Promise<CommitDetails> {
     if (!/^[0-9a-f]{7,40}$/i.test(hash)) throw new Error('Invalid commit hash.');
     if (!this.store) await this.initialize();
-    const [metadata, body, parents, files, branches] = await Promise.all([
+    const [metadata, body, parents, branches] = await Promise.all([
       this.run(['show', '-s', '--format=%H%x1f%an%x1f%aI%x1f%s', hash]),
       this.run(['show', '-s', '--format=%B', hash]),
       this.run(['rev-list', '--parents', '-n', '1', hash]),
-      this.run(['diff-tree', '--root', '--no-commit-id', '--name-status', '-r', '-M', '-z', hash]),
       this.getBranches()
     ]);
     const [fullHash = hash, author = '', date = '', subject = ''] = metadata.trim().split('\x1f');
     const parentHashes = parents.trim().split(' ').slice(1).filter(Boolean);
+    const files = await this.run(parentHashes[0]
+      ? ['diff', '--name-status', '-r', '-M', '-z', parentHashes[0], fullHash, '--']
+      : ['diff-tree', '--root', '--no-commit-id', '--name-status', '-r', '-M', '-z', fullHash]);
     const fileTokens = files.split('\0').filter(Boolean);
     const changedFiles: CommitFile[] = [];
     for (let index = 0; index < fileTokens.length;) {

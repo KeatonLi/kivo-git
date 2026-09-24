@@ -71,6 +71,35 @@ describe('GitClient integration', () => {
     expect(master.commitsHasMore).toBe(false);
   });
 
+  it('reports files introduced by a merge commit relative to its first parent', async () => {
+    const root = await createRepository();
+    await git(root, ['switch', '-c', 'feature/merge-files']);
+    await fs.writeFile(path.join(root, 'merged.txt'), 'from feature\n');
+    await git(root, ['add', 'merged.txt']);
+    await git(root, ['commit', '-m', 'add feature file']);
+    await git(root, ['switch', 'main']);
+    await git(root, ['commit', '--allow-empty', '-m', 'advance main']);
+    await git(root, ['merge', '--no-ff', '--no-edit', 'feature/merge-files']);
+
+    const client = new GitClient(root);
+    const details = await client.commitDetails(await git(root, ['rev-parse', 'HEAD']));
+    expect(details.parents).toHaveLength(2);
+    expect(details.files).toContainEqual({ path: 'merged.txt', status: 'A', originalPath: undefined });
+    const rootDetails = await client.commitDetails(await git(root, ['rev-list', '--max-parents=0', 'HEAD']));
+    expect(rootDetails.files.map((file) => file.path)).toContain('alpha.txt');
+  });
+
+  it('can return identical snapshots when switching between refs at the same tip', async () => {
+    const root = await createRepository();
+    await git(root, ['branch', 'same-tip']);
+    const client = new GitClient(root);
+    await client.initialize();
+    const allRefs = await client.snapshot();
+    const selectedRef = await client.snapshot(80, 'same-tip');
+    expect(selectedRef.commits).toEqual(allRefs.commits);
+    expect(selectedRef.commitsHasMore).toBe(allRefs.commitsHasMore);
+  });
+
   it('keeps a detached HEAD commit visible and handles repositories without commits', async () => {
     const emptyRoot = await fs.mkdtemp(path.join(os.tmpdir(), 'ideagit-empty-'));
     temporaryRepositories.push(emptyRoot);
