@@ -35,6 +35,20 @@ describe('extension contribution model', () => {
     ]));
   });
 
+  it('adds focused Kivo Git actions to the Explorer file context menu', async () => {
+    const manifest = JSON.parse(await readFile(path.join(root, 'package.json'), 'utf8'));
+    expect(manifest.contributes.submenus).toContainEqual({ id: 'ideaGit.explorer', label: 'Kivo Git' });
+    expect(manifest.contributes.menus['explorer/context']).toEqual(expect.arrayContaining([
+      expect.objectContaining({ submenu: 'ideaGit.explorer', when: 'resourceScheme == file && !explorerResourceIsFolder' })
+    ]));
+    expect(manifest.contributes.menus['ideaGit.explorer']).toEqual(expect.arrayContaining([
+      expect.objectContaining({ command: 'ideaGit.openResourceDiff' }),
+      expect.objectContaining({ command: 'ideaGit.showFileHistory' }),
+      expect.objectContaining({ command: 'ideaGit.showResourceInChanges' }),
+      expect.objectContaining({ command: 'ideaGit.moveResourceToChangelist' })
+    ]));
+  });
+
   it('keeps a native History button in the Commit view title', async () => {
     const manifest = JSON.parse(await readFile(path.join(root, 'package.json'), 'utf8'));
     expect(manifest.contributes.menus['view/title']).toEqual(expect.arrayContaining([

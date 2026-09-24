@@ -11,6 +11,10 @@ exports.run = async function run() {
     'ideaGit.focus',
     'ideaGit.showChanges',
     'ideaGit.showLog',
+    'ideaGit.openResourceDiff',
+    'ideaGit.showFileHistory',
+    'ideaGit.moveResourceToChangelist',
+    'ideaGit.showResourceInChanges',
     'ideaGit.changes.focus',
     'ideaGit.history.focus'
   ]) {

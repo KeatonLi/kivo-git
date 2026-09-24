@@ -2,7 +2,7 @@
   "name": "idea-git",
   "displayName": "Kivo Git",
   "description": "An IDEA-style Git workflow for VS Code: commit changes on the left, inspect history in the bottom Panel.",
-  "version": "0.3.0-beta.13",
+  "version": "0.3.0-beta.21",
   "publisher": "keatonli",
   "license": "MIT",
   "repository": {
@@ -39,7 +39,7 @@
     "LICENSE"
   ],
   "scripts": {
-    "check": "tsc --noEmit && node --check media/main.js && node --check scripts/release.mjs && node --check scripts/sync-assets.mjs && node --check scripts/verify-vsix.mjs && node --check scripts/test-extension.mjs && node --check scripts/visual-server.mjs",
+    "check": "tsc --noEmit && node --check media/graph-layout.js && node --check media/main.js && node --check scripts/release.mjs && node --check scripts/sync-assets.mjs && node --check scripts/verify-vsix.mjs && node --check scripts/test-extension.mjs && node --check scripts/visual-server.mjs",
     "sync-assets": "node scripts/sync-assets.mjs",
     "compile": "npm run sync-assets && node esbuild.mjs",
     "watch": "node esbuild.mjs --watch",
@@ -100,6 +100,32 @@
         "command": "ideaGit.showLog",
         "title": "Kivo Git: Show History",
         "icon": "$(history)"
+      },
+      {
+        "command": "ideaGit.openResourceDiff",
+        "title": "Open Kivo Diff",
+        "icon": "$(diff)"
+      },
+      {
+        "command": "ideaGit.showFileHistory",
+        "title": "Show File History",
+        "icon": "$(history)"
+      },
+      {
+        "command": "ideaGit.moveResourceToChangelist",
+        "title": "Move to Changelist…",
+        "icon": "$(list-selection)"
+      },
+      {
+        "command": "ideaGit.showResourceInChanges",
+        "title": "Show in Kivo Commit",
+        "icon": "$(git-commit)"
+      }
+    ],
+    "submenus": [
+      {
+        "id": "ideaGit.explorer",
+        "label": "Kivo Git"
       }
     ],
     "menus": {
@@ -113,6 +139,31 @@
           "command": "ideaGit.refresh",
           "when": "view == ideaGit.changes || view == ideaGit.history",
           "group": "navigation@2"
+        }
+      ],
+      "explorer/context": [
+        {
+          "submenu": "ideaGit.explorer",
+          "when": "resourceScheme == file && !explorerResourceIsFolder",
+          "group": "scm@50"
+        }
+      ],
+      "ideaGit.explorer": [
+        {
+          "command": "ideaGit.openResourceDiff",
+          "group": "1_review@1"
+        },
+        {
+          "command": "ideaGit.showFileHistory",
+          "group": "1_review@2"
+        },
+        {
+          "command": "ideaGit.showResourceInChanges",
+          "group": "2_navigate@1"
+        },
+        {
+          "command": "ideaGit.moveResourceToChangelist",
+          "group": "3_changelist@1"
         }
       ]
     },

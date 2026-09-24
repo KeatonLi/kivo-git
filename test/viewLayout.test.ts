@@ -25,6 +25,17 @@ describe('Kivo Git two-surface routing', () => {
     expect(isMessageAllowedOnSurface('changes', 'loadMoreCommits')).toBe(false);
     expect(isMessageAllowedOnSurface('history', 'showChanges')).toBe(true);
     expect(isMessageAllowedOnSurface('changes', 'showChanges')).toBe(false);
+    for (const message of ['mergeBranch', 'renameBranch', 'deleteBranch', 'copyBranchName', 'createTag', 'checkoutRevision', 'copyCommitHash', 'copyCommitSubject']) {
+      expect(isMessageAllowedOnSurface('history', message)).toBe(true);
+      expect(isMessageAllowedOnSurface('changes', message)).toBe(false);
+    }
+  });
+
+  it('keeps file-specific navigation in the Changes surface', () => {
+    for (const message of ['showFileHistory', 'showBranchHistory', 'revealInExplorer']) {
+      expect(isMessageAllowedOnSurface('changes', message)).toBe(true);
+      expect(isMessageAllowedOnSurface('history', message)).toBe(false);
+    }
   });
 
   it('allows synchronisation and branch operations from either surface', () => {

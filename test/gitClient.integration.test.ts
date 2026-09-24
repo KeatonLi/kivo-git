@@ -137,6 +137,66 @@ describe('GitClient integration', () => {
     expect((await client.snapshot()).branch).toBe('feature/from-release');
   });
 
+  it('creates a tag at an exact commit and safely checks out that revision', async () => {
+    const root = await createRepository();
+    const initial = await git(root, ['rev-parse', 'HEAD']);
+    await fs.appendFile(path.join(root, 'alpha.txt'), 'new head\n');
+    await git(root, ['add', 'alpha.txt']);
+    await git(root, ['commit', '-m', 'new head']);
+
+    const client = new GitClient(root);
+    await client.initialize();
+    await client.createTag('release/exact', initial);
+    expect(await git(root, ['rev-parse', 'release/exact^{commit}'])).toBe(initial);
+
+    await client.checkoutRevision(initial);
+    expect(await git(root, ['rev-parse', 'HEAD'])).toBe(initial);
+    expect(await git(root, ['branch', '--show-current'])).toBe('');
+  });
+
+  it('merges, renames, and safely deletes local branches', async () => {
+    const root = await createRepository();
+    await git(root, ['switch', '-c', 'feature/branch-actions']);
+    await fs.writeFile(path.join(root, 'branch-action.txt'), 'branch action\n');
+    await git(root, ['add', 'branch-action.txt']);
+    await git(root, ['commit', '-m', 'feature branch action']);
+    await git(root, ['switch', 'main']);
+
+    const client = new GitClient(root);
+    await client.initialize();
+    await client.mergeBranch('feature/branch-actions');
+    expect(await fs.readFile(path.join(root, 'branch-action.txt'), 'utf8')).toBe('branch action\n');
+
+    await git(root, ['branch', 'cleanup/old-name']);
+    await client.renameBranch('cleanup/old-name', 'cleanup/new-name');
+    expect((await git(root, ['branch', '--list', 'cleanup/new-name'])).trim()).toContain('cleanup/new-name');
+    await client.deleteBranch('cleanup/new-name', false);
+    expect(await git(root, ['branch', '--list', 'cleanup/new-name'])).toBe('');
+
+    await git(root, ['switch', '-c', 'protect/unmerged']);
+    await fs.writeFile(path.join(root, 'unmerged.txt'), 'keep me\n');
+    await git(root, ['add', 'unmerged.txt']);
+    await git(root, ['commit', '-m', 'unmerged work']);
+    await git(root, ['switch', 'main']);
+    await expect(client.deleteBranch('protect/unmerged', false)).rejects.toThrow(/not fully merged/i);
+  });
+
+  it('deletes the exact selected remote branch', async () => {
+    const root = await createRepository();
+    const remote = await fs.mkdtemp(path.join(os.tmpdir(), 'ideagit-delete-remote-'));
+    temporaryRepositories.push(remote);
+    await git(remote, ['init', '--bare']);
+    await git(root, ['remote', 'add', 'origin', remote]);
+    await git(root, ['switch', '-c', 'feature/remove-me']);
+    await git(root, ['push', '-u', 'origin', 'feature/remove-me']);
+
+    const client = new GitClient(root);
+    await client.initialize();
+    await client.deleteBranch('origin/feature/remove-me', true);
+
+    expect(await git(remote, ['for-each-ref', '--format=%(refname:short)', 'refs/heads/feature/remove-me'])).toBe('');
+  });
+
   it('groups changes and commits selected files without consuming unrelated staged changes', async () => {
     const root = await createRepository();
     await fs.appendFile(path.join(root, 'alpha.txt'), 'changed\n');

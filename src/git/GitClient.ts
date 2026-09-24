@@ -296,6 +296,51 @@ export class GitClient {
     await this.run(['switch', '-c', name, startPoint]);
   }
 
+  async createTag(tagName: string, revision: string): Promise<void> {
+    const name = tagName.trim();
+    if (!name) throw new Error('Enter a tag name.');
+    if (!/^[0-9a-f]{7,40}$/i.test(revision)) throw new Error('Invalid commit hash.');
+    await this.run(['check-ref-format', `refs/tags/${name}`]);
+    await this.run(['rev-parse', '--verify', '--quiet', `${revision}^{commit}`]);
+    await this.run(['tag', name, revision]);
+  }
+
+  async checkoutRevision(revision: string): Promise<void> {
+    if (!/^[0-9a-f]{7,40}$/i.test(revision)) throw new Error('Invalid commit hash.');
+    await this.run(['rev-parse', '--verify', '--quiet', `${revision}^{commit}`]);
+    await this.run(['switch', '--detach', revision]);
+  }
+
+  async mergeBranch(branchName: string): Promise<void> {
+    const branch = branchName.trim();
+    if (!branch) throw new Error('Choose a branch to merge.');
+    await this.run(['rev-parse', '--verify', '--quiet', `${branch}^{commit}`]);
+    await this.run(['merge', '--no-edit', branch]);
+  }
+
+  async renameBranch(currentName: string, nextName: string): Promise<void> {
+    const current = currentName.trim();
+    const next = nextName.trim();
+    if (!current || !next) throw new Error('Enter a branch name.');
+    await this.run(['check-ref-format', '--branch', next]);
+    await this.run(['show-ref', '--verify', '--quiet', `refs/heads/${current}`]);
+    await this.run(['branch', '--move', current, next]);
+  }
+
+  async deleteBranch(branchName: string, remote: boolean): Promise<void> {
+    const branch = branchName.trim();
+    if (!branch) throw new Error('Choose a branch to delete.');
+    if (!remote) {
+      await this.run(['branch', '--delete', branch]);
+      return;
+    }
+    const separator = branch.indexOf('/');
+    if (separator <= 0 || separator === branch.length - 1) throw new Error('The remote branch name is invalid.');
+    const remoteName = branch.slice(0, separator);
+    const remoteBranch = branch.slice(separator + 1);
+    await this.run(['push', remoteName, '--delete', remoteBranch]);
+  }
+
   async fetch(background = false): Promise<void> {
     await this.run(['fetch', '--all', '--prune'], 8 * 1024 * 1024, background
       ? { timeout: 30000, env: { GIT_TERMINAL_PROMPT: '0', GCM_INTERACTIVE: 'Never' } }

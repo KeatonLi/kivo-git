@@ -2,6 +2,55 @@
 
 ## Unreleased
 
+## 0.3.0-beta.21 - 2026-09-23
+
+- Fixed Show History from the Commit branch popup to open and filter the History panel, including tags and newly opened History views.
+- Kept Local, Remote, and tag searches incremental even when many branches match, and avoided rendering the closed branch popup on every update.
+- Reset incompatible History filters during file and branch navigation, restored keyboard focus after the final batch, and removed repeated Graph row entrance animation.
+
+## 0.3.0-beta.20 - 2026-09-23
+
+- Added complete File, Branch, and Commit context menus with keyboard access and native Explorer/history actions.
+- Added draggable, persisted Commit pane sizing plus lazy Branch groups/search and consistent Graph loading/selection feedback.
+- Refined the compact UI with shared spacing, row states, lighter surfaces, and fewer borders and radii.
+
+## 0.3.0-beta.19 - 2026-09-23
+
+- Added a compact Kivo Git submenu to Explorer files for opening a working-tree diff, filtering History to a file, revealing it in Commit, and moving it to another changelist.
+- Added commit-row context actions in History for copying the full hash, creating a branch or lightweight tag at that commit, and confirmed detached-HEAD checkout, with mouse and keyboard access.
+- Removed the disabled Amend placeholder from the Commit footer so every visible control now performs a real action.
+
+## 0.3.0-beta.18 - 2026-09-23
+
+- Isolated Commit and History view state per repository, including filters, drafts, selections, expansion, Graph position, and resizable pane dimensions; switching projects no longer carries stale filters into the next repository.
+- Made Commit and Commit and Push react immediately to file selection, commit-message content, and running operations, with clear disabled-state explanations.
+- Restored focus to the invoking file or branch after dismissing a context menu with Escape.
+- Removed the retired spectral CSS layer so the compact host-theme UI now has one predictable restrained style path instead of competing overrides.
+
+## 0.3.0-beta.17 - 2026-09-23
+
+- Made changed-file actions reliably accessible through document-level right-click capture, including composed event paths across Webview refreshes.
+- Added a compact, hover-revealed file action button that opens the same menu for mouse, trackpad, and keyboard users.
+- Simplified the Commit and History visual layer to flat VS Code theme surfaces with quieter selection, focus, resize, and hover feedback; removed decorative gradients, glow, and lateral hover motion.
+
+## 0.3.0-beta.16 - 2026-09-23
+
+- Expanded the IDEA-style History branch menu with checkout, branch creation, merge into current, local rename, safe local/confirmed remote delete, copy name, and history filtering.
+- Made every History pane boundary adjustable: branch tree/history, history/commit details, and Changed Files/commit information now support pointer dragging, keyboard resizing, double-click reset, Escape cancellation, responsive orientation, and persisted sizes.
+- Added Git integration coverage for merge, rename, safe deletion, and protection of unmerged local branches.
+
+## 0.3.0-beta.15 - 2026-09-21
+
+- Fixed History branch and changed-file context menus by routing right-clicks through a stable webview root listener, so refreshes and lazy-loaded Graph rows no longer fall back to the native Cut/Copy/Paste menu.
+- Kept the existing IDEA-style branch action flow: create and check out a new local branch from the exact selected branch, remote ref, or tag.
+
+## 0.3.0-beta.14 - 2026-09-20
+
+- Reworked Kivo Git History for large and highly branched repositories: history now loads in incremental pages as the user reaches the end of the list, without the former 800-commit ceiling.
+- Virtualized History rows so the Webview only renders the visible commit window plus a small buffer, while retaining full scroll position, mouse selection, and Arrow/Home/End keyboard navigation.
+- Made the Graph width react to the actual visible history window and available Panel width. Dense topology compresses safely instead of allowing an off-screen branch fan-out to consume the Commit column.
+- Added pure layout regression coverage for dense 48-lane topology and a 1,000-commit virtual window, plus VSIX verification of the new runtime asset.
+
 ## 0.3.0-beta.13 - 2026-09-20
 
 - Added the Kivo visual layer without changing the IDEA-style layout: restrained cyan-violet accents, clearer sync direction badges, focused branch and commit states, file status signals, tactile toolbar/commit controls, and Kivo Graph/Changes marks at the two surface entrances.

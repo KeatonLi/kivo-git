@@ -15,7 +15,11 @@ export function activate(context: vscode.ExtensionContext): void {
     vscode.commands.registerCommand('ideaGit.refresh', () => provider.refresh()),
     vscode.commands.registerCommand('ideaGit.focus', () => provider.showChanges()),
     vscode.commands.registerCommand('ideaGit.showChanges', () => provider.showChanges()),
-    vscode.commands.registerCommand('ideaGit.showLog', () => provider.showLog())
+    vscode.commands.registerCommand('ideaGit.showLog', () => provider.showLog()),
+    vscode.commands.registerCommand('ideaGit.openResourceDiff', (uri?: vscode.Uri) => provider.openResourceDiff(uri)),
+    vscode.commands.registerCommand('ideaGit.showFileHistory', (uri?: vscode.Uri) => provider.showFileHistory(uri)),
+    vscode.commands.registerCommand('ideaGit.moveResourceToChangelist', (uri?: vscode.Uri) => provider.moveResourceToChangelist(uri)),
+    vscode.commands.registerCommand('ideaGit.showResourceInChanges', (uri?: vscode.Uri) => provider.showResourceInChanges(uri))
   );
 }
 

@@ -30,6 +30,12 @@ const sharedMessages = new Set([
 const messagesBySurface: Record<KivoSurface, ReadonlySet<string>> = {
   changes: new Set([
     'openDiff',
+    'openFile',
+    'copyPath',
+    'moveFileToChangelist',
+    'showFileHistory',
+    'showBranchHistory',
+    'revealInExplorer',
     'commit',
     'commitAndPush',
     'showLog',
@@ -44,7 +50,15 @@ const messagesBySurface: Record<KivoSurface, ReadonlySet<string>> = {
     'loadMoreCommits',
     'commitDetails',
     'openCommitDiff',
-    'showChanges'
+    'showChanges',
+    'mergeBranch',
+    'renameBranch',
+    'deleteBranch',
+    'copyBranchName',
+    'createTag',
+    'checkoutRevision',
+    'copyCommitHash',
+    'copyCommitSubject'
   ])
 };
 
