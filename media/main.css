@@ -108,7 +108,8 @@ button:disabled { cursor: default !important; }
 .file-list { min-height: 0; overflow: hidden; padding: 1px 1px 4px; border-radius: var(--radius-md); transition: background 140ms, box-shadow 140ms, padding 180ms var(--ease); }
 .collapsed .file-list { padding-top: 0; padding-bottom: 0; }
 .file-list.drag-over { background: color-mix(in srgb, var(--accent) 11%, transparent); box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--accent) 65%, transparent); animation: drop-ready 620ms var(--ease) infinite alternate; }
-.drop-hint { margin: 2px 5px; padding: 7px 27px; border: 1px dashed var(--border-subtle); border-radius: var(--radius-sm); color: var(--muted); font-size: 10px; opacity: .72; }
+.file-list.empty.drag-over { min-height: 28px; display: grid; place-items: center; }
+.file-list.empty.drag-over::after { content: 'Drop files here'; color: var(--muted); font-size: 10px; opacity: .85; }
 .file-row { display: flex; align-items: center; gap: 6px; min-height: 28px; padding: 1px 7px 1px 5px; border-radius: var(--radius-sm); animation: file-in 170ms var(--ease) both; transition: background 100ms, transform 130ms, opacity 130ms, box-shadow 120ms; }
 .file-row:hover { background: var(--vscode-list-hoverBackground); }
 .file-row.selected { background: color-mix(in srgb, var(--vscode-list-activeSelectionBackground) 52%, transparent); }
@@ -274,7 +275,8 @@ body[data-surface="changes"] .changes-toolbar .toolbar-actions { flex: 0 0 auto;
 .log-branch-row:hover, .log-branch-row:focus-visible { outline: none; background: var(--vscode-list-hoverBackground); }
 .log-branch-row.selected { background: var(--vscode-list-activeSelectionBackground, color-mix(in srgb, var(--accent) 16%, transparent)); color: var(--vscode-list-activeSelectionForeground, var(--vscode-foreground)); }
 .log-branch-row.current:not(.selected) { color: var(--accent); }
-.log-branch-row > span { min-width: 0; flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 10px; }
+.log-branch-row > span:not(.codicon) { min-width: 0; flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 10px; }
+.log-branch-row > .codicon { flex: 0 0 auto; }
 .log-branch-row small { color: inherit; opacity: .75; font-size: 8px; font-weight: 650; }
 .log-branch-row.all { margin-bottom: 3px; }
 .log-splitter,
@@ -601,13 +603,47 @@ body[data-surface="changes"] .content { background: var(--vscode-sideBar-backgro
 .parity-mode .check { width: 17px; height: 18px; }
 .parity-mode .check span { width: 12px; height: 12px; border-radius: 2px; }
 .parity-mode .status { width: 13px; font-size: 9px; }
-.parity-mode .drop-hint {
-  margin: 2px 12px;
-  padding: 6px 7px;
-  border-radius: 2px;
-  text-align: center;
-}
 .parity-mode .commit-empty-list { padding: 8px 13px; color: var(--muted); font-size: 11px; }
+.parity-mode .workspace-brief {
+  margin: 22px 12px 16px;
+  padding: 1px 2px 2px 14px;
+  border-left: 2px solid color-mix(in srgb, var(--kivo-violet) 72%, var(--vscode-panel-border));
+  color: var(--vscode-foreground);
+}
+.parity-mode .workspace-brief-label,
+.parity-mode .workspace-brief-heading {
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  color: var(--muted);
+  font-size: 9px;
+  font-weight: 650;
+  letter-spacing: .45px;
+}
+.parity-mode .workspace-brief-mark { width: 5px; height: 5px; background: var(--kivo-violet); }
+.parity-mode .workspace-brief-state { display: flex; align-items: center; gap: 7px; margin: 10px 0 0; font-size: 12px; font-weight: 550; }
+.parity-mode .workspace-brief-state .codicon { color: var(--success); font-size: 13px; }
+.parity-mode .workspace-brief-branch { display: block; max-width: 100%; overflow: hidden; margin: 3px 0 0 20px; color: var(--muted); font-size: 10px; text-overflow: ellipsis; white-space: nowrap; }
+.parity-mode .workspace-brief-divider { height: 1px; margin: 14px 0 12px; background: color-mix(in srgb, var(--vscode-foreground) 10%, transparent); }
+.parity-mode .workspace-brief-heading { justify-content: space-between; gap: 10px; }
+.parity-mode .workspace-brief-heading > span { flex: 0 0 auto; }
+.parity-mode .workspace-brief-heading code { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--muted); font-size: 10px; font-weight: 400; letter-spacing: 0; }
+.parity-mode .workspace-brief-metrics { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; margin: 12px 0 10px; }
+.parity-mode .workspace-brief-metrics > div { min-width: 0; display: flex; flex-direction: column; align-items: flex-start; }
+.parity-mode .workspace-brief-direction { display: inline-flex; align-items: center; gap: 3px; color: var(--muted); font-size: 9px; font-weight: 600; letter-spacing: .25px; }
+.parity-mode .workspace-brief-direction .codicon { color: var(--vscode-textLink-foreground, var(--accent)); font-size: 11px; }
+.parity-mode .workspace-brief-metrics strong { margin: 2px 0 0; font: 500 23px/1.2 var(--vscode-editor-font-family, monospace); font-variant-numeric: tabular-nums; }
+.parity-mode .workspace-brief-metrics small { color: var(--muted); font-size: 10px; }
+.parity-mode .workspace-brief-summary { margin: 0; color: var(--vscode-foreground); font-size: 10px; }
+.parity-mode .workspace-brief-untracked { margin: 11px 0; color: var(--muted); font-size: 11px; line-height: 1.5; }
+.parity-mode .workspace-brief-footer { min-width: 0; display: flex; align-items: center; justify-content: space-between; gap: 7px; margin-top: 12px; color: var(--muted); font-size: 10px; }
+.parity-mode .workspace-brief-footer > span { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.parity-mode .workspace-brief-error { color: var(--vscode-errorForeground, var(--danger)); }
+.parity-mode .workspace-brief-footer button { flex: 0 0 auto; display: inline-flex; align-items: center; gap: 4px; padding: 3px 5px; border-radius: 3px; background: transparent; color: var(--vscode-textLink-foreground, var(--accent)); cursor: pointer; font-size: 10px; }
+.parity-mode .workspace-brief-footer button:hover:not(:disabled),
+.parity-mode .workspace-brief-footer button:focus-visible { outline: none; background: var(--vscode-toolbar-hoverBackground); }
+.parity-mode .workspace-brief-footer button:disabled { opacity: .55; }
 .parity-mode .commit-panel {
   flex: 0 0 var(--commit-panel-height, 188px);
   padding: 8px 12px 10px;
@@ -659,6 +695,7 @@ body[data-surface="changes"] .content { background: var(--vscode-sideBar-backgro
 body[data-surface="history"] .content { min-width: 0; background: var(--vscode-panel-background, var(--surface-base)); }
 .parity-mode .graph-view { min-width: 0; background: var(--vscode-panel-background, var(--surface-base)); }
 .parity-mode .log-workspace {
+  --idea-row: 30px;
   flex: 1;
   min-height: 0;
   display: grid;
@@ -744,7 +781,7 @@ body[data-surface="history"] .content { min-width: 0; background: var(--vscode-p
 .parity-mode .log-branch-row:focus-visible { outline: none; background: var(--vscode-list-hoverBackground); }
 .parity-mode .log-branch-row.selected { background: var(--idea-selection); color: var(--idea-selection-foreground); }
 .parity-mode .log-branch-row.current:not(.selected) { color: var(--vscode-foreground); }
-.parity-mode .log-branch-row > span { font-size: 11px; }
+.parity-mode .log-branch-row > span:not(.codicon) { font-size: 11px; }
 .parity-mode .log-branch-row small { font-size: 8px; }
 .parity-mode .branch-tree-empty { padding: 2px 7px; color: var(--muted); font-size: 10px; }
 .parity-mode .branch-pane-footer {
@@ -762,33 +799,42 @@ body[data-surface="history"] .content { min-width: 0; background: var(--vscode-p
 .parity-mode .branch-pane-current > span { min-width: 0; display: flex; flex-direction: column; gap: 1px; }
 .parity-mode .branch-pane-current small { color: var(--muted); font-size: 8px; letter-spacing: .35px; line-height: 1; }
 .parity-mode .branch-pane-current strong { overflow: hidden; color: var(--vscode-foreground); text-overflow: ellipsis; white-space: nowrap; font-size: 10px; font-weight: 600; }
+.parity-mode .branch-pane-sync { min-width: 0; display: flex; align-items: center; gap: 4px; margin-top: 3px; }
+.parity-mode .branch-sync-values { min-width: 0; flex: 1; display: flex; align-items: center; gap: 9px; color: var(--vscode-foreground); font-size: 10px; white-space: nowrap; }
+.parity-mode .branch-sync-count { display: inline-flex; align-items: center; gap: 2px; }
+.parity-mode .branch-sync-count .codicon { color: var(--vscode-textLink-foreground, var(--accent)); font-size: 11px; }
+.parity-mode .branch-sync-untracked,
+.parity-mode .branch-sync-error { color: var(--muted); font-size: 10px; }
+.parity-mode .branch-sync-error { color: var(--vscode-errorForeground, var(--danger)); }
+.parity-mode .branch-pane-sync .idea-toolbar-button { width: 22px; height: 22px; flex: 0 0 auto; }
 .parity-mode .branch-pane-stats { display: flex; align-items: center; gap: 6px; min-width: 0; color: var(--muted); font-size: 9px; }
 .parity-mode .branch-pane-stats span + span { padding-left: 6px; border-left: 1px solid var(--vscode-panel-border, var(--border-subtle)); }
 .parity-mode .log-splitter { grid-column: 3; grid-row: 1; }
 .parity-mode .log-history-pane { grid-column: 4; min-width: 0; min-height: 0; display: flex; flex-direction: column; }
 .parity-mode .log-detail-splitter { grid-column: 5; grid-row: 1; }
 .parity-mode .log-filter-bar {
-  flex: 0 0 38px;
+  flex: 0 0 auto;
+  min-height: 42px;
   display: flex;
   align-items: center;
-  padding: 3px 7px;
+  padding: 7px 10px;
   border-bottom: 1px solid var(--vscode-panel-border, var(--border-subtle));
   background: var(--vscode-panel-background, var(--surface-base));
 }
-.parity-mode .log-filter-bar .graph-toolbar-head { width: 100%; gap: 6px; }
+.parity-mode .log-filter-bar .graph-toolbar-head { width: 100%; flex-wrap: wrap; gap: 7px 10px; }
 .parity-mode .log-filter-bar .graph-search {
-  flex: 0 1 215px;
-  height: 27px;
+  flex: 1 1 220px;
+  height: 29px;
   border-radius: 4px;
   font-size: 11px;
 }
-.parity-mode .log-filter-bar .graph-filters { gap: 3px; }
-.parity-mode .log-filter-bar .graph-filter { height: 26px; padding: 0 5px; border-radius: 3px; }
+.parity-mode .log-filter-bar .graph-filters { order: 3; flex: 1 0 100%; gap: 7px; overflow-x: auto; }
+.parity-mode .log-filter-bar .graph-filter { height: 27px; padding: 0 7px; border-radius: 4px; }
 .parity-mode .log-filter-bar .graph-filter span { font-size: 10px; font-weight: 500; letter-spacing: 0; }
 .parity-mode .log-filter-bar .graph-filter select,
 .parity-mode .log-filter-bar .graph-filter input { font-size: 10px; }
-.parity-mode .log-filter-bar .path-filter input { width: 58px; }
-.parity-mode .log-result-count { padding-left: 5px; border-left: 0; font-size: 10px; }
+.parity-mode .log-filter-bar .path-filter input { width: 96px; }
+.parity-mode .log-result-count { margin-left: auto; padding-left: 5px; border-left: 0; font-size: 11px; }
 .parity-mode .log-column-header,
 .parity-mode .graph-row {
   grid-template-columns: minmax(88px, 108px) var(--graph-width) minmax(0, 1fr) 142px;
@@ -796,7 +842,7 @@ body[data-surface="history"] .content { min-width: 0; background: var(--vscode-p
   padding: 0 8px 0 0;
 }
 .parity-mode .log-column-header {
-  height: 24px;
+  height: 28px;
   background: var(--vscode-panel-background, var(--surface-base));
   font-size: 9px;
   font-weight: 600;
@@ -822,14 +868,25 @@ body[data-surface="history"] .content { min-width: 0; background: var(--vscode-p
 .parity-mode .graph-node { stroke-width: 1.45; }
 .parity-mode .graph-node.merge { stroke-width: 2.1; }
 .parity-mode .log-author,
-.parity-mode .log-date { padding-left: 8px; font-size: 10px; }
+.parity-mode .log-date { padding-left: 8px; font-size: 11px; }
 .parity-mode .log-date { text-align: left; }
 .parity-mode .graph-commit { gap: 5px; padding: 0 6px; }
-.parity-mode .graph-commit strong { font-size: 11px; font-weight: 450; }
-.parity-mode .log-meta { font-size: 9px; }
+.parity-mode .graph-commit strong { font-size: 12px; font-weight: 450; }
+.parity-mode .log-meta { font-size: 10px; }
 .parity-mode .graph-ref { max-width: 120px; padding: 0 2px; border: 0; border-radius: 0; background: transparent; line-height: 14px; font-size: 9px; }
 .parity-mode .graph-ref.local.current { background: transparent; }
-.parity-mode .load-more { border-radius: 3px; }
+.parity-mode .graph-list > .inline-empty {
+  display: flex;
+  min-height: 120px;
+  align-items: center;
+  justify-content: center;
+  padding: 24px;
+  text-align: center;
+  line-height: 1.5;
+  font-size: 12px;
+}
+.parity-mode .graph-list > .inline-empty .codicon { margin-right: 8px; }
+.parity-mode .load-more { min-height: 30px; margin: 10px auto; padding: 5px 11px; border-radius: 4px; font-size: 11px; }
 .parity-mode .log-workspace .commit-detail {
   grid-column: 6;
   min-width: 0;
@@ -865,11 +922,11 @@ body[data-surface="history"] .content { min-width: 0; background: var(--vscode-p
 }
 .parity-mode .commit-file-folder .codicon { color: var(--muted); font-size: 12px; }
 .parity-mode .commit-file {
-  min-height: 22px;
+  min-height: 26px;
   gap: 4px;
   padding: 0 4px 0 calc(5px + var(--tree-indent, 0px));
   border-radius: 2px;
-  font-size: 10px;
+  font-size: 11px;
 }
 .parity-mode .commit-file .codicon { color: var(--muted); font-size: 12px; }
 .parity-mode .commit-file .status { width: 11px; font-size: 8px; }

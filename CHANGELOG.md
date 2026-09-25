@@ -2,6 +2,30 @@
 
 ## Unreleased
 
+## 0.3.0-beta.25 - 2026-09-24
+
+- Added a restrained Repository Status summary beneath Changelists, using real working-tree and upstream counts to explain whether the branch is in sync, ahead, behind, or diverged.
+- Showed the tracked branch and last remote check state, with a direct fetch action and clear missing-upstream or fetch-error messages.
+- Kept the displayed remote-check timestamp tied to fetches, so push and pull do not claim a new fetch happened.
+
+## 0.3.0-beta.24 - 2026-09-24
+
+- Removed the extra space between branch icons and names in the History branch tree.
+- Displayed the current branch's behind and ahead counts beside a remote check action in History; counts update after fetching and show an explicit state without an upstream.
+
+## 0.3.0-beta.23 - 2026-09-24
+
+- Fixed History getting stuck loading when switching between refs with identical commit windows.
+- Showed changed files for merge commits by comparing against the first parent.
+- Kept the selected History ref in sync after renaming or deleting that branch.
+
+## 0.3.0-beta.22 - 2026-09-24
+
+- Loaded History from the selected branch or tag directly, including tips beyond the recent all-ref window; retained clear partial-result messaging when searching older history.
+- Kept commit details aligned with active filters and restored selected commit details when reopening History.
+- Cached parsed Git history until HEAD, refs, or the requested window changes so working-tree refreshes avoid repeating Git log.
+- Improved History filter spacing, commit row legibility, empty states, and the load-more action; included detached HEAD commits in the all-ref view.
+
 ## 0.3.0-beta.21 - 2026-09-23
 
 - Fixed Show History from the Commit branch popup to open and filter the History panel, including tags and newly opened History views.

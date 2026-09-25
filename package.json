@@ -2,7 +2,7 @@
   "name": "idea-git",
   "displayName": "Kivo Git",
   "description": "An IDEA-style Git workflow for VS Code: commit changes on the left, inspect history in the bottom Panel.",
-  "version": "0.3.0-beta.21",
+  "version": "0.3.0-beta.25",
   "publisher": "keatonli",
   "license": "MIT",
   "repository": {
@@ -39,12 +39,13 @@
     "LICENSE"
   ],
   "scripts": {
-    "check": "tsc --noEmit && node --check media/graph-layout.js && node --check media/main.js && node --check scripts/release.mjs && node --check scripts/sync-assets.mjs && node --check scripts/verify-vsix.mjs && node --check scripts/test-extension.mjs && node --check scripts/visual-server.mjs",
+    "check": "tsc --noEmit && node --check media/graph-layout.js && node --check media/main.js && node --check scripts/release.mjs && node --check scripts/sync-assets.mjs && node --check scripts/verify-vsix.mjs && node --check scripts/test-extension.mjs && node --check scripts/test-webview.mjs && node --check scripts/visual-server.mjs",
     "sync-assets": "node scripts/sync-assets.mjs",
     "compile": "npm run sync-assets && node esbuild.mjs",
     "watch": "node esbuild.mjs --watch",
     "dev": "node scripts/visual-server.mjs",
     "test": "vitest run",
+    "test:webview": "node scripts/test-webview.mjs",
     "test:extension": "npm run compile && node scripts/test-extension.mjs",
     "test:vsix": "node scripts/verify-vsix.mjs kivo-git-${npm_package_version}.vsix",
     "package": "npm run check && npm run test && npm run compile && vsce package --out kivo-git-${npm_package_version}.vsix && npm run test:vsix",

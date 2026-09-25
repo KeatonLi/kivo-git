@@ -87,11 +87,17 @@
           { hash: 'bb011a0a1b2c3d4e5f678901234567890abcd12', shortHash: 'bb011a0', author: 'jarvan.jiang', date: '2026-09-15T09:56:00Z', subject: 'Accept Merge Request #14862: release/20260910 → master', parents: [], paths: ['src/main/java/com/anker/mvp/provider/ClusterProvider.java'], refs: [{ name: 'origin/master', kind: 'remote' }], lane: 1, incomingLanes: [0, 1], parentLanes: [], hasIncoming: true, laneTransitions: [{ from: 0, to: 0, kind: 'through' }] }
         ]
       };
+      if (new URLSearchParams(location.search).get('state') === 'empty') {
+        fixture.changes = [];
+        fixture.changelists[0].changes = [];
+      }
+      window.__vscodeMessages = [];
       function emit(data) { window.dispatchEvent(new MessageEvent('message', { data })); }
       window.acquireVsCodeApi = () => ({
         getState: () => ({}),
         setState: () => {},
         postMessage: (message) => {
+          window.__vscodeMessages.push(message);
           if (message.type === 'commitDetails') {
             setTimeout(() => emit({ type: 'commitDetails', payload: {
               hash: message.hash,
