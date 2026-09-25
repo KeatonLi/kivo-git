@@ -661,8 +661,8 @@ function renderChanges(s) {
       <div class="list-heading"><label class="list-check check"><input type="checkbox" data-select-list="${escapeHtml(list.id)}" aria-label="Select all files in ${escapeHtml(list.name)}" ${allSelected ? 'checked' : ''} ${ui.busy || !list.changes.length ? 'disabled' : ''}><span></span></label><button class="list-collapse" data-collapse="${escapeHtml(list.id)}" aria-expanded="${!collapsed}">
         ${icon('chevron-down', 'disclosure')}<span class="active-dot" title="${list.active ? 'Active changelist' : ''}"></span><span class="list-name">${escapeHtml(list.name)}</span><span class="count">${list.changes.length}</span>
       </button><button class="list-more" data-list-menu="${escapeHtml(list.id)}" aria-label="Actions for ${escapeHtml(list.name)}" aria-expanded="${ui.listMenuId === list.id}">${icon('more')}</button></div>
-      <div class="file-list-shell"><div class="file-list" data-drop-list="${escapeHtml(list.id)}">
-        ${list.changes.length ? list.changes.map((change) => renderFile(change, list.id)).join('') : '<div class="drop-hint">Drop files here</div>'}
+      <div class="file-list-shell"><div class="file-list ${list.changes.length ? '' : 'empty'}" data-drop-list="${escapeHtml(list.id)}">
+        ${list.changes.map((change) => renderFile(change, list.id)).join('')}
       </div></div><div class="list-menu ${ui.listMenuId === list.id ? 'open' : ''}" role="menu" ${ui.listMenuId === list.id ? '' : 'inert'}>
         ${list.active ? '' : `<button role="menuitem" data-list-action="active" data-list-id="${escapeHtml(list.id)}">Set Active</button>`}
         <button role="menuitem" data-list-action="rename" data-list-id="${escapeHtml(list.id)}" data-list-name="${escapeHtml(list.name)}">Rename</button>
