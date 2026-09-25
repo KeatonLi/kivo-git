@@ -108,7 +108,8 @@ button:disabled { cursor: default !important; }
 .file-list { min-height: 0; overflow: hidden; padding: 1px 1px 4px; border-radius: var(--radius-md); transition: background 140ms, box-shadow 140ms, padding 180ms var(--ease); }
 .collapsed .file-list { padding-top: 0; padding-bottom: 0; }
 .file-list.drag-over { background: color-mix(in srgb, var(--accent) 11%, transparent); box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--accent) 65%, transparent); animation: drop-ready 620ms var(--ease) infinite alternate; }
-.drop-hint { margin: 2px 5px; padding: 7px 27px; border: 1px dashed var(--border-subtle); border-radius: var(--radius-sm); color: var(--muted); font-size: 10px; opacity: .72; }
+.file-list.empty.drag-over { min-height: 28px; display: grid; place-items: center; }
+.file-list.empty.drag-over::after { content: 'Drop files here'; color: var(--muted); font-size: 10px; opacity: .85; }
 .file-row { display: flex; align-items: center; gap: 6px; min-height: 28px; padding: 1px 7px 1px 5px; border-radius: var(--radius-sm); animation: file-in 170ms var(--ease) both; transition: background 100ms, transform 130ms, opacity 130ms, box-shadow 120ms; }
 .file-row:hover { background: var(--vscode-list-hoverBackground); }
 .file-row.selected { background: color-mix(in srgb, var(--vscode-list-activeSelectionBackground) 52%, transparent); }
@@ -602,12 +603,6 @@ body[data-surface="changes"] .content { background: var(--vscode-sideBar-backgro
 .parity-mode .check { width: 17px; height: 18px; }
 .parity-mode .check span { width: 12px; height: 12px; border-radius: 2px; }
 .parity-mode .status { width: 13px; font-size: 9px; }
-.parity-mode .drop-hint {
-  margin: 2px 12px;
-  padding: 6px 7px;
-  border-radius: 2px;
-  text-align: center;
-}
 .parity-mode .commit-empty-list { padding: 8px 13px; color: var(--muted); font-size: 11px; }
 .parity-mode .workspace-brief {
   margin: 22px 12px 16px;
