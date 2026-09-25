@@ -76,6 +76,23 @@ try {
 
   await page.setViewportSize({ width: 1450, height: 650 });
   await openSurface(page, 'surface=history');
+  const loadedCommitCount = await page.locator('.graph-row').count();
+  const firstSubject = page.locator('.graph-row strong').first();
+  assert.equal(await firstSubject.getAttribute('title'), await firstSubject.textContent(), 'Truncated commit subjects should expose their full text on hover.');
+  await page.locator('#graph-search').fill('2d4411f');
+  assert.equal(await page.locator('.graph-row').count(), 1, 'Commit search should match by short hash.');
+  await page.locator('[data-action="clear-graph-filters"]').first().click();
+  assert.equal(await page.locator('.graph-row').count(), loadedCommitCount, 'Clearing filters should restore all loaded commits.');
+  await page.locator('#graph-path').fill('config');
+  assert.equal(await page.locator('.graph-row').count(), 1, 'Path filtering should return commits that touched the path.');
+  await page.locator('[data-action="clear-graph-filters"]').first().click();
+  await page.locator('[data-graph-filter="author"]').selectOption('jarvan.jiang');
+  assert.ok(await page.locator('.graph-row').count() > 0 && await page.locator('.graph-row').count() < loadedCommitCount, 'Author filtering should narrow the commit list.');
+  await page.locator('[data-action="clear-graph-filters"]').first().click();
+  await page.locator('[data-graph-filter="branch"]').selectOption('origin/master');
+  assert.ok(await page.evaluate(() => window.__vscodeMessages.some((message) => message.type === 'setHistoryRef' && message.branch === 'origin/master')), 'Ref filtering should request the selected history from VS Code.');
+
+  await openSurface(page, 'surface=history');
   assert.equal(await page.locator('.log-branch-row.current .branch-current-sync').count(), 1, 'Sync status should sit beside the current branch.');
   assert.equal(await page.locator('.log-head-group, .branch-pane-footer').count(), 0, 'History should not duplicate the current branch or reserve a status footer.');
   assert.match(await page.locator('.log-branch-row.current .branch-current-sync').getAttribute('title'), /2 incoming, 6 outgoing/);
@@ -98,12 +115,19 @@ try {
   await page.locator('[data-branch-context-action="copy"]').click();
   assert.equal(await page.locator('[data-branch-context]').count(), 0, 'Choosing a branch action should close its menu.');
   assert.ok(await page.evaluate(() => window.__vscodeMessages.some((message) => message.type === 'copyBranchName')), 'The branch action should reach VS Code.');
-  await page.locator('.graph-row').first().click();
+  await page.locator('.graph-row').nth(1).click();
+  await page.locator('.commit-detail-head strong').waitFor();
+  assert.equal(await page.locator('.commit-detail-head strong').textContent(), 'fix: #0000 补充迁移模板中的 ssl_cert_file 配置', 'Selecting a commit should show matching detail data.');
   await page.locator('.commit-file').first().waitFor();
   assert.ok(await page.locator('.commit-file .file-type-icon').count() > 0, 'Changed files should reserve a file icon slot.');
+  assert.match(await page.locator('.commit-file').first().getAttribute('data-commit-file'), /AwsWebClientInitializer\.java$/, 'The selected commit should show its own changed files.');
+  await page.locator('.commit-file').first().click();
+  assert.ok(await page.evaluate(() => window.__vscodeMessages.some((message) => message.type === 'openCommitDiff' && message.hash === '2d4411f0a1b2c3d4e5f678901234567890abcd12')), 'Opening a changed file should request its diff in VS Code.');
+  await page.locator('[data-action="load-more-commits"]').click();
+  assert.ok(await page.evaluate(() => window.__vscodeMessages.some((message) => message.type === 'loadMoreCommits')), 'Load more history should reach VS Code.');
 
   assert.deepEqual(pageErrors, [], 'The webview should not throw browser runtime errors.');
-  console.log('Webview E2E passed: fetch and commit, branch-folder collapse, branch menu dismissal, History status, and file icons.');
+  console.log('Webview E2E passed: commit, fetch, History search and filters, ref loading, branch-folder collapse, menu dismissal, commit details/diffs, and pagination.');
 } finally {
   await browser?.close();
   server.kill('SIGTERM');

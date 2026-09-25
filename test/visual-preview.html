@@ -99,22 +99,22 @@
         postMessage: (message) => {
           window.__vscodeMessages.push(message);
           if (message.type === 'commitDetails') {
+            const commit = fixture.commits.find((item) => item.hash === message.hash);
+            if (!commit) return;
             setTimeout(() => emit({ type: 'commitDetails', payload: {
-              hash: message.hash,
-              subject: fixture.commits[0].subject,
-              body: '背景：此前 ACK 支持判断散落在多个模块。\n\n本次：新增 Provider SPI，并把云厂商差异收敛在 provider 层。',
-              author: 'keaton.li',
-              date: fixture.commits[0].date,
-              parents: fixture.commits[0].parents,
-              refs: fixture.commits[0].refs,
-              files: [
-                { path: 'src/main/java/com/anker/mvp/provider/AckClusterProvider.java', status: 'A' },
-                { path: 'src/main/java/com/anker/mvp/provider/EksClusterProvider.java', status: 'M' },
-                { path: 'src/main/java/com/anker/mvp/provider/ClusterProvider.java', status: 'M' },
-                { path: 'src/main/java/com/anker/mvp/provider/ClusterProviderRegistry.java', status: 'M' },
-                { path: 'src/main/java/com/anker/mvp/config/AwsWebClientInitializer.java', status: 'M' },
-                { path: 'src/main/java/com/anker/mvp/service/EcrPullSecretService.java', status: 'M' }
-              ]
+              hash: commit.hash,
+              subject: commit.subject,
+              body: commit.hash === fixture.commits[0].hash
+                ? '背景：此前 ACK 支持判断散落在多个模块。\n\n本次：新增 Provider SPI，并把云厂商差异收敛在 provider 层。'
+                : '',
+              author: commit.author,
+              date: commit.date,
+              parents: commit.parents,
+              refs: commit.refs,
+              files: (commit.paths || []).map((filePath) => ({
+                path: filePath,
+                status: commit.hash === fixture.commits[5].hash && filePath.endsWith('AckClusterProvider.java') ? 'A' : 'M'
+              }))
             }}), 20);
           }
         }
