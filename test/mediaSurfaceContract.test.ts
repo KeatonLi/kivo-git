@@ -22,7 +22,8 @@ describe('webview surface composition', () => {
     expect(main).toContain('Commit and Push…');
     expect(main).toContain('function renderLogActionRail()');
     expect(main).toContain('class="log-branch-pane"');
-    expect(main).toContain('class="branch-pane-footer"');
+    expect(main).toContain('class="branch-current-sync');
+    expect(main).not.toContain('class="branch-pane-footer"');
     expect(main).toContain('data-log-splitter');
     expect(main).toContain('Resize History branch tree');
     expect(main).toContain('data-log-detail-splitter');
@@ -119,11 +120,13 @@ describe('webview surface composition', () => {
   it('renders active-theme file icons for changed files and keeps a native fallback', async () => {
     const main = await readFile(path.join(root, 'media', 'main.js'), 'utf8');
     const provider = await readFile(path.join(root, 'src', 'IdeaGitViewProvider.ts'), 'utf8');
-    expect(main).toContain('function renderFileTypeIcon(change)');
+    expect(main).toContain('function renderFileTypeIcon(change, fileIcons = ui.snapshot?.fileIcons)');
+    expect(main).toContain('renderFileTypeIcon(file, ui.commitDetails?.fileIcons)');
     expect(main).toContain('class="file-type-icon"');
     expect(main).toContain("icon('file-code', 'file-type-icon file-type-icon-fallback')");
     expect(provider).toContain('FileIconThemeResolver');
     expect(provider).toContain("type: 'fileIconCss'");
+    expect(provider).toContain('details.files.map((file) => file.path)');
     expect(provider).toContain('workbench.iconTheme');
   });
 

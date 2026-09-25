@@ -353,7 +353,15 @@ export class IdeaGitViewProvider implements vscode.WebviewViewProvider, vscode.T
           return;
         case 'commitDetails':
           try {
-            await this.postToView(surface, { type: 'commitDetails', payload: await client.commitDetails(message.hash) });
+            const details = await client.commitDetails(message.hash);
+            const view = this.views.get(surface);
+            await this.postToView(surface, {
+              type: 'commitDetails',
+              payload: {
+                ...details,
+                fileIcons: view ? this.fileIconTheme.iconsFor(view.webview, details.files.map((file) => file.path)) : {}
+              }
+            });
           } catch (error) {
             await this.postToView(surface, { type: 'commitDetailsError', hash: message.hash, message: this.errorText(error) });
           }

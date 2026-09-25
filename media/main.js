@@ -676,7 +676,7 @@ function renderChanges(s) {
   return `
     ${renderCommitToolbar(s)}
     <div class="commit-changes-heading" role="heading" aria-level="2"><span class="changes-heading-label">${kivoIcon('changes', 'changes-heading-icon')}<span>Changes</span></span><small>${s.changes.length || ''}</small></div>
-    <div class="lists commit-changes-tree" id="kivo-commit-changes">${lists || '<div class="commit-empty-list">No changes</div>'}${renderWorkspaceBrief(s)}</div>
+    <div class="lists commit-changes-tree" id="kivo-commit-changes">${lists || '<div class="commit-empty-list">No changes</div>'}</div>
     <div class="commit-panel-splitter" data-commit-panel-splitter role="separator" aria-label="Resize changes and commit message" aria-controls="kivo-commit-changes kivo-commit-message" aria-orientation="horizontal" aria-valuemin="${COMMIT_PANEL_MIN_HEIGHT}" aria-valuenow="${Math.round(ui.commitPanelHeight)}" tabindex="0" title="Drag to resize. Double-click to reset."></div>
     <footer class="commit-panel" id="kivo-commit-message" style="--commit-panel-height:${Math.round(ui.commitPanelHeight)}px">
       <textarea id="commit-message" rows="4" placeholder="Commit Message" aria-label="Commit Message" spellcheck="true" ${ui.operationKind === 'commit' ? 'disabled' : ''}>${escapeHtml(ui.commitMessage)}</textarea>
@@ -687,33 +687,6 @@ function renderChanges(s) {
       </div>
     </footer>
     ${renderFileContextMenu()}`;
-}
-
-function renderWorkspaceBrief(s) {
-  const syncing = ui.syncPhase === 'fetching' || ui.operationKind === 'fetch';
-  const hasUpstream = Boolean(s.upstream);
-  const changes = s.changes.length;
-  const status = changes ? `${changes} changed file${changes === 1 ? '' : 's'}` : 'Working tree clean';
-  const freshness = syncing ? 'Checking remote…' : ui.syncPhase === 'error' ? 'Remote check failed' : ui.lastFetchedAt ? updatedLabel(ui.lastFetchedAt) : 'Check remote for updates';
-  const comparison = hasUpstream
-    ? `<div class="workspace-brief-metrics" aria-label="${s.behind} commits behind and ${s.ahead} commits ahead of ${escapeHtml(s.upstream)}">
-        <div><span class="workspace-brief-direction">${icon('arrow-down')} INCOMING</span><strong>${s.behind}</strong><small>to pull</small></div>
-        <div><span class="workspace-brief-direction">${icon('arrow-up')} OUTGOING</span><strong>${s.ahead}</strong><small>to push</small></div>
-      </div>`
-    : '<p class="workspace-brief-untracked">No upstream branch. Set one to compare local and remote commits.</p>';
-  const syncSummary = s.behind && s.ahead ? 'Local and remote have diverged'
-    : s.behind ? 'New commits available on remote'
-      : s.ahead ? 'Local commits ready to push' : 'In sync with fetched refs';
-  return `<section class="workspace-brief" aria-label="Repository status">
-    <div class="workspace-brief-label"><span class="workspace-brief-mark" aria-hidden="true"></span><span>REPOSITORY STATUS</span></div>
-    <strong class="workspace-brief-state">${icon(changes ? 'diff' : 'check')}<span>${status}</span></strong>
-    <code class="workspace-brief-branch" title="${escapeHtml(s.branch)}">${escapeHtml(s.branch)}</code>
-    <div class="workspace-brief-divider"></div>
-    <div class="workspace-brief-heading"><span>SYNC WITH REMOTE</span>${hasUpstream ? `<code title="${escapeHtml(s.upstream)}">${escapeHtml(s.upstream)}</code>` : ''}</div>
-    ${comparison}
-    ${hasUpstream ? `<p class="workspace-brief-summary">${syncSummary}</p>` : ''}
-    <div class="workspace-brief-footer"><span class="${ui.syncPhase === 'error' ? 'workspace-brief-error' : ''}" title="${escapeHtml(ui.syncError || '')}">${escapeHtml(freshness)}</span><button data-action="fetch" aria-label="Check remote and update commit counts" title="Fetch remote refs and update counts" ${ui.busy || syncing ? 'disabled' : ''}>${icon(syncing ? 'loading' : 'refresh', syncing ? 'codicon-modifier-spin' : '')}<span>${syncing ? 'Checking' : 'Check remote'}</span></button></div>
-  </section>`;
 }
 
 function renderFile(change, listId) {
@@ -730,8 +703,8 @@ function renderFile(change, listId) {
   </div>`;
 }
 
-function renderFileTypeIcon(change) {
-  const fileIcon = ui.snapshot?.fileIcons?.[change.path];
+function renderFileTypeIcon(change, fileIcons = ui.snapshot?.fileIcons) {
+  const fileIcon = fileIcons?.[change.path];
   if (fileIcon?.kind === 'image' && fileIcon.uri) {
     return `<img class="file-type-icon" src="${escapeHtml(fileIcon.uri)}" alt="" aria-hidden="true">`;
   }
@@ -839,7 +812,7 @@ function renderCommitFileTree(node, depth = 0) {
   const folders = [...node.directories.entries()].sort(([left], [right]) => left.localeCompare(right));
   return `${folders.map(([name, child]) => `<div class="commit-file-folder" style="--tree-indent:${depth * 13}px">${icon('chevron-down')} ${icon('folder')}<span>${escapeHtml(name)}</span></div>${renderCommitFileTree(child, depth + 1)}`).join('')}${node.leaves.sort((left, right) => left.leaf.localeCompare(right.leaf)).map((file) => {
     const kind = file.status === 'D' ? 'deleted' : file.status === 'A' ? 'added' : 'modified';
-    return `<button class="commit-file tree-file" style="--tree-indent:${depth * 13}px" data-commit-file="${escapeHtml(file.path)}" data-commit-kind="${escapeHtml(file.status)}" data-commit-original="${escapeHtml(file.originalPath || '')}" title="Open diff for ${escapeHtml(file.path)}"><span class="status ${kind}">${escapeHtml(file.status)}</span>${icon('file-code')}<span>${escapeHtml(file.leaf)}</span></button>`;
+    return `<button class="commit-file tree-file" style="--tree-indent:${depth * 13}px" data-commit-file="${escapeHtml(file.path)}" data-commit-kind="${escapeHtml(file.status)}" data-commit-original="${escapeHtml(file.originalPath || '')}" title="Open diff for ${escapeHtml(file.path)}">${renderFileTypeIcon(file, ui.commitDetails?.fileIcons)}<span class="commit-file-name">${escapeHtml(file.leaf)}</span><span class="status ${kind}">${escapeHtml(file.status)}</span></button>`;
   }).join('')}`;
 }
 
@@ -871,10 +844,10 @@ function renderCommitDetails(s) {
   </aside>`;
 }
 
-function renderLogBranchRow(branch, depth = 0) {
+function renderLogBranchRow(branch, depth = 0, sync = '') {
   const kind = branch.kind === 'tag' ? 'tag' : 'branch';
   const label = branch.leaf || branch.name;
-  return `<button class="log-branch-row ${branch.current ? 'current' : ''} ${ui.graphBranchFilter === branch.name ? 'selected' : ''}" style="--tree-indent:${depth * 13}px" data-log-branch="${escapeHtml(branch.name)}" data-branch-ref="${escapeHtml(branch.name)}" data-branch-remote="${branch.remote ? 'true' : 'false'}" data-branch-kind="${kind}" aria-pressed="${ui.graphBranchFilter === branch.name}" aria-haspopup="menu" title="Show ${escapeHtml(branch.name)} history · Right-click for ${kind} actions">${icon(branch.remote ? 'cloud' : kind === 'tag' ? 'tag' : 'git-branch')}<span>${escapeHtml(label)}</span>${branch.current ? '<small>HEAD</small>' : ''}</button>`;
+  return `<button class="log-branch-row ${branch.current ? 'current' : ''} ${ui.graphBranchFilter === branch.name ? 'selected' : ''}" style="--tree-indent:${depth * 13}px" data-log-branch="${escapeHtml(branch.name)}" data-branch-ref="${escapeHtml(branch.name)}" data-branch-remote="${branch.remote ? 'true' : 'false'}" data-branch-kind="${kind}" aria-pressed="${ui.graphBranchFilter === branch.name}" aria-haspopup="menu" title="Show ${escapeHtml(branch.name)} history · Right-click for ${kind} actions">${icon(branch.remote ? 'cloud' : kind === 'tag' ? 'tag' : 'git-branch')}<span>${escapeHtml(label)}</span>${sync}${branch.current ? '<small>HEAD</small>' : ''}</button>`;
 }
 
 function renderLogBranchTree(node, depth = 0) {
@@ -886,45 +859,37 @@ function renderLogBranchPane(s) {
   const query = ui.logBranchQuery.trim().toLowerCase();
   const matches = (item) => !query || item.name.toLowerCase().includes(query);
   const current = s.branches.find((branch) => branch.current && !branch.remote);
-  const local = s.branches.filter((branch) => !branch.remote && !branch.current && matches(branch));
+  const local = s.branches.filter((branch) => !branch.remote && matches(branch))
+    .sort((left, right) => Number(right.current) - Number(left.current) || left.name.localeCompare(right.name));
   const remote = s.branches.filter((branch) => branch.remote && matches(branch));
   const tags = (s.tags || []).filter(matches).map((tag) => ({ ...tag, path: tag.name, name: tag.name, remote: false, kind: 'tag' }));
-  const localCount = s.branches.filter((branch) => !branch.remote).length;
-  const remoteCount = s.branches.filter((branch) => branch.remote).length;
   const tagCount = (s.tags || []).length;
-  const checkingRemote = ui.syncPhase === 'fetching' || ui.operationKind === 'fetch';
-  const syncLabel = s.upstream
-    ? `<span class="branch-sync-count" title="${escapeHtml(s.behind)} behind ${escapeHtml(s.upstream)}">${icon('arrow-down')} ${s.behind} behind</span><span class="branch-sync-count" title="${escapeHtml(s.ahead)} ahead of ${escapeHtml(s.upstream)}">${icon('arrow-up')} ${s.ahead} ahead</span>`
-    : '<span class="branch-sync-untracked">No upstream branch</span>';
-  const root = current && matches(current) ? renderLogBranchRow({ ...current, leaf: current.name }) : '';
+  const syncTitle = s.upstream
+    ? `${s.behind} incoming, ${s.ahead} outgoing · ${s.upstream}${ui.syncPhase === 'error' ? ' · Remote check failed' : ''}`
+    : 'No upstream branch';
+  const syncIcon = current
+    ? `<span class="branch-current-sync ${s.behind || s.ahead ? 'has-count' : ''}" title="${escapeHtml(syncTitle)}" aria-label="${escapeHtml(syncTitle)}">${icon(ui.syncPhase === 'fetching' ? 'loading' : ui.syncPhase === 'error' ? 'warning' : s.upstream ? 'sync' : 'circle-slash', ui.syncPhase === 'fetching' ? 'codicon-modifier-spin' : '')}</span>`
+    : '';
   const group = (key, label, items, emptyLabel) => {
     const expanded = Boolean(query) || ui.branchGroupsExpanded[key];
     const visibleCount = ui.branchVisibleCounts[key];
     const visible = expanded ? items.slice(0, visibleCount) : [];
     const remaining = Math.max(0, items.length - visible.length);
-    const tree = visible.length ? renderLogBranchTree(buildPathTree(visible)) : '';
+    const tree = key === 'local'
+      ? visible.map((branch) => renderLogBranchRow(branch, 0, branch.current ? syncIcon : '')).join('')
+      : visible.length ? renderLogBranchTree(buildPathTree(visible)) : '';
     return `<section class="log-branch-group ${expanded ? 'expanded' : 'collapsed'}" data-branch-group-section="${key}">
       <button class="log-branch-group-title" data-branch-group="${key}" aria-expanded="${expanded}">${icon('chevron-right', 'branch-group-chevron')}<span>${label}</span><small>${items.length}</small></button>
-      ${expanded ? `<div class="log-branch-group-body">${tree || `<div class="branch-tree-empty">${emptyLabel}</div>`}${remaining ? `<button class="branch-load-more" data-branch-more="${key}">Show ${Math.min(BRANCH_PAGE_SIZE, remaining)} more</button>` : ''}</div>` : ''}
+      ${expanded ? `<div class="log-branch-group-body">${tree || (key === 'local' && !query ? '' : `<div class="branch-tree-empty">${emptyLabel}</div>`)}${remaining ? `<button class="branch-load-more" data-branch-more="${key}">Show ${Math.min(BRANCH_PAGE_SIZE, remaining)} more</button>` : ''}</div>` : ''}
     </section>`;
   };
   return `<aside class="log-branch-pane" id="kivo-log-branches" aria-label="History branches">
     <label class="log-branch-search">${icon('search')}<input id="log-branch-search" aria-label="Branch or tag" placeholder="Branch or tag" value="${escapeHtml(ui.logBranchQuery)}"></label>
     <div class="log-branch-tree">
-      <section class="log-branch-group log-head-group"><div class="log-branch-group-title"><span>HEAD (Current Branch)</span></div>${root || '<div class="branch-tree-empty">No current branch</div>'}</section>
       ${group('local', 'Local', local, query ? 'No matching local branches' : 'No other local branches')}
       ${group('remote', 'Remote', remote, query ? 'No matching remote branches' : 'No remote branches')}
       ${tagCount || query ? group('tags', 'Tags', tags, query ? 'No matching tags' : 'No tags') : ''}
     </div>
-    <footer class="branch-pane-footer" aria-label="Branch summary">
-      <div class="branch-pane-current" title="${escapeHtml(current?.name || s.branch || 'No current branch')}">${icon('git-branch')}<span><small>HEAD</small><strong>${escapeHtml(current?.name || s.branch || 'Detached HEAD')}</strong></span></div>
-      <div class="branch-pane-sync" aria-live="polite" title="${s.upstream ? `Compared with the last fetched ${escapeHtml(s.upstream)}` : 'Set an upstream branch to track ahead and behind counts'}">
-        <div class="branch-sync-values">${syncLabel}</div>
-        <button class="idea-toolbar-button" data-action="fetch" aria-label="${checkingRemote ? 'Checking remote' : 'Check remote for new commits'}" title="${checkingRemote ? 'Checking remote…' : 'Fetch and refresh ahead/behind counts'}" ${ui.busy || checkingRemote ? 'disabled' : ''}>${icon(checkingRemote ? 'loading' : 'refresh', checkingRemote ? 'codicon-modifier-spin' : '')}</button>
-      </div>
-      ${ui.syncPhase === 'error' ? `<div class="branch-sync-error" role="status" title="${escapeHtml(ui.syncError || '')}">Remote check failed · Retry with refresh</div>` : ''}
-      <div class="branch-pane-stats"><span>${localCount} local</span><span>${remoteCount} remote</span>${tagCount ? `<span>${tagCount} tag${tagCount === 1 ? '' : 's'}</span>` : ''}</div>
-    </footer>
   </aside>`;
 }
 

@@ -38,7 +38,7 @@ async function waitForServer() {
 
 async function openSurface(page, query) {
   await page.goto(`${baseUrl}/test/visual-preview.html?${query}`);
-  await page.waitForSelector('.commit-toolbar');
+  await page.waitForSelector(query.includes('surface=history') ? '.log-branch-pane' : '.commit-toolbar');
 }
 
 try {
@@ -60,8 +60,7 @@ try {
   assert.equal(activeHint, '"Drop files here"', 'The drop instruction should appear while dragging over an empty list.');
 
   await openSurface(page, 'surface=changes');
-  const syncCounts = await page.locator('.workspace-brief-metrics strong').allTextContents();
-  assert.deepEqual(syncCounts, ['2', '6'], 'The sidebar should show incoming and outgoing commit counts.');
+  assert.equal(await page.locator('.workspace-brief').count(), 0, 'The Commit view should leave repository status to History.');
   await page.locator('.commit-toolbar [data-action="fetch"]').click();
   assert.ok(await page.evaluate(() => window.__vscodeMessages.some((message) => message.type === 'fetch')), 'Fetch should reach the VS Code message bridge.');
 
@@ -75,8 +74,17 @@ try {
   assert.equal(commitMessage?.message, 'test: verify browser commit flow');
   assert.equal(commitMessage?.paths?.length, 1, 'Commit should include only the selected file.');
 
+  await page.setViewportSize({ width: 1450, height: 650 });
+  await openSurface(page, 'surface=history');
+  assert.equal(await page.locator('.log-branch-row.current .branch-current-sync').count(), 1, 'Sync status should sit beside the current branch.');
+  assert.equal(await page.locator('.log-head-group, .branch-pane-footer').count(), 0, 'History should not duplicate the current branch or reserve a status footer.');
+  assert.match(await page.locator('.log-branch-row.current .branch-current-sync').getAttribute('title'), /2 incoming, 6 outgoing/);
+  await page.locator('.graph-row').first().click();
+  await page.locator('.commit-file').first().waitFor();
+  assert.ok(await page.locator('.commit-file .file-type-icon').count() > 0, 'Changed files should reserve a file icon slot.');
+
   assert.deepEqual(pageErrors, [], 'The webview should not throw browser runtime errors.');
-  console.log('Webview E2E passed: empty drop target, sync counts, fetch bridge, and selected-file commit.');
+  console.log('Webview E2E passed: empty drop target, fetch and commit, compact History branch status, and file icon slots.');
 } finally {
   await browser?.close();
   server.kill('SIGTERM');
