@@ -760,6 +760,28 @@ body[data-surface="history"] .content { min-width: 0; background: var(--vscode-p
 .parity-mode .commit-file-folder { font-size: 11px; }
 .parity-mode .list-name,
 .parity-mode .file-main { font-size: 12px; }
+.parity-mode .log-branch-search input { font-size: 12px; }
+.parity-mode .log-branch-group-title { font-size: 12px; }
+.parity-mode .log-branch-group-title > small { font-size: 10px; }
+.parity-mode .log-branch-row > span:not(.codicon) { font-size: 12px; }
+.parity-mode .log-filter-bar { min-height: 46px; padding-top: 8px; padding-bottom: 8px; }
+.parity-mode .log-filter-bar .graph-search { height: 30px; font-size: 12px; }
+.parity-mode .log-filter-bar .graph-search input { font-size: 12px; }
+.parity-mode .log-filter-bar .graph-filter { height: 28px; }
+.parity-mode .log-filter-bar .graph-filter select,
+.parity-mode .log-filter-bar .graph-filter input { font-size: 11px; }
+.parity-mode .log-column-header { height: 30px; font-size: 10px; letter-spacing: .3px; }
+.parity-mode .log-author,
+.parity-mode .log-date { font-size: 11px; }
+.parity-mode .graph-commit strong { font-size: 13px; font-weight: 500; }
+.parity-mode .log-meta { font-size: 11px; }
+.parity-mode .graph-ref { font-size: 10px; }
+.parity-mode .details-section-heading { font-size: 12px; }
+.parity-mode .commit-file-folder { font-size: 12px; }
+.parity-mode .commit-file { font-size: 12px; }
+.parity-mode .commit-detail-head strong { font-size: 12px; line-height: 1.4; }
+.parity-mode .commit-detail-meta { font-size: 11px; }
+.parity-mode .commit-body { font-size: 11px; line-height: 1.55; }
 .parity-mode .log-splitter { grid-column: 3; grid-row: 1; }
 .parity-mode .log-history-pane { grid-column: 4; min-width: 0; min-height: 0; display: flex; flex-direction: column; }
 .parity-mode .log-detail-splitter { grid-column: 5; grid-row: 1; }

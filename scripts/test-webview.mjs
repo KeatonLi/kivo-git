@@ -79,12 +79,23 @@ try {
   assert.equal(await page.locator('.log-branch-row.current .branch-current-sync').count(), 1, 'Sync status should sit beside the current branch.');
   assert.equal(await page.locator('.log-head-group, .branch-pane-footer').count(), 0, 'History should not duplicate the current branch or reserve a status footer.');
   assert.match(await page.locator('.log-branch-row.current .branch-current-sync').getAttribute('title'), /2 incoming, 6 outgoing/);
+  await page.locator('.log-branch-row[data-branch-remote="true"]').first().click({ button: 'right' });
+  assert.equal(await page.locator('[data-branch-context]').count(), 1, 'Right-click should open branch actions.');
+  await page.locator('.log-branch-search').click();
+  assert.equal(await page.locator('[data-branch-context]').count(), 0, 'Clicking outside should dismiss branch actions.');
+  await page.locator('.log-branch-row[data-branch-remote="true"]').first().click({ button: 'right' });
+  await page.locator('[data-branch-context-action="copy"]').press('Escape');
+  assert.equal(await page.locator('[data-branch-context]').count(), 0, 'Escape should dismiss branch actions.');
+  await page.locator('.log-branch-row[data-branch-remote="true"]').first().click({ button: 'right' });
+  await page.locator('[data-branch-context-action="copy"]').click();
+  assert.equal(await page.locator('[data-branch-context]').count(), 0, 'Choosing a branch action should close its menu.');
+  assert.ok(await page.evaluate(() => window.__vscodeMessages.some((message) => message.type === 'copyBranchName')), 'The branch action should reach VS Code.');
   await page.locator('.graph-row').first().click();
   await page.locator('.commit-file').first().waitFor();
   assert.ok(await page.locator('.commit-file .file-type-icon').count() > 0, 'Changed files should reserve a file icon slot.');
 
   assert.deepEqual(pageErrors, [], 'The webview should not throw browser runtime errors.');
-  console.log('Webview E2E passed: empty drop target, fetch and commit, compact History branch status, and file icon slots.');
+  console.log('Webview E2E passed: fetch and commit, branch menu dismissal, History status, and file icons.');
 } finally {
   await browser?.close();
   server.kill('SIGTERM');

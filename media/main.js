@@ -2267,22 +2267,31 @@ document.addEventListener('keydown', (event) => {
   app.querySelector('[data-action="branches"]')?.focus();
 });
 
-document.addEventListener('click', (event) => {
-  if (ui.branchContextMenu && !event.target.closest('[data-branch-context]')) {
+function closeContextMenusOutside(target) {
+  const element = target instanceof Element ? target : target?.parentElement;
+  let closed = false;
+  if (ui.branchContextMenu && !element?.closest('[data-branch-context]')) {
     ui.branchContextMenu = undefined;
-    render();
-    return;
+    closed = true;
   }
-  if (ui.commitContextMenu && !event.target.closest('[data-commit-context]')) {
+  if (ui.commitContextMenu && !element?.closest('[data-commit-context]')) {
     ui.commitContextMenu = undefined;
-    render();
-    return;
+    closed = true;
   }
-  if (ui.fileContextMenu && !event.target.closest('[data-file-context]')) {
+  if (ui.fileContextMenu && !element?.closest('[data-file-context]')) {
     ui.fileContextMenu = undefined;
-    render();
-    return;
+    closed = true;
   }
+  if (closed) render();
+  return closed;
+}
+
+document.addEventListener('pointerdown', (event) => {
+  closeContextMenusOutside(event.target);
+}, true);
+
+document.addEventListener('click', (event) => {
+  if (closeContextMenusOutside(event.target)) return;
   if (ui.pullMenuOpen && !event.target.closest('.sync-action-wrap')) {
     ui.pullMenuOpen = false;
     render();
