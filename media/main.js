@@ -63,6 +63,7 @@ const ui = {
     remote: initialRepositoryState.branchGroupsExpanded?.remote !== false,
     tags: initialRepositoryState.branchGroupsExpanded?.tags === true
   },
+  collapsedLogBranchFolders: new Set(initialRepositoryState.collapsedLogBranchFolders || []),
   branchVisibleCounts: { local: BRANCH_PAGE_SIZE, remote: BRANCH_PAGE_SIZE, tags: BRANCH_PAGE_SIZE },
   branchPopupVisibleCounts: { local: BRANCH_PAGE_SIZE, remote: BRANCH_PAGE_SIZE },
   busy: false,
@@ -149,6 +150,7 @@ function serializeRepositoryState() {
     commitMetadataHeight: ui.commitMetadataHeight,
     commitPanelHeight: ui.commitPanelHeight,
     branchGroupsExpanded: ui.branchGroupsExpanded,
+    collapsedLogBranchFolders: [...ui.collapsedLogBranchFolders],
     graphScrollTop: ui.graphScrollTop,
     selectedCommitHash: ui.selectedCommitHash,
     focusedCommitHash: ui.focusedCommitHash,
@@ -194,6 +196,7 @@ function restoreRepositoryState(root, state = {}) {
     remote: state.branchGroupsExpanded?.remote !== false,
     tags: state.branchGroupsExpanded?.tags === true
   };
+  ui.collapsedLogBranchFolders = new Set(state.collapsedLogBranchFolders || []);
   ui.branchVisibleCounts = { local: BRANCH_PAGE_SIZE, remote: BRANCH_PAGE_SIZE, tags: BRANCH_PAGE_SIZE };
   ui.branchPopupVisibleCounts = { local: BRANCH_PAGE_SIZE, remote: BRANCH_PAGE_SIZE };
   ui.graphScrollTop = Number(state.graphScrollTop) || 0;
@@ -850,9 +853,13 @@ function renderLogBranchRow(branch, depth = 0, sync = '') {
   return `<button class="log-branch-row ${branch.current ? 'current' : ''} ${ui.graphBranchFilter === branch.name ? 'selected' : ''}" style="--tree-indent:${depth * 13}px" data-log-branch="${escapeHtml(branch.name)}" data-branch-ref="${escapeHtml(branch.name)}" data-branch-remote="${branch.remote ? 'true' : 'false'}" data-branch-kind="${kind}" aria-pressed="${ui.graphBranchFilter === branch.name}" aria-haspopup="menu" title="Show ${escapeHtml(branch.name)} history · Right-click for ${kind} actions">${icon(branch.remote ? 'cloud' : kind === 'tag' ? 'tag' : 'git-branch')}<span>${escapeHtml(label)}</span>${sync}${branch.current ? '<small>HEAD</small>' : ''}</button>`;
 }
 
-function renderLogBranchTree(node, depth = 0) {
+function renderLogBranchTree(node, depth = 0, parentPath = '', forceExpanded = false) {
   const folders = [...node.directories.entries()].sort(([left], [right]) => left.localeCompare(right));
-  return `${folders.map(([name, child]) => `<div class="log-branch-folder" style="--tree-indent:${depth * 13}px">${icon('chevron-down')} ${icon('folder')}<span>${escapeHtml(name)}</span></div>${renderLogBranchTree(child, depth + 1)}`).join('')}${node.leaves.sort((left, right) => left.leaf.localeCompare(right.leaf)).map((branch) => renderLogBranchRow(branch, depth)).join('')}`;
+  return `${folders.map(([name, child]) => {
+    const folderPath = parentPath ? `${parentPath}/${name}` : name;
+    const expanded = forceExpanded || !ui.collapsedLogBranchFolders.has(folderPath);
+    return `<div class="log-branch-folder-node ${expanded ? 'expanded' : 'collapsed'}" data-log-branch-folder-node="${escapeHtml(folderPath)}"><button class="log-branch-folder" style="--tree-indent:${depth * 13}px" data-log-folder-toggle="${escapeHtml(folderPath)}" aria-expanded="${expanded}" title="${expanded ? 'Collapse' : 'Expand'} ${escapeHtml(folderPath)}">${icon('chevron-right', 'branch-folder-chevron')}${icon('folder')}<span>${escapeHtml(name)}</span></button>${expanded ? `<div class="log-branch-folder-children">${renderLogBranchTree(child, depth + 1, folderPath, forceExpanded)}</div>` : ''}</div>`;
+  }).join('')}${node.leaves.sort((left, right) => left.leaf.localeCompare(right.leaf)).map((branch) => renderLogBranchRow(branch, depth)).join('')}`;
 }
 
 function renderLogBranchPane(s) {
@@ -877,7 +884,7 @@ function renderLogBranchPane(s) {
     const remaining = Math.max(0, items.length - visible.length);
     const tree = key === 'local'
       ? visible.map((branch) => renderLogBranchRow(branch, 0, branch.current ? syncIcon : '')).join('')
-      : visible.length ? renderLogBranchTree(buildPathTree(visible)) : '';
+      : visible.length ? renderLogBranchTree(buildPathTree(visible), 0, '', Boolean(query)) : '';
     return `<section class="log-branch-group ${expanded ? 'expanded' : 'collapsed'}" data-branch-group-section="${key}">
       <button class="log-branch-group-title" data-branch-group="${key}" aria-expanded="${expanded}">${icon('chevron-right', 'branch-group-chevron')}<span>${label}</span><small>${items.length}</small></button>
       ${expanded ? `<div class="log-branch-group-body">${tree || (key === 'local' && !query ? '' : `<div class="branch-tree-empty">${emptyLabel}</div>`)}${remaining ? `<button class="branch-load-more" data-branch-more="${key}">Show ${Math.min(BRANCH_PAGE_SIZE, remaining)} more</button>` : ''}</div>` : ''}
@@ -1656,6 +1663,15 @@ function bind() {
     persist();
     render();
     requestAnimationFrame(() => app.querySelector(`[data-branch-group="${group}"]`)?.focus());
+  });
+  once('[data-log-folder-toggle]', 'click', (event) => {
+    const folder = event.currentTarget.dataset.logFolderToggle;
+    if (!folder || ui.logBranchQuery.trim()) return;
+    if (ui.collapsedLogBranchFolders.has(folder)) ui.collapsedLogBranchFolders.delete(folder);
+    else ui.collapsedLogBranchFolders.add(folder);
+    persist();
+    render();
+    requestAnimationFrame(() => app.querySelector(`[data-log-folder-toggle="${CSS.escape(folder)}"]`)?.focus());
   });
   once('[data-branch-more]', 'click', (event) => {
     const group = event.currentTarget.dataset.branchMore;

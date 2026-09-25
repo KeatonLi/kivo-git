@@ -79,6 +79,14 @@ try {
   assert.equal(await page.locator('.log-branch-row.current .branch-current-sync').count(), 1, 'Sync status should sit beside the current branch.');
   assert.equal(await page.locator('.log-head-group, .branch-pane-footer').count(), 0, 'History should not duplicate the current branch or reserve a status footer.');
   assert.match(await page.locator('.log-branch-row.current .branch-current-sync').getAttribute('title'), /2 incoming, 6 outgoing/);
+  const remoteBranchCount = await page.locator('.log-branch-row[data-branch-remote="true"]').count();
+  const originFolder = page.locator('[data-log-folder-toggle="origin"]');
+  assert.equal(await originFolder.getAttribute('aria-expanded'), 'true', 'Remote folder nodes should start expanded.');
+  await originFolder.click();
+  assert.equal(await page.locator('[data-log-folder-toggle="origin"]').getAttribute('aria-expanded'), 'false', 'Clicking a remote folder should collapse it.');
+  assert.equal(await page.locator('.log-branch-row[data-branch-remote="true"]').count(), 0, 'Collapsing origin should hide all of its remote branches.');
+  await page.locator('[data-log-folder-toggle="origin"]').click();
+  assert.equal(await page.locator('.log-branch-row[data-branch-remote="true"]').count(), remoteBranchCount, 'Expanding origin should restore its remote branches.');
   await page.locator('.log-branch-row[data-branch-remote="true"]').first().click({ button: 'right' });
   assert.equal(await page.locator('[data-branch-context]').count(), 1, 'Right-click should open branch actions.');
   await page.locator('.log-branch-search').click();
@@ -95,7 +103,7 @@ try {
   assert.ok(await page.locator('.commit-file .file-type-icon').count() > 0, 'Changed files should reserve a file icon slot.');
 
   assert.deepEqual(pageErrors, [], 'The webview should not throw browser runtime errors.');
-  console.log('Webview E2E passed: fetch and commit, branch menu dismissal, History status, and file icons.');
+  console.log('Webview E2E passed: fetch and commit, branch-folder collapse, branch menu dismissal, History status, and file icons.');
 } finally {
   await browser?.close();
   server.kill('SIGTERM');

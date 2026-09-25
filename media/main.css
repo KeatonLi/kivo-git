@@ -712,6 +712,11 @@ body[data-surface="history"] .content { min-width: 0; background: var(--vscode-p
   font-size: 11px;
   font-weight: 500;
 }
+.parity-mode button.log-branch-folder { width: 100%; border: 0; border-radius: 0; background: transparent; text-align: left; cursor: pointer; }
+.parity-mode button.log-branch-folder:hover,
+.parity-mode button.log-branch-folder:focus-visible { outline: none; background: var(--vscode-list-hoverBackground); }
+.parity-mode .branch-folder-chevron { transition: transform 100ms ease; }
+.parity-mode .log-branch-folder-node.expanded > .log-branch-folder .branch-folder-chevron { transform: rotate(90deg); }
 .parity-mode button.log-branch-group-title { width: 100%; border-radius: 0; background: transparent; text-align: left; cursor: pointer; }
 .parity-mode button.log-branch-group-title:hover,
 .parity-mode button.log-branch-group-title:focus-visible { outline: none; background: var(--vscode-list-hoverBackground); }
