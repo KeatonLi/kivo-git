@@ -173,9 +173,9 @@
       "properties": {
         "ideaGit.autoRefreshInterval": {
           "type": "number",
-          "default": 30000,
+          "default": 10000,
           "minimum": 5000,
-          "description": "Fallback refresh interval in milliseconds while the Kivo Git view is visible. File changes also trigger an immediate debounced refresh."
+          "description": "Fallback refresh interval in milliseconds while the Kivo Git view is visible. Saved files refresh immediately; file changes are briefly batched."
         },
         "ideaGit.autoFetch": {
           "type": "boolean",

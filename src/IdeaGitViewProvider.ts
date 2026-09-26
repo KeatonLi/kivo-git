@@ -88,7 +88,7 @@ export class IdeaGitViewProvider implements vscode.WebviewViewProvider, vscode.T
 
   constructor(private readonly context: vscode.ExtensionContext) {
     this.context.subscriptions.push(
-      vscode.workspace.onDidSaveTextDocument(() => this.scheduleRefresh()),
+      vscode.workspace.onDidSaveTextDocument(() => this.scheduleRefresh(40)),
       vscode.workspace.onDidCreateFiles(() => this.scheduleRefresh()),
       vscode.workspace.onDidDeleteFiles(() => this.scheduleRefresh()),
       vscode.workspace.onDidRenameFiles(() => this.scheduleRefresh()),
@@ -311,10 +311,19 @@ export class IdeaGitViewProvider implements vscode.WebviewViewProvider, vscode.T
     this.watcher.onDidDelete(() => this.scheduleRefresh());
   }
 
-  private scheduleRefresh(): void {
+  private refreshDueAt?: number;
+
+  private scheduleRefresh(delay = 140): void {
     if (!this.hasVisibleView()) return;
+    const dueAt = Date.now() + delay;
+    if (this.debounceTimer && this.refreshDueAt !== undefined && this.refreshDueAt <= dueAt) return;
     if (this.debounceTimer) clearTimeout(this.debounceTimer);
-    this.debounceTimer = setTimeout(() => void this.refresh(true), 180);
+    this.refreshDueAt = dueAt;
+    this.debounceTimer = setTimeout(() => {
+      this.debounceTimer = undefined;
+      this.refreshDueAt = undefined;
+      void this.refresh(true);
+    }, Math.max(0, dueAt - Date.now()));
   }
 
   private async handle(surface: KivoSurface, message: WebviewMessage): Promise<void> {
@@ -865,6 +874,7 @@ export class IdeaGitViewProvider implements vscode.WebviewViewProvider, vscode.T
     if (this.refreshTimer) clearInterval(this.refreshTimer);
     if (this.autoFetchTimer) clearInterval(this.autoFetchTimer);
     if (this.debounceTimer) clearTimeout(this.debounceTimer);
+    this.refreshDueAt = undefined;
     this.watcher?.dispose();
     this.emitter.dispose();
   }
