@@ -2,6 +2,7 @@
 
 ## Unreleased
 
+- Added Staged and Working tree choices to Commit file filtering, so partial staging and untracked edits can be found directly; existing saved type filters are preserved.
 - Added Show Line Blame to the editor context menu to identify the current line's author, commit time, message, and hash, with quick actions to copy the hash or open file history.
 - Explained detached HEAD in Repository status and the History title, showed its commit hash, and added a Create branch action that starts from that exact commit so new work stays easy to find.
 - Added separate staged and unstaged diff actions for files changed in both the index and working tree, so commit review can distinguish HEAD → Index from Index → Working Tree without altering either state.

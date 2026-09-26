@@ -99,6 +99,7 @@ Goal: reach strong IDE parity for the operations developers perform every day.
 - [ ] **P1** Move files through drag-and-drop, context menu, and keyboard commands.
 - [ ] **P1** Add search and filters for modified, staged, untracked, ignored, and conflicted files.
   - [x] Filter the visible changelist files by modified, added, deleted, renamed, untracked, or conflicted type, combined with path/status search.
+  - [x] Filter staged index changes and working-tree edits without changing the index; ignored files remain outside the current status snapshot.
 - [ ] **P1** Show index and working-tree state separately when both exist.
 - [ ] **P1** Add track, ignore, delete, rollback, and compare actions for unversioned files.
 - [ ] **P1** Detect externally staged changes without silently changing their meaning.

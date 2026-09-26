@@ -46,7 +46,7 @@ const ui = {
   branchOpen: false,
   branchQuery: '',
   changeQuery: initialRepositoryState.changeQuery || '',
-  changeKindFilter: initialRepositoryState.changeKindFilter || 'all',
+  changeFilter: initialRepositoryState.changeFilter || initialRepositoryState.changeKindFilter || 'all',
   changeSearchOpen: false,
   logBranchQuery: initialRepositoryState.logBranchQuery || '',
   logBranchWidth: Number.isFinite(restoredBranchWidth)
@@ -155,7 +155,7 @@ function serializeRepositoryState() {
     collapsed: [...ui.collapsed],
     focusedPath: ui.focusedPath,
     changeQuery: ui.changeQuery,
-    changeKindFilter: ui.changeKindFilter,
+    changeFilter: ui.changeFilter,
     changeSearchOpen: ui.changeSearchOpen,
     commitMessage: ui.commitMessage,
     graphQuery: ui.graphQuery,
@@ -200,8 +200,9 @@ function restoreRepositoryState(root, state = {}) {
   ui.collapsed = new Set(state.collapsed || []);
   ui.focusedPath = state.focusedPath;
   ui.changeQuery = state.changeQuery || '';
-  ui.changeKindFilter = ['all', 'modified', 'added', 'deleted', 'renamed', 'untracked', 'conflict'].includes(state.changeKindFilter)
-    ? state.changeKindFilter
+  const savedChangeFilter = state.changeFilter || state.changeKindFilter;
+  ui.changeFilter = ['all', 'staged', 'worktree', 'modified', 'added', 'deleted', 'renamed', 'untracked', 'conflict'].includes(savedChangeFilter)
+    ? savedChangeFilter
     : 'all';
   ui.changeSearchOpen = state.changeSearchOpen === true;
   ui.selectionAnchor = undefined;
@@ -691,11 +692,17 @@ function renderCommitToolbar(s) {
   </header>`;
 }
 
+function matchesChangeFilter(change) {
+  if (ui.changeFilter === 'staged') return change.staged && change.kind !== 'conflict';
+  if (ui.changeFilter === 'worktree') return change.workingTreeStatus !== '.';
+  return ui.changeFilter === 'all' || change.kind === ui.changeFilter;
+}
+
 function renderChanges(s) {
   const query = ui.changeQuery.trim().toLowerCase();
-  const filtersActive = Boolean(query || ui.changeKindFilter !== 'all');
+  const filtersActive = Boolean(query || ui.changeFilter !== 'all');
   const changesByList = new Map(s.changelists.map((list) => [list.id, list.changes.filter((change) =>
-    (ui.changeKindFilter === 'all' || change.kind === ui.changeKindFilter)
+    matchesChangeFilter(change)
       && (!query || `${change.path} ${change.kind} ${change.indexStatus} ${change.workingTreeStatus}`.toLowerCase().includes(query))
   )]));
   const filteredTotal = [...changesByList.values()].reduce((count, changes) => count + changes.length, 0);
@@ -728,7 +735,7 @@ function renderChanges(s) {
     <div class="commit-upper" id="kivo-commit-upper" style="flex-basis:${ui.commitZonePercent}%">
       ${renderCommitToolbar(s)}
       <div class="commit-changes-heading" role="heading" aria-level="2"><span class="changes-heading-label">${kivoIcon('changes', 'changes-heading-icon')}<span>Changes</span></span><small>${filtersActive ? `${filteredTotal}/${s.changes.length}` : s.changes.length || ''}</small></div>
-      ${ui.changeSearchOpen ? `<div class="commit-change-search"><input id="change-search" type="search" aria-label="Search changed files by path or status" placeholder="Path or status…" value="${escapeHtml(ui.changeQuery)}"><select id="change-kind-filter" aria-label="Filter changed files by type"><option value="all" ${ui.changeKindFilter === 'all' ? 'selected' : ''}>All types</option><option value="modified" ${ui.changeKindFilter === 'modified' ? 'selected' : ''}>Modified</option><option value="added" ${ui.changeKindFilter === 'added' ? 'selected' : ''}>Added</option><option value="deleted" ${ui.changeKindFilter === 'deleted' ? 'selected' : ''}>Deleted</option><option value="renamed" ${ui.changeKindFilter === 'renamed' ? 'selected' : ''}>Renamed</option><option value="untracked" ${ui.changeKindFilter === 'untracked' ? 'selected' : ''}>Untracked</option><option value="conflict" ${ui.changeKindFilter === 'conflict' ? 'selected' : ''}>Conflicts</option></select><kbd>Esc</kbd></div>` : ''}
+      ${ui.changeSearchOpen ? `<div class="commit-change-search"><input id="change-search" type="search" aria-label="Search changed files by path or status" placeholder="Path or status…" value="${escapeHtml(ui.changeQuery)}"><select id="change-filter" aria-label="Filter changed files by type or Git state"><option value="all" ${ui.changeFilter === 'all' ? 'selected' : ''}>All changes</option><option value="staged" ${ui.changeFilter === 'staged' ? 'selected' : ''}>Staged</option><option value="worktree" ${ui.changeFilter === 'worktree' ? 'selected' : ''}>Working tree</option><option value="modified" ${ui.changeFilter === 'modified' ? 'selected' : ''}>Modified</option><option value="added" ${ui.changeFilter === 'added' ? 'selected' : ''}>Added</option><option value="deleted" ${ui.changeFilter === 'deleted' ? 'selected' : ''}>Deleted</option><option value="renamed" ${ui.changeFilter === 'renamed' ? 'selected' : ''}>Renamed</option><option value="untracked" ${ui.changeFilter === 'untracked' ? 'selected' : ''}>Untracked</option><option value="conflict" ${ui.changeFilter === 'conflict' ? 'selected' : ''}>Conflicts</option></select><kbd>Esc</kbd></div>` : ''}
       <div class="lists commit-changes-tree" id="kivo-commit-changes">${lists || `<div class="commit-empty-list">${filtersActive ? 'No changed files match the current filters' : 'No changes'}</div>`}</div>
       <div class="commit-panel-splitter" data-commit-panel-splitter role="separator" aria-label="Resize changes and commit message" aria-controls="kivo-commit-changes kivo-commit-message" aria-orientation="horizontal" aria-valuemin="${COMMIT_PANEL_MIN_HEIGHT}" aria-valuenow="${Math.round(ui.commitPanelHeight)}" tabindex="0" title="Drag to resize. Double-click to reset."></div>
       <footer class="commit-panel" id="kivo-commit-message" style="--commit-panel-height:${Math.round(ui.commitPanelHeight)}px">
@@ -1834,21 +1841,21 @@ function bind() {
       event.preventDefault();
       event.stopPropagation();
       ui.changeQuery = '';
-      ui.changeKindFilter = 'all';
+      ui.changeFilter = 'all';
       ui.changeSearchOpen = false;
       persist();
       render();
       app.querySelector('[data-action="search-changes"]')?.focus();
     });
   }
-  const changeKindFilter = app.querySelector('#change-kind-filter');
-  if (changeKindFilter && !changeKindFilter.__ideaGitListeners) {
-    changeKindFilter.__ideaGitListeners = new Set(['changed-file-kind-filter']);
-    changeKindFilter.addEventListener('change', () => {
-      ui.changeKindFilter = changeKindFilter.value;
+  const changeFilter = app.querySelector('#change-filter');
+  if (changeFilter && !changeFilter.__ideaGitListeners) {
+    changeFilter.__ideaGitListeners = new Set(['changed-file-filter']);
+    changeFilter.addEventListener('change', () => {
+      ui.changeFilter = changeFilter.value;
       persist();
       render();
-      requestAnimationFrame(() => app.querySelector('#change-kind-filter')?.focus());
+      requestAnimationFrame(() => app.querySelector('#change-filter')?.focus());
     });
   }
   once('[data-branch-group]', 'click', (event) => {
@@ -2219,7 +2226,7 @@ function handleAction(action) {
     ui.changeSearchOpen = !ui.changeSearchOpen;
     if (!ui.changeSearchOpen) {
       ui.changeQuery = '';
-      ui.changeKindFilter = 'all';
+      ui.changeFilter = 'all';
       persist();
     }
     render();
