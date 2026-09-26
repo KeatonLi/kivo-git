@@ -1951,17 +1951,13 @@ function bind() {
   });
   once('[data-select]', 'click', (event) => {
     const input = event.currentTarget;
-    input.dataset.selectionFromClick = 'true';
-    setSelection(input.dataset.select, input.checked, event.shiftKey);
-    render();
+    input.dataset.selectionRange = String(event.shiftKey);
   });
   once('[data-select]', 'change', (event) => {
     const input = event.currentTarget;
-    if (input.dataset.selectionFromClick === 'true') {
-      delete input.dataset.selectionFromClick;
-      return;
-    }
-    setSelection(input.dataset.select, input.checked);
+    const range = input.dataset.selectionRange === 'true';
+    delete input.dataset.selectionRange;
+    setSelection(input.dataset.select, input.checked, range);
     render();
   });
   once('[data-select-list]', 'change', (event) => {
