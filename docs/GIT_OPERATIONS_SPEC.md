@@ -13,6 +13,8 @@ Kivo Git 的承诺是让 VS Code 用户在一个连贯的工作流里完成提�
 
 原型还提供可体验的交互：拖动调整 Commit 侧栏与底部 Panel 尺寸；在 changelist 间移动和排序文件、创建/重命名/删除 changelist；折叠本地/远程 branch 分组并从分支右键菜单操作；按搜索、ref、作者、时间和路径筛选提交；Ctrl/Shift 多选提交，或将提交拖到 branch 上发起 Cherry-pick；通过冲突、空补丁和 merge commit 场景预览恢复流程。原型中的 Git 反馈均为模拟状态。
 
+History 的 branch 树行可显示本地分支与远端跟踪分支的 ahead/behind 数量：向上箭头表示待推送提交，向下箭头表示待拉取提交。branch 树占左侧导航区上半部并独立滚动；下半部显示不重复 branch 标签的 Recent commits 小列表，方便从导航快速跳到近期提交；incoming/outgoing 与同步按钮仍固定在最底部。这样填充空白区域时保留清楚的三层用途：选分支、看近期历史、同步远端。
+
 ## 已有能力与缺口
 
 | 工作流 | 当前状态 | 备注 |
