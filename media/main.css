@@ -1196,7 +1196,7 @@ body.commit-zone-resizing, body.commit-zone-resizing * { cursor: row-resize !imp
 .parity-mode .commit-recent-row > .codicon { color: var(--vscode-textLink-foreground, var(--kivo-accent)); font-size: 12px; }
 .parity-mode .commit-recent-copy { min-width: 0; display: flex; flex-direction: column; gap: 2px; }
 .parity-mode .commit-recent-copy strong { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 11px; font-weight: 550; }
-.parity-mode .commit-recent-copy code { color: var(--vscode-descriptionForeground, var(--muted)); font: 10px var(--vscode-editor-font-family, Consolas, monospace); }
+.parity-mode .commit-recent-copy code { align-self: flex-start; max-width: 100%; overflow: hidden; padding: 0; border: 0; background: transparent; color: var(--vscode-descriptionForeground, var(--muted)); font: 10px var(--vscode-editor-font-family, Consolas, monospace); text-overflow: ellipsis; white-space: nowrap; }
 .parity-mode .commit-recent-row time { color: var(--vscode-descriptionForeground, var(--muted)); font-size: 10px; }
 .parity-mode .commit-recent-empty { padding: 6px 13px 12px; color: var(--muted); font-size: 11px; }
 .parity-mode .commit-lower .commit-repository-context,
