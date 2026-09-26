@@ -631,6 +631,40 @@ export class IdeaGitViewProvider implements vscode.WebviewViewProvider, vscode.T
     await this.chooseChangelistForFiles(client, [filePath]);
   }
 
+  async showLineBlame(): Promise<void> {
+    const editor = vscode.window.activeTextEditor;
+    if (!editor) {
+      void vscode.window.showInformationMessage(`${IdeaGitViewProvider.productName}: Open a file and place the cursor on a line first.`);
+      return;
+    }
+    try {
+      const filePath = this.workspaceRelativePath(editor.document.uri);
+      const line = editor.selection.active.line + 1;
+      const blame = await (await this.getClient()).blameLine(filePath, line);
+      const shortHash = blame.hash.slice(0, 8);
+      const authoredAt = blame.authorTime ? new Date(blame.authorTime * 1000).toLocaleString() : 'time unknown';
+      const summary = blame.summary || 'No commit message';
+      const message = blame.uncommitted
+        ? `${path.basename(filePath)}:${line} · Uncommitted line · no commit author yet`
+        : `${path.basename(filePath)}:${line} · ${blame.author} · ${authoredAt}\n${summary} (${shortHash})`;
+      const actions = blame.uncommitted ? ['Show File History'] : ['Copy Commit Hash', 'Show File History'];
+      const action = await vscode.window.showInformationMessage(message, ...actions);
+      if (action === 'Copy Commit Hash' && !blame.uncommitted) {
+        await vscode.env.clipboard.writeText(blame.hash);
+        void vscode.window.showInformationMessage('Commit hash copied.');
+      } else if (action === 'Show File History') {
+        await this.showFileHistory(editor.document.uri);
+      }
+    } catch (error) {
+      const message = this.errorText(error);
+      if (/no such path|no such file/i.test(message)) {
+        void vscode.window.showInformationMessage(`${path.basename(editor.document.uri.fsPath)} has no committed history yet.`);
+        return;
+      }
+      void vscode.window.showErrorMessage(`${IdeaGitViewProvider.productName}: ${message}`);
+    }
+  }
+
   private async chooseChangelistForFiles(client: GitClient, paths: string[]): Promise<void> {
     const uniquePaths = [...new Set(paths)].filter((filePath) => typeof filePath === 'string' && filePath.length > 0);
     if (!uniquePaths.length) return;

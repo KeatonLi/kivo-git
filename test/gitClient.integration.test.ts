@@ -55,6 +55,22 @@ describe('GitClient integration', () => {
     expect(complete.commits.length).toBeGreaterThan(first.commits.length);
   });
 
+  it('attributes a line to its commit and identifies worktree-only edits', async () => {
+    const root = await createRepository();
+    const client = new GitClient(root);
+    await client.initialize();
+
+    const committed = await client.blameLine('alpha.txt', 1);
+    expect(committed.author).toBe('IdeaGit Test');
+    expect(committed.summary).toBe('initial');
+    expect(committed.uncommitted).toBe(false);
+
+    await fs.writeFile(path.join(root, 'alpha.txt'), 'edited in working tree\n');
+    const edited = await client.blameLine('alpha.txt', 1);
+    expect(edited.uncommitted).toBe(true);
+    expect(edited.author).toBe('Not Committed Yet');
+  });
+
   it('opens an older branch even when its tip is outside the all-branches history window', async () => {
     const root = await createRepository();
     const initial = await git(root, ['rev-parse', 'HEAD']);
@@ -243,7 +259,7 @@ describe('GitClient integration', () => {
     const client = new GitClient(root);
     await client.initialize();
     await client.mergeBranch('feature/branch-actions');
-    expect(await fs.readFile(path.join(root, 'branch-action.txt'), 'utf8')).toBe('branch action\n');
+    expect((await fs.readFile(path.join(root, 'branch-action.txt'), 'utf8')).replace(/\r\n/g, '\n')).toBe('branch action\n');
 
     await git(root, ['branch', 'cleanup/old-name']);
     await client.renameBranch('cleanup/old-name', 'cleanup/new-name');

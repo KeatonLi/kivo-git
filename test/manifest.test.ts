@@ -31,7 +31,11 @@ describe('extension contribution model', () => {
     const manifest = JSON.parse(await readFile(path.join(root, 'package.json'), 'utf8'));
     expect(manifest.contributes.commands).toEqual(expect.arrayContaining([
       expect.objectContaining({ command: 'ideaGit.showChanges', title: 'Kivo Git: Show Changes' }),
-      expect.objectContaining({ command: 'ideaGit.showLog', title: 'Kivo Git: Show History', icon: '$(history)' })
+      expect.objectContaining({ command: 'ideaGit.showLog', title: 'Kivo Git: Show History', icon: '$(history)' }),
+      expect.objectContaining({ command: 'ideaGit.showLineBlame', title: 'Kivo Git: Show Line Blame', icon: '$(git-commit)' })
+    ]));
+    expect(manifest.contributes.menus['editor/context']).toEqual(expect.arrayContaining([
+      expect.objectContaining({ command: 'ideaGit.showLineBlame', when: 'editorTextFocus && resourceScheme == file' })
     ]));
   });
 

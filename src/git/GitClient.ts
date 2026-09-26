@@ -3,7 +3,7 @@ import { promisify } from 'node:util';
 import path from 'node:path';
 import { ChangelistStore } from './ChangelistStore';
 import { parsePorcelainV2 } from './statusParser';
-import type { BranchSummary, CommitDetails, CommitFile, CommitSummary, GitRef, PullStrategy, RepositorySnapshot } from './types';
+import type { BranchSummary, CommitDetails, CommitFile, CommitSummary, GitRef, LineBlame, PullStrategy, RepositorySnapshot } from './types';
 
 const execFileAsync = promisify(execFile);
 
@@ -372,6 +372,29 @@ export class GitClient {
     } catch {
       return '';
     }
+  }
+
+  async blameLine(filePath: string, line: number): Promise<LineBlame> {
+    if (!Number.isInteger(line) || line < 1) throw new Error('Choose a valid line in the editor.');
+    const output = await this.run(['blame', '--line-porcelain', '-L', `${line},${line}`, '--', filePath]);
+    const [header = '', ...metadata] = output.split('\n');
+    const match = /^([0-9a-f]+)\s+\d+\s+\d+(?:\s+\d+)?$/.exec(header.trim());
+    if (!match) throw new Error(`Git did not return blame information for ${filePath}:${line}.`);
+    const fields = new Map<string, string>();
+    for (const entry of metadata) {
+      const separator = entry.indexOf(' ');
+      if (separator > 0) fields.set(entry.slice(0, separator), entry.slice(separator + 1));
+    }
+    const hash = match[1]!;
+    return {
+      hash,
+      author: fields.get('author') || 'Unknown author',
+      authorTime: Number(fields.get('author-time')) || 0,
+      summary: fields.get('summary') || '',
+      line,
+      content: metadata.find((entry) => entry.startsWith('\t'))?.slice(1) || '',
+      uncommitted: /^0+$/.test(hash)
+    };
   }
 
   async showIndexFile(filePath: string): Promise<string> {

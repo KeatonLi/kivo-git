@@ -27,7 +27,8 @@
   ],
   "activationEvents": [
     "onView:ideaGit.changes",
-    "onView:ideaGit.history"
+    "onView:ideaGit.history",
+    "onCommand:ideaGit.showLineBlame"
   ],
   "main": "./dist/extension.js",
   "files": [
@@ -113,6 +114,11 @@
         "icon": "$(history)"
       },
       {
+        "command": "ideaGit.showLineBlame",
+        "title": "Kivo Git: Show Line Blame",
+        "icon": "$(git-commit)"
+      },
+      {
         "command": "ideaGit.moveResourceToChangelist",
         "title": "Move to Changelist…",
         "icon": "$(list-selection)"
@@ -140,6 +146,13 @@
           "command": "ideaGit.refresh",
           "when": "view == ideaGit.changes || view == ideaGit.history",
           "group": "navigation@2"
+        }
+      ],
+      "editor/context": [
+        {
+          "command": "ideaGit.showLineBlame",
+          "when": "editorTextFocus && resourceScheme == file",
+          "group": "navigation@5"
         }
       ],
       "explorer/context": [

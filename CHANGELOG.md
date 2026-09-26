@@ -2,6 +2,7 @@
 
 ## Unreleased
 
+- Added Show Line Blame to the editor context menu to identify the current line's author, commit time, message, and hash, with quick actions to copy the hash or open file history.
 - Explained detached HEAD in Repository status and the History title, showed its commit hash, and added a Create branch action that starts from that exact commit so new work stays easy to find.
 - Added separate staged and unstaged diff actions for files changed in both the index and working tree, so commit review can distinguish HEAD → Index from Index → Working Tree without altering either state.
 - Updated History typography to use the native macOS system font where available, with a Segoe UI Variable fallback on Windows, and increased commit-row text for easier reading.

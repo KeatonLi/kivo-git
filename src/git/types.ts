@@ -67,6 +67,16 @@ export interface CommitDetails {
   files: CommitFile[];
 }
 
+export interface LineBlame {
+  hash: string;
+  author: string;
+  authorTime: number;
+  summary: string;
+  line: number;
+  content: string;
+  uncommitted: boolean;
+}
+
 export interface ChangeList {
   id: string;
   name: string;

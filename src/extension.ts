@@ -18,6 +18,7 @@ export function activate(context: vscode.ExtensionContext): void {
     vscode.commands.registerCommand('ideaGit.showLog', () => provider.showLog()),
     vscode.commands.registerCommand('ideaGit.openResourceDiff', (uri?: vscode.Uri) => provider.openResourceDiff(uri)),
     vscode.commands.registerCommand('ideaGit.showFileHistory', (uri?: vscode.Uri) => provider.showFileHistory(uri)),
+    vscode.commands.registerCommand('ideaGit.showLineBlame', () => provider.showLineBlame()),
     vscode.commands.registerCommand('ideaGit.moveResourceToChangelist', (uri?: vscode.Uri) => provider.moveResourceToChangelist(uri)),
     vscode.commands.registerCommand('ideaGit.showResourceInChanges', (uri?: vscode.Uri) => provider.showResourceInChanges(uri))
   );
