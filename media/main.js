@@ -21,6 +21,7 @@ const LOG_DETAIL_DEFAULT_HEIGHT = 190;
 const COMMIT_METADATA_MIN_HEIGHT = 96;
 const COMMIT_METADATA_DEFAULT_HEIGHT = 180;
 const COMMIT_PANEL_MIN_HEIGHT = 124;
+const COMMIT_PANEL_MAX_HEIGHT = 220;
 const COMMIT_PANEL_LEGACY_DEFAULT_HEIGHT = 188;
 const COMMIT_PANEL_DEFAULT_HEIGHT = 144;
 const COMMIT_ZONE_DEFAULT_PERCENT = window.innerHeight < 720 ? 47 : 40;
@@ -60,7 +61,7 @@ const ui = {
     ? Math.max(COMMIT_METADATA_MIN_HEIGHT, restoredCommitMetadataHeight)
     : COMMIT_METADATA_DEFAULT_HEIGHT,
   commitPanelHeight: Number.isFinite(restoredCommitPanelHeight)
-    ? Math.max(COMMIT_PANEL_MIN_HEIGHT, restoredCommitPanelHeight === COMMIT_PANEL_LEGACY_DEFAULT_HEIGHT ? COMMIT_PANEL_DEFAULT_HEIGHT : restoredCommitPanelHeight)
+    ? clamp(restoredCommitPanelHeight === COMMIT_PANEL_LEGACY_DEFAULT_HEIGHT ? COMMIT_PANEL_DEFAULT_HEIGHT : restoredCommitPanelHeight, COMMIT_PANEL_MIN_HEIGHT, COMMIT_PANEL_MAX_HEIGHT)
     : COMMIT_PANEL_DEFAULT_HEIGHT,
   commitZonePercent: clamp(Number(initialRepositoryState.commitZonePercent) || COMMIT_ZONE_DEFAULT_PERCENT, 35, 75),
   branchGroupsExpanded: {
@@ -211,7 +212,7 @@ function restoreRepositoryState(root, state = {}) {
   ui.logDetailHeight = Number.isFinite(detailHeight) ? Math.max(LOG_DETAIL_MIN_HEIGHT, detailHeight) : LOG_DETAIL_DEFAULT_HEIGHT;
   ui.commitMetadataHeight = Number.isFinite(metadataHeight) ? Math.max(COMMIT_METADATA_MIN_HEIGHT, metadataHeight) : COMMIT_METADATA_DEFAULT_HEIGHT;
   ui.commitPanelHeight = Number.isFinite(panelHeight)
-    ? Math.max(COMMIT_PANEL_MIN_HEIGHT, panelHeight === COMMIT_PANEL_LEGACY_DEFAULT_HEIGHT ? COMMIT_PANEL_DEFAULT_HEIGHT : panelHeight)
+    ? clamp(panelHeight === COMMIT_PANEL_LEGACY_DEFAULT_HEIGHT ? COMMIT_PANEL_DEFAULT_HEIGHT : panelHeight, COMMIT_PANEL_MIN_HEIGHT, COMMIT_PANEL_MAX_HEIGHT)
     : COMMIT_PANEL_DEFAULT_HEIGHT;
   ui.commitZonePercent = clamp(Number(state.commitZonePercent) || COMMIT_ZONE_DEFAULT_PERCENT, 35, 75);
   ui.branchGroupsExpanded = {
@@ -1556,9 +1557,9 @@ function commitPanelBounds(splitter) {
   const toolbarHeight = content?.querySelector('.commit-toolbar')?.getBoundingClientRect().height || 31;
   const headingHeight = content?.querySelector('.commit-changes-heading')?.getBoundingClientRect().height || 26;
   const available = content?.clientHeight || 0;
-  const maximum = available
+  const maximum = Math.min(COMMIT_PANEL_MAX_HEIGHT, available
     ? Math.max(COMMIT_PANEL_MIN_HEIGHT, available - toolbarHeight - headingHeight - 82)
-    : COMMIT_PANEL_DEFAULT_HEIGHT * 2;
+    : COMMIT_PANEL_MAX_HEIGHT);
   return { minimum: COMMIT_PANEL_MIN_HEIGHT, maximum };
 }
 

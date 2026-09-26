@@ -658,7 +658,7 @@ body[data-surface="changes"] .content { background: var(--vscode-sideBar-backgro
 .parity-mode .repo-sync-state.has-error,
 .parity-mode .remote-context-row.has-error .repo-sync-state { color: var(--vscode-editorWarning-foreground, var(--warning)); }
 .parity-mode .commit-panel {
-  flex: 0 0 var(--commit-panel-height, 144px);
+  flex: 0 1 clamp(124px, var(--commit-panel-height, 144px), 220px);
   gap: 5px;
   padding: 6px 10px 8px;
   background: var(--vscode-sideBar-background, var(--surface-base));
