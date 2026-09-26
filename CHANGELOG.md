@@ -2,6 +2,12 @@
 
 ## Unreleased
 
+- Added Ctrl+A / ⌘A on a focused Commit file row to select every changed file while keeping keyboard focus on the current row.
+- Added an expandable Commit file search, opened with Ctrl+F / ⌘F or the toolbar, that filters by path and Git status and remembers its query per repository.
+- Made History hash searches load older commit pages automatically until a matching commit is found or the repository history ends.
+- Showed index and working-tree status separately on changed-file rows (for example, `M·`, `·M`, and `MM`) with accessible explanations.
+- Added the `M` keyboard action on a focused Commit file to move that file, or the current multi-selection, to another changelist.
+
 ## 0.3.0-beta.25 - 2026-09-24
 
 - Added a restrained Repository Status summary beneath Changelists, using real working-tree and upstream counts to explain whether the branch is in sync, ahead, behind, or diverged.

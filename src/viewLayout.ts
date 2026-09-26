@@ -33,6 +33,7 @@ const messagesBySurface: Record<KivoSurface, ReadonlySet<string>> = {
     'openFile',
     'copyPath',
     'moveFileToChangelist',
+    'moveSelectedFilesToChangelist',
     'showFileHistory',
     'showBranchHistory',
     'revealInExplorer',

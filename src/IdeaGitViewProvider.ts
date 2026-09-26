@@ -17,6 +17,7 @@ type WebviewMessage =
   | { type: 'openFile'; path: string }
   | { type: 'copyPath'; path: string }
   | { type: 'moveFileToChangelist'; path: string }
+  | { type: 'moveSelectedFilesToChangelist'; paths: string[] }
   | { type: 'showFileHistory'; path: string }
   | { type: 'showBranchHistory'; branch: string }
   | { type: 'revealInExplorer'; path: string }
@@ -394,6 +395,9 @@ export class IdeaGitViewProvider implements vscode.WebviewViewProvider, vscode.T
         case 'moveFileToChangelist':
           await this.moveFileToChangelist(client, message.path);
           return;
+        case 'moveSelectedFilesToChangelist':
+          await this.chooseChangelistForFiles(client, message.paths);
+          return;
         case 'showFileHistory':
           this.workspaceFileUri(message.path);
           this.historyRef = undefined;
@@ -606,26 +610,34 @@ export class IdeaGitViewProvider implements vscode.WebviewViewProvider, vscode.T
   }
 
   private async moveFileToChangelist(client: GitClient, filePath: string): Promise<void> {
+    await this.chooseChangelistForFiles(client, [filePath]);
+  }
+
+  private async chooseChangelistForFiles(client: GitClient, paths: string[]): Promise<void> {
+    const uniquePaths = [...new Set(paths)].filter((filePath) => typeof filePath === 'string' && filePath.length > 0);
+    if (!uniquePaths.length) return;
     const snapshot = await client.snapshot(this.commitLimit);
-    const currentList = snapshot.changelists.find((list) => list.changes.some((change) => change.path === filePath));
-    if (!currentList) {
-      void vscode.window.showInformationMessage(`${IdeaGitViewProvider.productName}: ${filePath} has no working tree changes.`);
+    const changedPaths = new Set(snapshot.changes.map((change) => change.path));
+    if (uniquePaths.some((filePath) => !changedPaths.has(filePath))) {
+      void vscode.window.showInformationMessage(`${IdeaGitViewProvider.productName}: The selected files changed. Refresh the Commit view and try again.`);
       return;
     }
+    const selected = new Set(uniquePaths);
+    const sourceLists = snapshot.changelists.filter((list) => list.changes.some((change) => selected.has(change.path)));
     const options = snapshot.changelists
-      .filter((list) => list.id !== currentList?.id)
+      .filter((list) => sourceLists.length !== 1 || list.id !== sourceLists[0]?.id)
       .map((list) => ({ label: list.name, description: list.active ? 'Active changelist' : undefined, id: list.id }));
     if (!options.length) {
       void vscode.window.showInformationMessage(`${IdeaGitViewProvider.productName}: Create another changelist before moving this file.`);
       return;
     }
     const target = await vscode.window.showQuickPick(options, {
-      title: 'Move to Changelist',
-      placeHolder: filePath,
+      title: uniquePaths.length === 1 ? 'Move to Changelist' : `Move ${uniquePaths.length} Files to Changelist`,
+      placeHolder: uniquePaths.length === 1 ? uniquePaths[0] : `${uniquePaths.length} selected files`,
       ignoreFocusOut: true
     });
     if (!target) return;
-    await this.operation('move', `Moving ${filePath}…`, () => client.moveToChangelist([filePath], target.id), `Moved to ${target.label}`);
+    await this.operation('move', uniquePaths.length === 1 ? `Moving ${uniquePaths[0]}…` : `Moving ${uniquePaths.length} files…`, () => client.moveToChangelist(uniquePaths, target.id), `Moved to ${target.label}`);
   }
 
   private async operation(kind: OperationKind, label: string, action: () => Promise<void>, success: string, clearsCommit = false): Promise<boolean> {
