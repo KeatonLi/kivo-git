@@ -46,6 +46,7 @@ const ui = {
   branchOpen: false,
   branchQuery: '',
   changeQuery: initialRepositoryState.changeQuery || '',
+  changeKindFilter: initialRepositoryState.changeKindFilter || 'all',
   changeSearchOpen: false,
   logBranchQuery: initialRepositoryState.logBranchQuery || '',
   logBranchWidth: Number.isFinite(restoredBranchWidth)
@@ -154,6 +155,7 @@ function serializeRepositoryState() {
     collapsed: [...ui.collapsed],
     focusedPath: ui.focusedPath,
     changeQuery: ui.changeQuery,
+    changeKindFilter: ui.changeKindFilter,
     changeSearchOpen: ui.changeSearchOpen,
     commitMessage: ui.commitMessage,
     graphQuery: ui.graphQuery,
@@ -198,6 +200,9 @@ function restoreRepositoryState(root, state = {}) {
   ui.collapsed = new Set(state.collapsed || []);
   ui.focusedPath = state.focusedPath;
   ui.changeQuery = state.changeQuery || '';
+  ui.changeKindFilter = ['all', 'modified', 'added', 'deleted', 'renamed', 'untracked', 'conflict'].includes(state.changeKindFilter)
+    ? state.changeKindFilter
+    : 'all';
   ui.changeSearchOpen = state.changeSearchOpen === true;
   ui.selectionAnchor = undefined;
   ui.commitMessage = state.commitMessage || '';
@@ -686,22 +691,24 @@ function renderCommitToolbar(s) {
 
 function renderChanges(s) {
   const query = ui.changeQuery.trim().toLowerCase();
+  const filtersActive = Boolean(query || ui.changeKindFilter !== 'all');
   const changesByList = new Map(s.changelists.map((list) => [list.id, list.changes.filter((change) =>
-    !query || `${change.path} ${change.kind} ${change.indexStatus} ${change.workingTreeStatus}`.toLowerCase().includes(query)
+    (ui.changeKindFilter === 'all' || change.kind === ui.changeKindFilter)
+      && (!query || `${change.path} ${change.kind} ${change.indexStatus} ${change.workingTreeStatus}`.toLowerCase().includes(query))
   )]));
   const filteredTotal = [...changesByList.values()].reduce((count, changes) => count + changes.length, 0);
   const visiblePaths = s.changelists
     .filter((list) => !ui.collapsed.has(list.id))
     .flatMap((list) => (changesByList.get(list.id) || []).map((change) => change.path));
   if (!visiblePaths.includes(ui.focusedPath)) ui.focusedPath = visiblePaths[0];
-  const lists = s.changelists.filter((list) => !query || changesByList.get(list.id)?.length).map((list) => {
+  const lists = s.changelists.filter((list) => !filtersActive || changesByList.get(list.id)?.length).map((list) => {
     const collapsed = ui.collapsed.has(list.id);
     const changes = changesByList.get(list.id) || [];
     const selected = list.changes.filter((change) => ui.selected.has(change.path)).length;
     const allSelected = list.changes.length > 0 && selected === list.changes.length;
     return `<section class="changelist ${collapsed ? 'collapsed' : ''} ${list.active ? 'active-list' : ''}" data-list-id="${escapeHtml(list.id)}">
       <div class="list-heading"><label class="list-check check"><input type="checkbox" data-select-list="${escapeHtml(list.id)}" aria-label="Select all files in ${escapeHtml(list.name)}" ${allSelected ? 'checked' : ''} ${ui.busy || !list.changes.length ? 'disabled' : ''}><span></span></label><button class="list-collapse" data-collapse="${escapeHtml(list.id)}" aria-expanded="${!collapsed}">
-        ${icon('chevron-down', 'disclosure')}<span class="active-dot" title="${list.active ? 'Active changelist' : ''}"></span><span class="list-name">${escapeHtml(list.name)}</span><span class="count">${query ? `${changes.length}/${list.changes.length}` : list.changes.length}</span>
+        ${icon('chevron-down', 'disclosure')}<span class="active-dot" title="${list.active ? 'Active changelist' : ''}"></span><span class="list-name">${escapeHtml(list.name)}</span><span class="count">${filtersActive ? `${changes.length}/${list.changes.length}` : list.changes.length}</span>
       </button><button class="list-more" data-list-menu="${escapeHtml(list.id)}" aria-label="Actions for ${escapeHtml(list.name)}" aria-expanded="${ui.listMenuId === list.id}">${icon('more')}</button></div>
       <div class="file-list-shell"><div class="file-list ${list.changes.length ? '' : 'empty'}" data-drop-list="${escapeHtml(list.id)}">
         ${changes.map((change) => renderFile(change, list.id)).join('')}
@@ -718,9 +725,9 @@ function renderChanges(s) {
   return `
     <div class="commit-upper" id="kivo-commit-upper" style="flex-basis:${ui.commitZonePercent}%">
       ${renderCommitToolbar(s)}
-      <div class="commit-changes-heading" role="heading" aria-level="2"><span class="changes-heading-label">${kivoIcon('changes', 'changes-heading-icon')}<span>Changes</span></span><small>${query ? `${filteredTotal}/${s.changes.length}` : s.changes.length || ''}</small></div>
-      ${ui.changeSearchOpen ? `<div class="commit-change-search"><input id="change-search" type="search" aria-label="Search changed files by path or status" placeholder="Path or status…" value="${escapeHtml(ui.changeQuery)}"><kbd>Esc</kbd></div>` : ''}
-      <div class="lists commit-changes-tree" id="kivo-commit-changes">${lists || `<div class="commit-empty-list">${query ? `No changed files match “${escapeHtml(ui.changeQuery)}”` : 'No changes'}</div>`}</div>
+      <div class="commit-changes-heading" role="heading" aria-level="2"><span class="changes-heading-label">${kivoIcon('changes', 'changes-heading-icon')}<span>Changes</span></span><small>${filtersActive ? `${filteredTotal}/${s.changes.length}` : s.changes.length || ''}</small></div>
+      ${ui.changeSearchOpen ? `<div class="commit-change-search"><input id="change-search" type="search" aria-label="Search changed files by path or status" placeholder="Path or status…" value="${escapeHtml(ui.changeQuery)}"><select id="change-kind-filter" aria-label="Filter changed files by type"><option value="all" ${ui.changeKindFilter === 'all' ? 'selected' : ''}>All types</option><option value="modified" ${ui.changeKindFilter === 'modified' ? 'selected' : ''}>Modified</option><option value="added" ${ui.changeKindFilter === 'added' ? 'selected' : ''}>Added</option><option value="deleted" ${ui.changeKindFilter === 'deleted' ? 'selected' : ''}>Deleted</option><option value="renamed" ${ui.changeKindFilter === 'renamed' ? 'selected' : ''}>Renamed</option><option value="untracked" ${ui.changeKindFilter === 'untracked' ? 'selected' : ''}>Untracked</option><option value="conflict" ${ui.changeKindFilter === 'conflict' ? 'selected' : ''}>Conflicts</option></select><kbd>Esc</kbd></div>` : ''}
+      <div class="lists commit-changes-tree" id="kivo-commit-changes">${lists || `<div class="commit-empty-list">${filtersActive ? 'No changed files match the current filters' : 'No changes'}</div>`}</div>
       <div class="commit-panel-splitter" data-commit-panel-splitter role="separator" aria-label="Resize changes and commit message" aria-controls="kivo-commit-changes kivo-commit-message" aria-orientation="horizontal" aria-valuemin="${COMMIT_PANEL_MIN_HEIGHT}" aria-valuenow="${Math.round(ui.commitPanelHeight)}" tabindex="0" title="Drag to resize. Double-click to reset."></div>
       <footer class="commit-panel" id="kivo-commit-message" style="--commit-panel-height:${Math.round(ui.commitPanelHeight)}px">
       <textarea id="commit-message" rows="4" placeholder="Commit Message" aria-label="Commit Message" spellcheck="true" ${ui.operationKind === 'commit' ? 'disabled' : ''}>${escapeHtml(ui.commitMessage)}</textarea>
@@ -1818,10 +1825,21 @@ function bind() {
       event.preventDefault();
       event.stopPropagation();
       ui.changeQuery = '';
+      ui.changeKindFilter = 'all';
       ui.changeSearchOpen = false;
       persist();
       render();
       app.querySelector('[data-action="search-changes"]')?.focus();
+    });
+  }
+  const changeKindFilter = app.querySelector('#change-kind-filter');
+  if (changeKindFilter && !changeKindFilter.__ideaGitListeners) {
+    changeKindFilter.__ideaGitListeners = new Set(['changed-file-kind-filter']);
+    changeKindFilter.addEventListener('change', () => {
+      ui.changeKindFilter = changeKindFilter.value;
+      persist();
+      render();
+      requestAnimationFrame(() => app.querySelector('#change-kind-filter')?.focus());
     });
   }
   once('[data-branch-group]', 'click', (event) => {
@@ -2189,6 +2207,7 @@ function handleAction(action) {
     ui.changeSearchOpen = !ui.changeSearchOpen;
     if (!ui.changeSearchOpen) {
       ui.changeQuery = '';
+      ui.changeKindFilter = 'all';
       persist();
     }
     render();
