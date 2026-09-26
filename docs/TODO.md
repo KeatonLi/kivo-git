@@ -126,6 +126,7 @@ Goal: reach strong IDE parity for the operations developers perform every day.
 - [x] **P1** Add Commit and Push as a first-class action.
 - [ ] **P1** Add Amend with a preview of the commit being replaced.
 - [ ] **P1** Add commit-message history and repository commit templates.
+  - [x] Reuse the full message from one of the current branch's last 20 commits, with confirmation before replacing a draft. Repository commit templates remain to be added.
 - [ ] **P1** Show Git identity and provide a clear setup path when it is missing.
 - [ ] **P1** Support author, sign-off, no-verify, and hook settings.
 - [ ] **P1** Add configurable pre-commit checks: format, lint, typecheck, tests, and custom commands.

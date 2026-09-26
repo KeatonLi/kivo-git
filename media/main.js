@@ -743,6 +743,7 @@ function renderChanges(s) {
       <div class="commit-actions">
         <button class="primary-button ${ui.operationKind === 'commit' ? 'working' : ''}" data-action="commit" title="${escapeHtml(commitHint)} (${commandKey}+Enter)" ${!canCommit ? 'disabled' : ''}>${ui.operationKind === 'commit' ? `${icon('loading', 'codicon-modifier-spin button-spinner')}<span>Committing…</span>` : '<span>Commit</span>'}</button>
         <button class="commit-push-button ${ui.operationKind === 'push' ? 'working' : ''}" data-action="commit-and-push" title="${escapeHtml(canCommit ? 'Commit selected files and push' : commitHint)}" ${!canCommit ? 'disabled' : ''}>${ui.operationKind === 'push' ? `${icon('loading', 'codicon-modifier-spin button-spinner')}<span>Pushing…</span>` : '<span>Commit and Push…</span>'}</button>
+        <button class="idea-toolbar-button" data-action="reuse-commit-message" aria-label="Reuse a recent commit message" title="Reuse a recent commit message" ${ui.busy ? 'disabled' : ''}>${icon('history')}</button>
         <button class="idea-toolbar-button commit-settings" data-action="open-settings" aria-label="Kivo Git settings" title="Kivo Git settings">${icon('gear')}</button>
       </div>
       </footer>
@@ -2190,6 +2191,7 @@ function handleAction(action) {
   if (action === 'show-log') post('showLog');
   if (action === 'show-changes') post('showChanges');
   if (action === 'open-settings') post('openSettings');
+  if (action === 'reuse-commit-message' && !ui.busy) post('reuseCommitMessage', { draft: ui.commitMessage });
   if (action === 'save-detached-head' && !ui.busy && ui.snapshot?.branch === '(detached)') {
     post('createBranch', { startPoint: ui.snapshot.headOid || 'HEAD' });
   }
@@ -2306,6 +2308,17 @@ function dismissToast(element) {
 
 window.addEventListener('message', (event) => {
   const message = event.data;
+  if (message.type === 'reuseCommitMessage' && surface === 'changes') {
+    if (ui.commitMessage !== message.expectedDraft) {
+      toast('Draft changed while choosing a message. Choose again to replace it.', 'error');
+      return;
+    }
+    ui.commitMessage = message.body;
+    persist();
+    render();
+    app.querySelector('#commit-message')?.focus();
+    return;
+  }
   if (message.type === 'revealCommit' && surface === 'history') {
     ui.graphBranchFilter = '';
     ui.graphPathFilter = '';

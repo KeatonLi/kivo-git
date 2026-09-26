@@ -41,6 +41,7 @@ const messagesBySurface: Record<KivoSurface, ReadonlySet<string>> = {
     'revealInExplorer',
     'commit',
     'commitAndPush',
+    'reuseCommitMessage',
     'showLog',
     'showRecentCommit',
     'openSettings',

@@ -25,6 +25,7 @@ type WebviewMessage =
   | { type: 'openCommitDiff'; hash: string; path: string; originalPath?: string; kind?: string }
   | { type: 'commit'; message: string; paths: string[] }
   | { type: 'commitAndPush'; message: string; paths: string[] }
+  | { type: 'reuseCommitMessage'; draft: string }
   | { type: 'checkout'; branch: string; remote: boolean }
   | { type: 'createBranch'; startPoint: string }
   | { type: 'mergeBranch'; branch: string }
@@ -448,6 +449,9 @@ export class IdeaGitViewProvider implements vscode.WebviewViewProvider, vscode.T
         case 'commitAndPush':
           await this.commitAndPush(client, message.message, message.paths);
           return;
+        case 'reuseCommitMessage':
+          await this.reuseCommitMessage(client, message.draft);
+          return;
         case 'checkout':
           await this.operation('checkout', `Switching to ${message.branch}…`, async () => client.checkout(message.branch, message.remote), `Switched to ${message.branch}`);
           return;
@@ -629,6 +633,26 @@ export class IdeaGitViewProvider implements vscode.WebviewViewProvider, vscode.T
 
   private async moveFileToChangelist(client: GitClient, filePath: string): Promise<void> {
     await this.chooseChangelistForFiles(client, [filePath]);
+  }
+
+  private async reuseCommitMessage(client: GitClient, draft: string): Promise<void> {
+    const commits = await client.recentCommitMessages();
+    if (!commits.length) {
+      void vscode.window.showInformationMessage('No commit messages on the current branch yet.');
+      return;
+    }
+    const selected = await vscode.window.showQuickPick(commits.map((commit) => ({
+      label: commit.subject,
+      description: commit.hash.slice(0, 8),
+      hash: commit.hash
+    })), { title: 'Reuse Commit Message', placeHolder: 'Choose a recent commit on the current branch' });
+    if (!selected) return;
+    if (draft.trim()) {
+      const choice = await vscode.window.showWarningMessage('Replace the current commit message draft?', { modal: true }, 'Replace Draft');
+      if (choice !== 'Replace Draft') return;
+    }
+    const details = await client.commitDetails(selected.hash);
+    await this.postToView('changes', { type: 'reuseCommitMessage', body: details.body, expectedDraft: draft });
   }
 
   async showLineBlame(): Promise<void> {

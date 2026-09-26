@@ -374,6 +374,14 @@ export class GitClient {
     }
   }
 
+  async recentCommitMessages(): Promise<Array<{ hash: string; subject: string }>> {
+    const output = await this.run(['log', 'HEAD', '-n', '20', '-z', '--format=%H%x1f%s']).catch(() => '');
+    return output.split('\0').filter(Boolean).map((entry) => {
+      const [hash = '', subject = ''] = entry.trim().split('\x1f');
+      return { hash, subject };
+    }).filter((entry) => /^[0-9a-f]{40}$/.test(entry.hash));
+  }
+
   async blameLine(filePath: string, line: number): Promise<LineBlame> {
     if (!Number.isInteger(line) || line < 1) throw new Error('Choose a valid line in the editor.');
     const output = await this.run(['blame', '--line-porcelain', '-L', `${line},${line}`, '--', filePath]);
