@@ -1,6 +1,6 @@
 # Kivo Git 功能规划与 Cherry-pick 交互说明
 
-状态：产品讨论稿（2026-09-26）  
+状态：产品讨论稿（2026-09-26）
 原型：[Git Operations prototype](./prototypes/git-operations.html)
 
 ## 这份文档要解决什么
@@ -129,4 +129,3 @@ Kivo Git 的承诺是让 VS Code 用户在一个连贯的工作流里完成提�
 2. 多提交选择是否允许用户拖动排序？建议第一版固定为旧到新，并在执行前清楚预览。
 3. 空提交是否默认跳过？建议默认停下并让用户选 Skip 或显式保留。
 4. Revert 与 Stash 是否列入 Cherry-pick 后的紧接阶段？
-
