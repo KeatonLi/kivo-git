@@ -61,8 +61,21 @@ try {
 
   await openSurface(page, 'surface=changes');
   assert.equal(await page.locator('.workspace-brief').count(), 0, 'The Commit view should leave repository status to History.');
+  const repositoryContext = page.locator('.commit-repository-context');
+  assert.equal(await repositoryContext.count(), 1, 'The Commit view should use its lower area for branch and remote context.');
+  assert.match(await page.locator('.current-branch-row').getAttribute('aria-label'), /feature\/keaton\/ACKk8s/);
+  assert.match(await page.locator('.remote-context-row').getAttribute('aria-label'), /tracking origin\/feature\/keaton\/ACKk8s/);
+  assert.match(await page.locator('.repo-sync-counts').getAttribute('aria-label'), /2 incoming · 6 outgoing/);
+  assert.equal(await page.locator('.commit-panel').evaluate((element) => getComputedStyle(element).flexBasis), '144px', 'The default Commit form should stay compact.');
+  await page.locator('.current-branch-row').click();
+  assert.equal(await page.locator('.branch-popup').count(), 1, 'The branch shortcut should open the existing branch picker.');
+  await page.keyboard.press('Escape');
   await page.locator('.commit-toolbar [data-action="fetch"]').click();
   assert.ok(await page.evaluate(() => window.__vscodeMessages.some((message) => message.type === 'fetch')), 'Fetch should reach the VS Code message bridge.');
+  await page.evaluate(() => window.dispatchEvent(new MessageEvent('message', { data: { type: 'syncStatus', phase: 'error', error: 'Remote unavailable' } })));
+  assert.match(await page.locator('.repo-sync-state').textContent(), /Fetch failed/, 'The compact Commit status should expose remote errors.');
+  assert.ok((await page.locator('.remote-context-row').getAttribute('class')).includes('has-error'), 'Remote errors should have a distinct visual state.');
+  await page.evaluate(() => window.dispatchEvent(new MessageEvent('message', { data: { type: 'syncStatus', phase: 'idle' } })));
 
   const firstFile = page.locator('[data-select]').first();
   await firstFile.check({ force: true });

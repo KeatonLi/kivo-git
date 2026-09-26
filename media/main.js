@@ -20,8 +20,9 @@ const LOG_DETAIL_MIN_HEIGHT = 112;
 const LOG_DETAIL_DEFAULT_HEIGHT = 190;
 const COMMIT_METADATA_MIN_HEIGHT = 96;
 const COMMIT_METADATA_DEFAULT_HEIGHT = 180;
-const COMMIT_PANEL_MIN_HEIGHT = 116;
-const COMMIT_PANEL_DEFAULT_HEIGHT = 188;
+const COMMIT_PANEL_MIN_HEIGHT = 124;
+const COMMIT_PANEL_LEGACY_DEFAULT_HEIGHT = 188;
+const COMMIT_PANEL_DEFAULT_HEIGHT = 144;
 const BRANCH_PAGE_SIZE = 36;
 const GRAPH_MAX_WIDTH = 176;
 const GRAPH_MIN_WIDTH = 64;
@@ -56,7 +57,7 @@ const ui = {
     ? Math.max(COMMIT_METADATA_MIN_HEIGHT, restoredCommitMetadataHeight)
     : COMMIT_METADATA_DEFAULT_HEIGHT,
   commitPanelHeight: Number.isFinite(restoredCommitPanelHeight)
-    ? Math.max(COMMIT_PANEL_MIN_HEIGHT, restoredCommitPanelHeight)
+    ? Math.max(COMMIT_PANEL_MIN_HEIGHT, restoredCommitPanelHeight === COMMIT_PANEL_LEGACY_DEFAULT_HEIGHT ? COMMIT_PANEL_DEFAULT_HEIGHT : restoredCommitPanelHeight)
     : COMMIT_PANEL_DEFAULT_HEIGHT,
   branchGroupsExpanded: {
     local: initialRepositoryState.branchGroupsExpanded?.local !== false,
@@ -190,7 +191,9 @@ function restoreRepositoryState(root, state = {}) {
   ui.logDetailWidth = Number.isFinite(detailWidth) ? clamp(detailWidth, LOG_DETAIL_MIN_WIDTH, LOG_DETAIL_MAX_WIDTH) : LOG_DETAIL_DEFAULT_WIDTH;
   ui.logDetailHeight = Number.isFinite(detailHeight) ? Math.max(LOG_DETAIL_MIN_HEIGHT, detailHeight) : LOG_DETAIL_DEFAULT_HEIGHT;
   ui.commitMetadataHeight = Number.isFinite(metadataHeight) ? Math.max(COMMIT_METADATA_MIN_HEIGHT, metadataHeight) : COMMIT_METADATA_DEFAULT_HEIGHT;
-  ui.commitPanelHeight = Number.isFinite(panelHeight) ? Math.max(COMMIT_PANEL_MIN_HEIGHT, panelHeight) : COMMIT_PANEL_DEFAULT_HEIGHT;
+  ui.commitPanelHeight = Number.isFinite(panelHeight)
+    ? Math.max(COMMIT_PANEL_MIN_HEIGHT, panelHeight === COMMIT_PANEL_LEGACY_DEFAULT_HEIGHT ? COMMIT_PANEL_DEFAULT_HEIGHT : panelHeight)
+    : COMMIT_PANEL_DEFAULT_HEIGHT;
   ui.branchGroupsExpanded = {
     local: state.branchGroupsExpanded?.local !== false,
     remote: state.branchGroupsExpanded?.remote !== false,
@@ -680,6 +683,7 @@ function renderChanges(s) {
     ${renderCommitToolbar(s)}
     <div class="commit-changes-heading" role="heading" aria-level="2"><span class="changes-heading-label">${kivoIcon('changes', 'changes-heading-icon')}<span>Changes</span></span><small>${s.changes.length || ''}</small></div>
     <div class="lists commit-changes-tree" id="kivo-commit-changes">${lists || '<div class="commit-empty-list">No changes</div>'}</div>
+    ${renderCommitRepositoryContext(s)}
     <div class="commit-panel-splitter" data-commit-panel-splitter role="separator" aria-label="Resize changes and commit message" aria-controls="kivo-commit-changes kivo-commit-message" aria-orientation="horizontal" aria-valuemin="${COMMIT_PANEL_MIN_HEIGHT}" aria-valuenow="${Math.round(ui.commitPanelHeight)}" tabindex="0" title="Drag to resize. Double-click to reset."></div>
     <footer class="commit-panel" id="kivo-commit-message" style="--commit-panel-height:${Math.round(ui.commitPanelHeight)}px">
       <textarea id="commit-message" rows="4" placeholder="Commit Message" aria-label="Commit Message" spellcheck="true" ${ui.operationKind === 'commit' ? 'disabled' : ''}>${escapeHtml(ui.commitMessage)}</textarea>
@@ -690,6 +694,40 @@ function renderChanges(s) {
       </div>
     </footer>
     ${renderFileContextMenu()}`;
+}
+
+function renderCommitRepositoryContext(s) {
+  const localBranches = (s.branches || []).filter((branch) => !branch.remote);
+  const remoteNames = [...new Set((s.branches || []).filter((branch) => branch.remote).map((branch) => branch.name.split('/')[0]))];
+  const remoteName = s.upstream?.split('/')[0] || remoteNames[0];
+  const currentBranch = s.branch || 'Detached HEAD';
+  const syncState = ui.syncPhase === 'error'
+    ? 'Fetch failed'
+    : ui.syncPhase === 'fetching'
+      ? 'Checking remote'
+      : !s.upstream
+        ? 'No upstream'
+        : s.behind && s.ahead
+          ? `${s.behind} incoming · ${s.ahead} outgoing`
+          : s.behind
+            ? `${s.behind} incoming`
+            : s.ahead
+              ? `${s.ahead} outgoing`
+              : 'In sync';
+  const remoteTitle = `${remoteName || 'No remote'}${s.upstream ? ` · tracking ${s.upstream}` : ''} · ${syncState}${ui.syncPhase === 'error' && ui.syncError ? ` · ${ui.syncError}` : ''}`;
+  const syncCounts = s.upstream && ui.syncPhase !== 'error' && ui.syncPhase !== 'fetching'
+    ? `<span class="repo-sync-counts" aria-label="${escapeHtml(syncState)}">${s.behind ? `<span class="incoming-count">${icon('arrow-down')}<small>${s.behind}</small></span>` : ''}${s.ahead ? `<span class="outgoing-count">${icon('arrow-up')}<small>${s.ahead}</small></span>` : ''}${!s.behind && !s.ahead ? `<span class="repo-in-sync">${icon('check')}</span>` : ''}</span>`
+    : `<span class="repo-sync-state ${ui.syncPhase === 'error' ? 'has-error' : ''}">${icon(ui.syncPhase === 'error' ? 'warning' : ui.syncPhase === 'fetching' ? 'loading' : 'circle-slash', ui.syncPhase === 'fetching' ? 'codicon-modifier-spin' : '')}<small>${escapeHtml(syncState)}</small></span>`;
+  return `<div class="commit-repository-context" aria-label="Repository branches and remote">
+    <section class="repo-context-group" aria-label="Branches">
+      <div class="repo-context-heading"><span>Branches</span><small>${localBranches.length}</small></div>
+      <button class="repo-context-row current-branch-row" data-action="branches" aria-label="Choose branch, current branch ${escapeHtml(currentBranch)}" title="Choose branch · ${escapeHtml(currentBranch)}" aria-haspopup="dialog" aria-expanded="${ui.branchOpen}" ${ui.busy ? 'disabled' : ''}>${icon('git-branch')}<span>${escapeHtml(currentBranch)}</span><small class="repo-context-head">HEAD</small></button>
+    </section>
+    <section class="repo-context-group remote-context-group" aria-label="Remote">
+      <div class="repo-context-heading"><span>Remote</span><small>${remoteNames.length}</small></div>
+      <div class="repo-context-row remote-context-row ${ui.syncPhase === 'error' ? 'has-error' : ''}" role="group" aria-label="${escapeHtml(remoteTitle)}" title="${escapeHtml(remoteTitle)}">${icon(remoteName ? 'cloud' : 'circle-slash')}<span>${escapeHtml(remoteName || 'No remote')}</span>${syncCounts}</div>
+    </section>
+  </div>`;
 }
 
 function renderFile(change, listId) {

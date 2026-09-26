@@ -5,17 +5,10 @@
       <stop offset=".48" stop-color="#315BEA"/>
       <stop offset="1" stop-color="#6A5DF3"/>
     </linearGradient>
-    <linearGradient id="kivo-glow" x1="174" y1="104" x2="362" y2="406" gradientUnits="userSpaceOnUse">
-      <stop stop-color="#A7CEFF" stop-opacity=".42"/>
-      <stop offset="1" stop-color="#F1EDFF" stop-opacity="0"/>
-    </linearGradient>
   </defs>
   <rect width="512" height="512" rx="116" fill="url(#kivo-bg)"/>
-  <path d="M104 126c58-53 141-76 217-53 48 14 87 46 112 87" fill="none" stroke="url(#kivo-glow)" stroke-width="18" stroke-linecap="round" opacity=".85"/>
-  <path d="M164 128v256M186 256l164-126M186 256l164 126" stroke="#FFF" stroke-width="37" stroke-linecap="round" stroke-linejoin="round"/>
-  <circle cx="185" cy="256" r="34" fill="#FFF"/>
-  <circle cx="352" cy="128" r="35" fill="#FFF"/>
-  <circle cx="352" cy="384" r="35" fill="#FFF"/>
-  <circle cx="352" cy="128" r="13" fill="#315BEA"/>
-  <circle cx="352" cy="384" r="13" fill="#6A5DF3"/>
+  <path d="M164 107v273M164 256h18c36 0 60-25 60-61v-8l102-53" fill="none" stroke="#FFF" stroke-width="32" stroke-linecap="round" stroke-linejoin="round"/>
+  <circle cx="164" cy="107" r="39" fill="none" stroke="#FFF" stroke-width="25"/>
+  <circle cx="164" cy="380" r="39" fill="none" stroke="#FFF" stroke-width="25"/>
+  <circle cx="344" cy="134" r="39" fill="none" stroke="#FFF" stroke-width="25"/>
 </svg>

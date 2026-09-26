@@ -785,7 +785,7 @@ export class IdeaGitViewProvider implements vscode.WebviewViewProvider, vscode.T
       </head>
       <body class="parity-mode" data-surface="${surface}">
         <svg class="kivo-icon-sprite" aria-hidden="true" focusable="false">
-          <symbol id="kivo-graph" viewBox="0 0 24 24"><path d="M5 5v14m0-7h5m0 0 8-6m-8 6 8 6"/><circle cx="5" cy="5" r="2"/><circle cx="18" cy="6" r="2"/><circle cx="18" cy="18" r="2"/></symbol>
+          <symbol id="kivo-graph" viewBox="0 0 24 24"><path d="M6.5 4.5v15m0-7.5h1.8c2.8 0 4.7-1.9 4.7-4.6V6.2l2.2-1.7"/><circle cx="6.5" cy="4.5" r="2"/><circle cx="6.5" cy="19.5" r="2"/><circle cx="17" cy="4.5" r="2"/></symbol>
           <symbol id="kivo-changes" viewBox="0 0 24 24"><path d="M5 7.5h14M5 12h14M5 16.5h9"/><path d="M4 4.5h16v15H4z"/></symbol>
           <symbol id="kivo-sync" viewBox="0 0 24 24"><path d="M19 8a7.5 7.5 0 0 0-13.2-1.8L4 8.5M5 16a7.5 7.5 0 0 0 13.2 1.8l1.8-2.3"/><path d="M4 4.5v4h4M20 19.5v-4h-4"/></symbol>
           <symbol id="kivo-recovery" viewBox="0 0 24 24"><path d="M4 6.5h16v13H4zM7 6.5V4h10v2.5M7 11h10M7 15h6"/></symbol>
