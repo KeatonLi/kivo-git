@@ -2,6 +2,7 @@
 
 ## Unreleased
 
+- Explained detached HEAD in Repository status and the History title, showed its commit hash, and added a Create branch action that starts from that exact commit so new work stays easy to find.
 - Added separate staged and unstaged diff actions for files changed in both the index and working tree, so commit review can distinguish HEAD → Index from Index → Working Tree without altering either state.
 - Updated History typography to use the native macOS system font where available, with a Segoe UI Variable fallback on Windows, and increased commit-row text for easier reading.
 - Added Ctrl+A / ⌘A on a focused Commit file row to select every changed file while keeping keyboard focus on the current row.

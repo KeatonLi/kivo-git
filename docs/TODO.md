@@ -143,6 +143,7 @@ Goal: reach strong IDE parity for the operations developers perform every day.
 - [ ] **P1** Add Smart Checkout using stash or shelf, including recovery on conflict.
 - [ ] **P1** Detect name collisions when creating a local branch from a remote branch.
 - [ ] **P1** Handle detached HEAD and protected branches explicitly.
+  - [x] Show detached HEAD and its commit in Repository status, with a direct branch creation action from the exact commit.
 - [ ] **P2** Optionally restore open editors, selected files, and task context per branch.
 
 ### Remote synchronization

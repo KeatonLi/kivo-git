@@ -78,6 +78,7 @@ export interface RepositorySnapshot {
   repositoryName: string;
   root: string;
   branch: string;
+  headOid?: string;
   upstream?: string;
   ahead: number;
   behind: number;

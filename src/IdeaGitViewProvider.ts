@@ -791,7 +791,9 @@ export class IdeaGitViewProvider implements vscode.WebviewViewProvider, vscode.T
     const history = this.views.get('history');
     if (history) {
       history.title = 'History';
-      history.description = snapshot.branch;
+      history.description = snapshot.branch === '(detached)'
+        ? `Detached HEAD${snapshot.headOid ? ` · ${snapshot.headOid.slice(0, 8)}` : ''}`
+        : snapshot.branch;
     }
   }
 

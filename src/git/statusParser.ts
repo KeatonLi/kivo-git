@@ -2,6 +2,7 @@ import type { GitChange } from './types';
 
 export interface ParsedStatus {
   branch: string;
+  headOid?: string;
   upstream?: string;
   ahead: number;
   behind: number;
@@ -20,6 +21,7 @@ function classify(indexStatus: string, workingTreeStatus: string, untracked = fa
 
 export function parsePorcelainV2(output: string): ParsedStatus {
   let branch = 'HEAD';
+  let headOid: string | undefined;
   let upstream: string | undefined;
   let ahead = 0;
   let behind = 0;
@@ -29,6 +31,11 @@ export function parsePorcelainV2(output: string): ParsedStatus {
   for (let index = 0; index < records.length; index += 1) {
     const record = records[index];
     if (!record) continue;
+    if (record.startsWith('# branch.oid ')) {
+      const oid = record.slice(13).trim();
+      if (/^[0-9a-f]{40,64}$/i.test(oid)) headOid = oid;
+      continue;
+    }
     if (record.startsWith('# branch.head ')) {
       branch = record.slice(14).trim();
       continue;
@@ -86,5 +93,5 @@ export function parsePorcelainV2(output: string): ParsedStatus {
     }
   }
 
-  return { branch, upstream, ahead, behind, changes };
+  return { branch, headOid, upstream, ahead, behind, changes };
 }

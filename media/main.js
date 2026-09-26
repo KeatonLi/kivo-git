@@ -666,6 +666,8 @@ function renderPullMenu() {
 
 function renderCommitToolbar(s) {
   const syncing = ui.syncPhase === 'fetching';
+  const branchLabel = s.branch === '(detached)' ? 'Detached HEAD' : s.branch;
+  const branchActionLabel = s.branch === '(detached)' ? 'Git branches, detached HEAD' : `Git branches, current branch ${s.branch}`;
   const fetchIcon = syncing || ui.operationKind === 'fetch' ? 'loading' : 'refresh';
   const hasUpstream = Boolean(s.upstream);
   const pullTitle = s.behind ? `Pull ${s.behind} incoming commit${s.behind === 1 ? '' : 's'}` : 'No incoming commits';
@@ -674,7 +676,7 @@ function renderCommitToolbar(s) {
     <button class="idea-toolbar-button" data-action="refresh" aria-label="Refresh changes" title="Refresh changes" ${ui.busy ? 'disabled' : ''}>${icon('refresh')}</button>
     <span class="idea-toolbar-divider" aria-hidden="true"></span>
     <button class="idea-toolbar-button" data-action="show-log" aria-label="Open Kivo Git History in the bottom panel" title="Open Kivo Git History">${kivoIcon('graph', 'kivo-toolbar-mark')}</button>
-    <button class="idea-toolbar-button" data-action="branches" aria-label="Git branches, current branch ${escapeHtml(s.branch)}" title="Branches: ${escapeHtml(s.branch)}" aria-haspopup="dialog" aria-expanded="${ui.branchOpen}">${icon('git-branch')}</button>
+    <button class="idea-toolbar-button" data-action="branches" aria-label="${escapeHtml(branchActionLabel)}" title="Branches: ${escapeHtml(branchLabel)}" aria-haspopup="dialog" aria-expanded="${ui.branchOpen}">${icon('git-branch')}</button>
     <button class="idea-toolbar-button ${syncing ? 'working' : ''}" data-action="fetch" aria-label="${syncing ? 'Checking remote' : 'Fetch remote updates'}" title="${syncing ? 'Checking remote' : 'Fetch remote updates'}" ${ui.busy || syncing ? 'disabled' : ''}>${icon(fetchIcon, syncing || ui.operationKind === 'fetch' ? 'codicon-modifier-spin' : '')}</button>
     <div class="sync-action-wrap compact-sync-action">
     <button class="idea-toolbar-button ${s.behind ? 'has-count incoming-count' : ''}" data-action="pull-menu" aria-label="${escapeHtml(pullTitle)}" title="${escapeHtml(pullTitle)}" aria-haspopup="menu" aria-expanded="${ui.pullMenuOpen}" ${!hasUpstream || !s.behind || ui.busy || syncing ? 'disabled' : ''}>${icon('arrow-down')}${s.behind ? `<span class="tool-count">${s.behind}</span>` : ''}</button>
@@ -777,7 +779,9 @@ function selectedCountForSummary(s) {
 }
 
 function renderCommitRepositoryContext(s) {
-  const currentBranch = s.branch || 'Detached HEAD';
+  const detached = s.branch === '(detached)';
+  const currentBranch = detached ? `Detached HEAD${s.headOid ? ` · ${s.headOid.slice(0, 8)}` : ''}` : s.branch || 'Unknown branch';
+  const branchActionLabel = detached ? `Choose branch; ${currentBranch}` : `Choose branch, current branch ${currentBranch}`;
   const syncState = ui.syncPhase === 'error'
     ? 'Fetch failed'
     : ui.syncPhase === 'fetching'
@@ -786,7 +790,8 @@ function renderCommitRepositoryContext(s) {
   return `<section class="commit-repository-context" aria-label="Repository status">
     <div class="commit-insight-title">${icon('repo')}<span>Repository status</span></div>
     <div class="commit-repo-state">${icon(s.changes.length ? 'circle-filled' : 'check')}<span>${s.changes.length ? `Working tree has ${s.changes.length} ${s.changes.length === 1 ? 'change' : 'changes'}` : 'Working tree clean'}</span></div>
-    <div class="commit-repo-meta"><button data-action="branches" aria-label="Choose branch, current branch ${escapeHtml(currentBranch)}" title="Choose branch" aria-haspopup="dialog" aria-expanded="${ui.branchOpen}" ${ui.busy ? 'disabled' : ''}>${icon('git-branch')} ${escapeHtml(currentBranch)}</button><span>·</span><span class="${ui.syncPhase === 'error' ? 'has-error' : ''}" title="${escapeHtml(ui.syncError || syncState)}">${escapeHtml(syncState)}</span></div>
+    <div class="commit-repo-meta"><button data-action="branches" aria-label="${escapeHtml(branchActionLabel)}" title="Choose branch" aria-haspopup="dialog" aria-expanded="${ui.branchOpen}" ${ui.busy ? 'disabled' : ''}>${icon('git-branch')} ${escapeHtml(currentBranch)}</button><span>·</span><span class="${ui.syncPhase === 'error' ? 'has-error' : ''}" title="${escapeHtml(ui.syncError || syncState)}">${escapeHtml(syncState)}</span></div>
+    ${detached ? `<div class="commit-repo-warning" role="note">${icon('warning')}<span>New commits here have no branch name. Create a branch to keep them easy to find.</span><button data-action="save-detached-head" ${ui.busy ? 'disabled' : ''}>Create branch…</button></div>` : ''}
   </section>`;
 }
 
@@ -2174,6 +2179,9 @@ function handleAction(action) {
   if (action === 'show-log') post('showLog');
   if (action === 'show-changes') post('showChanges');
   if (action === 'open-settings') post('openSettings');
+  if (action === 'save-detached-head' && !ui.busy && ui.snapshot?.branch === '(detached)') {
+    post('createBranch', { startPoint: ui.snapshot.headOid || 'HEAD' });
+  }
   if ((action === 'fetch' || action === 'push') && !ui.busy && ui.syncPhase !== 'fetching') post(action);
   if (action === 'pull-menu' && !ui.busy && ui.syncPhase !== 'fetching') {
     ui.pullMenuOpen = !ui.pullMenuOpen;
