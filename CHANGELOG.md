@@ -2,6 +2,7 @@
 
 ## Unreleased
 
+- Updated History typography to use the native macOS system font where available, with a Segoe UI Variable fallback on Windows, and increased commit-row text for easier reading.
 - Added Ctrl+A / ⌘A on a focused Commit file row to select every changed file while keeping keyboard focus on the current row.
 - Added an expandable Commit file search, opened with Ctrl+F / ⌘F or the toolbar, that filters by path and Git status and remembers its query per repository.
 - Added a type filter beside Commit file search for modified, added, deleted, renamed, untracked, and conflicted files; the active filter is saved per repository.

@@ -734,6 +734,7 @@ body[data-surface="history"] .content { min-width: 0; background: var(--vscode-p
 .parity-mode .graph-view { min-width: 0; background: var(--vscode-panel-background, var(--surface-base)); }
 .parity-mode .log-workspace {
   --idea-row: 30px;
+  font-family: -apple-system, BlinkMacSystemFont, "SF Pro Text", "Segoe UI Variable Text", "Segoe UI", sans-serif;
   flex: 1;
   min-height: 0;
   display: grid;
@@ -913,6 +914,7 @@ body[data-surface="history"] .content { min-width: 0; background: var(--vscode-p
   animation: none;
   transition: background 100ms ease, color 100ms ease;
 }
+.parity-mode .graph-row { font-size: 13px; }
 .parity-mode .graph-row:hover { background: var(--vscode-list-hoverBackground); }
 .parity-mode .graph-row.selected { box-shadow: none; background: var(--idea-selection); color: var(--idea-selection-foreground); }
 .parity-mode .graph-row.selected .log-author,
@@ -924,12 +926,12 @@ body[data-surface="history"] .content { min-width: 0; background: var(--vscode-p
 .parity-mode .graph-node { stroke-width: 1.45; }
 .parity-mode .graph-node.merge { stroke-width: 2.1; }
 .parity-mode .log-author,
-.parity-mode .log-date { padding-left: 8px; font-size: 11px; }
+.parity-mode .log-date { padding-left: 8px; font-size: 12px; }
 .parity-mode .log-date { text-align: left; }
 .parity-mode .graph-commit { gap: 5px; padding: 0 6px; }
-.parity-mode .graph-commit strong { font-size: 12px; font-weight: 450; }
-.parity-mode .log-meta { font-size: 10px; }
-.parity-mode .graph-ref { max-width: 120px; padding: 0 2px; border: 0; border-radius: 0; background: transparent; line-height: 14px; font-size: 9px; }
+.parity-mode .graph-commit strong { font-size: 13px; font-weight: 450; letter-spacing: 0; }
+.parity-mode .log-meta { font-size: 11px; }
+.parity-mode .graph-ref { max-width: 120px; padding: 0 2px; border: 0; border-radius: 0; background: transparent; line-height: 15px; font-size: 10px; }
 .parity-mode .graph-ref.local.current { background: transparent; }
 .parity-mode .graph-list > .inline-empty {
   display: flex;
