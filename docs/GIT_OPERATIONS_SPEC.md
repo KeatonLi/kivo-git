@@ -9,6 +9,8 @@ Kivo Git 的承诺是让 VS Code 用户在一个连贯的工作流里完成提�
 
 原型使用虚构提交和本地交互，不会调用 Git，也不代表这些功能已在扩展中实现。当前重点审阅 Cherry-pick 的安全边界与冲突恢复体验。
 
+界面分区遵循 VS Code 布局：Commit 与工作区改动在左侧 Activity Bar 视图；History 在底部 Panel。History 左侧 branch 树显示本地/远程分支和标签，incoming/outgoing 计数及 Fetch/Sync 操作固定在这个 branch 区域底部。提交列表和选中提交详情位于 branch 树右边。
+
 ## 已有能力与缺口
 
 | 工作流 | 当前状态 | 备注 |
