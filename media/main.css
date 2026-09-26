@@ -1088,3 +1088,136 @@ body[data-surface="history"] .content { min-width: 0; background: var(--vscode-p
 .parity-mode .load-more { background: var(--vscode-input-background); transition: background 100ms ease, border-color 100ms ease; }
 .parity-mode .load-more:hover:not(:disabled),
 .parity-mode .load-more:focus-visible { border-color: var(--kivo-accent); box-shadow: none; }
+
+/* Commit workspace: focused actions above, context below. */
+.parity-mode .changes-content {
+  font-family: var(--vscode-font-family, "Segoe UI Variable Text", "Segoe UI", sans-serif);
+  background: var(--vscode-sideBar-background, var(--surface-base));
+}
+.parity-mode .commit-upper {
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  background: color-mix(in srgb, var(--vscode-sideBar-background) 96%, var(--vscode-foreground) 4%);
+}
+.parity-mode .commit-upper .commit-toolbar,
+.parity-mode .commit-upper .commit-changes-tree,
+.parity-mode .commit-upper .commit-panel { background: transparent; }
+.parity-mode .commit-upper .commit-changes-heading { font-size: 11px; letter-spacing: .035em; }
+.parity-mode .commit-upper .list-name,
+.parity-mode .commit-upper .file-main { font-size: 12px; }
+.parity-mode .commit-upper .file-parent { font-size: 10px; }
+.parity-mode .commit-upper .file-row { border-radius: 5px; margin: 0 5px; padding-left: 12px; }
+.parity-mode .commit-upper .commit-panel {
+  border-top: 1px solid var(--vscode-panel-border, var(--border-subtle));
+  padding: 10px 11px 12px;
+  gap: 8px;
+}
+.parity-mode .commit-upper .commit-panel textarea {
+  padding: 10px 11px;
+  border: 1px solid color-mix(in srgb, var(--vscode-input-border, var(--vscode-foreground)) 70%, transparent);
+  border-radius: 7px;
+  font-size: 12px;
+  line-height: 1.5;
+}
+.parity-mode .commit-upper .commit-actions { gap: 7px; }
+.parity-mode .commit-upper .primary-button,
+.parity-mode .commit-upper .commit-push-button { height: 30px; border-radius: 5px; font-size: 11px; }
+.parity-mode .commit-zone-splitter {
+  flex: 0 0 6px;
+  position: relative;
+  z-index: 3;
+  cursor: row-resize;
+  touch-action: none;
+  background: var(--vscode-sideBar-background, var(--surface-base));
+}
+.parity-mode .commit-zone-splitter::after {
+  content: '';
+  position: absolute;
+  inset: 2px 0 auto;
+  height: 1px;
+  background: var(--vscode-panel-border, var(--border-subtle));
+}
+.parity-mode .commit-zone-splitter:hover::after,
+.parity-mode .commit-zone-splitter:focus-visible::after,
+body.commit-zone-resizing .commit-zone-splitter::after { height: 3px; top: 1px; background: var(--vscode-focusBorder, var(--kivo-accent)); }
+.parity-mode .commit-zone-splitter:focus-visible { outline: none; }
+body.commit-zone-resizing, body.commit-zone-resizing * { cursor: row-resize !important; user-select: none; }
+.parity-mode .commit-lower {
+  flex: 1 1 0;
+  min-height: 0;
+  overflow: auto;
+  padding-bottom: 14px;
+  background: color-mix(in srgb, var(--vscode-sideBar-background) 94%, #121b2b 6%);
+  scrollbar-width: thin;
+}
+.parity-mode .commit-lower-heading {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  height: 35px;
+  padding: 0 12px;
+  color: var(--vscode-foreground);
+  font-size: 10px;
+  font-weight: 650;
+  letter-spacing: .06em;
+  text-transform: uppercase;
+}
+.parity-mode .commit-lower-heading > .codicon { color: var(--vscode-textLink-foreground, var(--kivo-accent)); font-size: 13px; }
+.parity-mode .commit-lower-heading button { margin-left: auto; padding: 4px; background: transparent; color: var(--vscode-textLink-foreground, var(--accent)); cursor: pointer; font-size: 10px; font-weight: 500; letter-spacing: 0; text-transform: none; }
+.parity-mode .commit-lower-heading button:hover { text-decoration: underline; }
+.parity-mode .commit-recent-list { padding: 0 9px 8px; }
+.parity-mode .commit-recent-row {
+  width: 100%;
+  min-width: 0;
+  display: grid;
+  grid-template-columns: 14px minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 7px;
+  padding: 7px;
+  border: 1px solid transparent;
+  border-radius: 6px;
+  background: transparent;
+  text-align: left;
+  cursor: pointer;
+}
+.parity-mode .commit-recent-row:hover,
+.parity-mode .commit-recent-row:focus-visible { outline: none; border-color: color-mix(in srgb, var(--kivo-accent) 28%, transparent); background: color-mix(in srgb, var(--kivo-accent) 9%, transparent); }
+.parity-mode .commit-recent-row > .codicon { color: var(--vscode-textLink-foreground, var(--kivo-accent)); font-size: 12px; }
+.parity-mode .commit-recent-copy { min-width: 0; display: flex; flex-direction: column; gap: 2px; }
+.parity-mode .commit-recent-copy strong { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 11px; font-weight: 550; }
+.parity-mode .commit-recent-copy code { color: var(--vscode-descriptionForeground, var(--muted)); font: 10px var(--vscode-editor-font-family, Consolas, monospace); }
+.parity-mode .commit-recent-row time { color: var(--vscode-descriptionForeground, var(--muted)); font-size: 10px; }
+.parity-mode .commit-recent-empty { padding: 6px 13px 12px; color: var(--muted); font-size: 11px; }
+.parity-mode .commit-lower .commit-repository-context,
+.parity-mode .commit-insight-card {
+  display: block;
+  margin: 8px 10px 0;
+  padding: 10px 11px;
+  border: 1px solid color-mix(in srgb, var(--vscode-panel-border, var(--vscode-foreground)) 80%, transparent);
+  border-radius: 8px;
+  background: color-mix(in srgb, var(--vscode-sideBar-background) 91%, var(--vscode-foreground) 9%);
+  box-shadow: 0 2px 8px #00000012;
+}
+.parity-mode .commit-insight-title { display: flex; align-items: center; gap: 7px; color: var(--vscode-foreground); font-size: 11px; font-weight: 650; }
+.parity-mode .commit-insight-title .codicon { color: var(--vscode-textLink-foreground, var(--kivo-accent)); font-size: 13px; }
+.parity-mode .commit-repo-state { display: flex; align-items: center; gap: 7px; margin-top: 10px; color: var(--vscode-foreground); font-size: 11px; }
+.parity-mode .commit-repo-state .codicon { color: var(--vscode-gitDecoration-addedResourceForeground, var(--success)); font-size: 10px; }
+.parity-mode .commit-repo-meta { min-width: 0; display: flex; align-items: center; gap: 6px; margin-top: 6px; color: var(--muted); font-size: 10px; }
+.parity-mode .commit-repo-meta button { display: inline-flex; align-items: center; gap: 4px; max-width: 44%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; padding: 0; background: transparent; color: var(--vscode-textLink-foreground, var(--kivo-accent)); cursor: pointer; }
+.parity-mode .commit-repo-meta button:hover { text-decoration: underline; }
+.parity-mode .commit-repo-meta > span:last-child { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.parity-mode .commit-repo-meta .has-error { color: var(--warning); }
+.parity-mode .commit-insight-total { display: flex; align-items: baseline; gap: 6px; margin-top: 7px; }
+.parity-mode .commit-insight-total strong { font-size: 23px; line-height: 1; font-weight: 650; font-variant-numeric: tabular-nums; }
+.parity-mode .commit-insight-total span { color: var(--muted); font-size: 11px; }
+.parity-mode .commit-insight-kinds { display: flex; gap: 10px; margin-top: 7px; color: var(--muted); font-size: 10px; }
+.parity-mode .commit-insight-kinds .modified { color: var(--vscode-gitDecoration-modifiedResourceForeground, var(--warning)); }
+.parity-mode .commit-insight-kinds .added { color: var(--vscode-gitDecoration-addedResourceForeground, var(--success)); }
+.parity-mode .commit-insight-footer { display: flex; justify-content: space-between; gap: 6px; margin-top: 10px; padding-top: 8px; border-top: 1px solid var(--border-subtle); color: var(--muted); font-size: 10px; }
+.parity-mode .commit-insight-footer strong { color: var(--vscode-foreground); font-weight: 550; }
+.parity-mode .commit-checks { display: flex; flex-wrap: wrap; gap: 5px 12px; margin-top: 10px; color: var(--muted); font-size: 10px; }
+.parity-mode .commit-checks span { display: inline-flex; align-items: center; gap: 3px; }
+.parity-mode .commit-checks .codicon { color: var(--vscode-gitDecoration-addedResourceForeground, var(--success)); }
+.parity-mode .commit-checks .pending .codicon { color: var(--warning); }

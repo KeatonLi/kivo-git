@@ -12,6 +12,7 @@ type WebviewMessage =
   | { type: 'setHistoryRef'; branch: string }
   | { type: 'pull'; strategy: PullStrategy }
   | { type: 'commitDetails'; hash: string }
+  | { type: 'showRecentCommit'; hash: string }
   | { type: 'openDiff'; path: string; originalPath?: string; kind?: string; preview?: boolean }
   | { type: 'openFile'; path: string }
   | { type: 'copyPath'; path: string }
@@ -66,6 +67,7 @@ export class IdeaGitViewProvider implements vscode.WebviewViewProvider, vscode.T
   private lastSnapshot?: RepositorySnapshot;
   private pendingHistoryPathFilter?: string;
   private pendingHistoryBranchFilter?: string;
+  private pendingHistoryCommitHash?: string;
   private pendingChangesReveal?: string;
   private readonly fileIconTheme = new FileIconThemeResolver();
   private fileIconThemeRefresh?: Promise<void>;
@@ -75,6 +77,7 @@ export class IdeaGitViewProvider implements vscode.WebviewViewProvider, vscode.T
       this.lastSnapshot = snapshot;
       this.updateViewTitles(snapshot);
       await this.postSnapshotToReadyViews(snapshot);
+      await this.deliverPendingNavigation('history');
     },
     (error) => { void this.showEmpty(error); }
   );
@@ -232,6 +235,11 @@ export class IdeaGitViewProvider implements vscode.WebviewViewProvider, vscode.T
       this.pendingHistoryBranchFilter = undefined;
       await this.postToView(surface, { type: 'applyBranchFilter', branch });
     }
+    if (surface === 'history' && this.pendingHistoryCommitHash && this.lastSnapshot?.commits.some((commit) => commit.hash === this.pendingHistoryCommitHash)) {
+      const hash = this.pendingHistoryCommitHash;
+      this.pendingHistoryCommitHash = undefined;
+      await this.postToView(surface, { type: 'revealCommit', hash });
+    }
     if (surface === 'changes' && this.pendingChangesReveal) {
       const filePath = this.pendingChangesReveal;
       this.pendingChangesReveal = undefined;
@@ -311,7 +319,7 @@ export class IdeaGitViewProvider implements vscode.WebviewViewProvider, vscode.T
       return;
     }
     if (message.type === 'ready') {
-      if (surface === 'history' && this.pendingHistoryBranchFilter === undefined && !this.pendingHistoryPathFilter) {
+      if (surface === 'history' && this.pendingHistoryBranchFilter === undefined && !this.pendingHistoryPathFilter && !this.pendingHistoryCommitHash) {
         this.historyRef = message.historyRef || undefined;
       }
       this.readyViews.add(surface);
@@ -327,6 +335,13 @@ export class IdeaGitViewProvider implements vscode.WebviewViewProvider, vscode.T
     }
     if (message.type === 'showLog') {
       await this.showLog();
+      return;
+    }
+    if (message.type === 'showRecentCommit') {
+      if (!this.lastSnapshot?.commits.some((commit) => commit.hash === message.hash)) return;
+      this.pendingHistoryCommitHash = message.hash;
+      await this.showLog();
+      await this.deliverPendingNavigation('history');
       return;
     }
     if (message.type === 'showChanges') {

@@ -39,6 +39,7 @@ const messagesBySurface: Record<KivoSurface, ReadonlySet<string>> = {
     'commit',
     'commitAndPush',
     'showLog',
+    'showRecentCommit',
     'openSettings',
     'createChangelist',
     'renameChangelist',
