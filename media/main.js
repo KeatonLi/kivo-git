@@ -799,6 +799,7 @@ function renderCommitRepositoryContext(s) {
     <div class="commit-insight-title">${icon('repo')}<span>Repository status</span></div>
     <div class="commit-repo-state">${icon(s.changes.length ? 'circle-filled' : 'check')}<span>${s.changes.length ? `Working tree has ${s.changes.length} ${s.changes.length === 1 ? 'change' : 'changes'}` : 'Working tree clean'}</span></div>
     <div class="commit-repo-meta"><button data-action="branches" aria-label="${escapeHtml(branchActionLabel)}" title="Choose branch" aria-haspopup="dialog" aria-expanded="${ui.branchOpen}" ${ui.busy ? 'disabled' : ''}>${icon('git-branch')} ${escapeHtml(currentBranch)}</button><span>·</span><span class="${ui.syncPhase === 'error' ? 'has-error' : ''}" title="${escapeHtml(ui.syncError || syncState)}">${escapeHtml(syncState)}</span></div>
+    <div class="commit-repo-identity ${s.identity?.ready ? '' : 'missing'}">${icon('account')}<span title="${escapeHtml(s.identity?.ready ? `${s.identity.name} <${s.identity.email}>` : 'Git author or committer identity is incomplete')}">${s.identity?.ready ? `${escapeHtml(s.identity.name)} &lt;${escapeHtml(s.identity.email)}&gt;` : 'Git identity missing'}</span><button data-action="configure-git-identity" ${ui.busy ? 'disabled' : ''}>${s.identity?.ready ? 'Edit' : 'Set identity…'}</button></div>
     ${detached ? `<div class="commit-repo-warning" role="note">${icon('warning')}<span>New commits here have no branch name. Create a branch to keep them easy to find.</span><button data-action="save-detached-head" ${ui.busy ? 'disabled' : ''}>Create branch…</button></div>` : ''}
   </section>`;
 }
@@ -2192,6 +2193,7 @@ function handleAction(action) {
   if (action === 'show-changes') post('showChanges');
   if (action === 'open-settings') post('openSettings');
   if (action === 'reuse-commit-message' && !ui.busy) post('reuseCommitMessage', { draft: ui.commitMessage });
+  if (action === 'configure-git-identity' && !ui.busy) post('configureGitIdentity');
   if (action === 'save-detached-head' && !ui.busy && ui.snapshot?.branch === '(detached)') {
     post('createBranch', { startPoint: ui.snapshot.headOid || 'HEAD' });
   }

@@ -2,6 +2,7 @@
 
 ## Unreleased
 
+- Displayed the effective Git commit identity in Repository status and added a guided repository-local name and email setup action when it is missing, so commit authorship is clear before committing.
 - Added a Recent Messages action beside Commit that lists the current branch's last 20 commits and reuses the full selected message; replacing an existing draft requires confirmation, and edits made while choosing are preserved.
 - Previewed the focused changed file while navigating the Commit list with Arrow keys, Home, or End, so keyboard review follows the selected row without leaving the list.
 - Added Staged and Working tree choices to Commit file filtering, so partial staging and untracked edits can be found directly; existing saved type filters are preserved.

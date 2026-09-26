@@ -1230,6 +1230,14 @@ body.commit-zone-resizing, body.commit-zone-resizing * { cursor: row-resize !imp
 .parity-mode .commit-repo-meta button:hover { text-decoration: underline; }
 .parity-mode .commit-repo-meta > span:last-child { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .parity-mode .commit-repo-meta .has-error { color: var(--warning); }
+.parity-mode .commit-repo-identity { display: flex; align-items: center; gap: 6px; margin-top: 7px; color: var(--muted); font-size: 10px; }
+.parity-mode .commit-repo-identity > .codicon { font-size: 12px; }
+.parity-mode .commit-repo-identity > span { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.parity-mode .commit-repo-identity.missing { color: var(--vscode-editorWarning-foreground, var(--warning)); }
+.parity-mode .commit-repo-identity button { flex: 0 0 auto; margin-left: auto; padding: 0; border: 0; background: transparent; color: var(--vscode-textLink-foreground, var(--kivo-accent)); font: inherit; cursor: pointer; }
+.parity-mode .commit-repo-identity button:hover:not(:disabled),
+.parity-mode .commit-repo-identity button:focus-visible { text-decoration: underline; }
+.parity-mode .commit-repo-identity button:disabled { opacity: .5; }
 .parity-mode .commit-repo-warning { display: grid; grid-template-columns: 12px minmax(0, 1fr); gap: 4px 7px; margin-top: 9px; color: var(--vscode-editorWarning-foreground, var(--warning)); font-size: 10px; line-height: 1.4; }
 .parity-mode .commit-repo-warning > .codicon { margin-top: 1px; font-size: 12px; }
 .parity-mode .commit-repo-warning button { grid-column: 2; justify-self: start; padding: 2px 0; border: 0; background: transparent; color: var(--vscode-textLink-foreground, var(--kivo-accent)); font: inherit; cursor: pointer; }

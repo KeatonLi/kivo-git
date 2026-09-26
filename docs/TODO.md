@@ -127,7 +127,7 @@ Goal: reach strong IDE parity for the operations developers perform every day.
 - [ ] **P1** Add Amend with a preview of the commit being replaced.
 - [ ] **P1** Add commit-message history and repository commit templates.
   - [x] Reuse the full message from one of the current branch's last 20 commits, with confirmation before replacing a draft. Repository commit templates remain to be added.
-- [ ] **P1** Show Git identity and provide a clear setup path when it is missing.
+- [x] **P1** Show Git identity and provide a clear setup path when it is missing. Repository status shows the effective author and offers guided repository-local name and email configuration.
 - [ ] **P1** Support author, sign-off, no-verify, and hook settings.
 - [ ] **P1** Add configurable pre-commit checks: format, lint, typecheck, tests, and custom commands.
 - [ ] **P1** Preserve the draft message and selection when a check or commit fails.

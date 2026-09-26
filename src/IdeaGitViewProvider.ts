@@ -26,6 +26,7 @@ type WebviewMessage =
   | { type: 'commit'; message: string; paths: string[] }
   | { type: 'commitAndPush'; message: string; paths: string[] }
   | { type: 'reuseCommitMessage'; draft: string }
+  | { type: 'configureGitIdentity' }
   | { type: 'checkout'; branch: string; remote: boolean }
   | { type: 'createBranch'; startPoint: string }
   | { type: 'mergeBranch'; branch: string }
@@ -452,6 +453,9 @@ export class IdeaGitViewProvider implements vscode.WebviewViewProvider, vscode.T
         case 'reuseCommitMessage':
           await this.reuseCommitMessage(client, message.draft);
           return;
+        case 'configureGitIdentity':
+          await this.configureGitIdentity(client);
+          return;
         case 'checkout':
           await this.operation('checkout', `Switching to ${message.branch}…`, async () => client.checkout(message.branch, message.remote), `Switched to ${message.branch}`);
           return;
@@ -653,6 +657,27 @@ export class IdeaGitViewProvider implements vscode.WebviewViewProvider, vscode.T
     }
     const details = await client.commitDetails(selected.hash);
     await this.postToView('changes', { type: 'reuseCommitMessage', body: details.body, expectedDraft: draft });
+  }
+
+  private async configureGitIdentity(client: GitClient): Promise<void> {
+    const current = this.lastSnapshot?.identity;
+    const name = await vscode.window.showInputBox({
+      title: 'Git Identity for This Repository',
+      prompt: 'Name to record on new commits in this repository',
+      value: current?.name || '',
+      validateInput: (value) => value.trim() && !/[\r\n]/.test(value) ? undefined : 'Enter your Git author name.'
+    });
+    if (name === undefined) return;
+    const email = await vscode.window.showInputBox({
+      title: 'Git Identity for This Repository',
+      prompt: 'Email to record on new commits in this repository',
+      value: current?.email || '',
+      validateInput: (value) => /^[^\s@<>]+@[^\s@<>]+$/.test(value.trim()) ? undefined : 'Enter a Git author email.'
+    });
+    if (email === undefined) return;
+    await client.setLocalCommitIdentity(name, email);
+    await this.refresh(true);
+    await this.postToView('changes', { type: 'notice', phase: 'success', message: 'Repository Git identity configuration saved' });
   }
 
   async showLineBlame(): Promise<void> {

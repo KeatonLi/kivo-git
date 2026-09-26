@@ -42,6 +42,7 @@ const messagesBySurface: Record<KivoSurface, ReadonlySet<string>> = {
     'commit',
     'commitAndPush',
     'reuseCommitMessage',
+    'configureGitIdentity',
     'showLog',
     'showRecentCommit',
     'openSettings',

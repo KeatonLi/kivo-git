@@ -89,6 +89,7 @@ export interface RepositorySnapshot {
   root: string;
   branch: string;
   headOid?: string;
+  identity?: { name: string; email: string; ready: boolean };
   upstream?: string;
   ahead: number;
   behind: number;

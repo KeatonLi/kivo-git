@@ -48,11 +48,12 @@ export class GitClient {
 
   async snapshot(commitLimit = 80, historyRef?: string): Promise<RepositorySnapshot> {
     if (!this.store) await this.initialize();
-    const [statusOutput, branches, tags, topLevel] = await Promise.all([
+    const [statusOutput, branches, tags, topLevel, identity] = await Promise.all([
       this.run(['status', '--porcelain=v2', '--branch', '-z', '--untracked-files=all']),
       this.getBranches(),
       this.getTags(),
-      this.run(['rev-parse', '--show-toplevel'])
+      this.run(['rev-parse', '--show-toplevel']),
+      this.getCommitIdentity()
     ]);
     const parsed = parsePorcelainV2(statusOutput);
     const root = topLevel.trim();
@@ -66,6 +67,7 @@ export class GitClient {
     return {
       repositoryName: path.basename(root),
       root,
+      identity,
       ...parsed,
       changelists: await this.store!.group(parsed.changes),
       branches,
@@ -372,6 +374,22 @@ export class GitClient {
     } catch {
       return '';
     }
+  }
+
+  private async getCommitIdentity(): Promise<{ name: string; email: string; ready: boolean }> {
+    const [author, committer] = await Promise.all([
+      this.run(['var', 'GIT_AUTHOR_IDENT']).catch(() => ''),
+      this.run(['var', 'GIT_COMMITTER_IDENT']).catch(() => '')
+    ]);
+    const match = author.trim().match(/^(.*) <([^<>]+)> \d+ [+-]\d{4}$/);
+    return { name: match?.[1] || '', email: match?.[2] || '', ready: Boolean(match && committer.trim().match(/^(.*) <([^<>]+)> \d+ [+-]\d{4}$/)) };
+  }
+
+  async setLocalCommitIdentity(name: string, email: string): Promise<void> {
+    if (!name.trim() || /[\r\n]/.test(name)) throw new Error('Enter a valid Git author name.');
+    if (!/^[^\s@<>]+@[^\s@<>]+$/.test(email.trim())) throw new Error('Enter a valid Git author email.');
+    await this.run(['config', '--local', 'user.name', name.trim()]);
+    await this.run(['config', '--local', 'user.email', email.trim()]);
   }
 
   async recentCommitMessages(): Promise<Array<{ hash: string; subject: string }>> {
