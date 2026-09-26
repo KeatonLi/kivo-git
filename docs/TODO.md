@@ -111,6 +111,7 @@ Goal: reach strong IDE parity for the operations developers perform every day.
 
 - [x] **P1** Add single-click diff preview while keeping double-click for a full native diff editor.
 - [ ] **P1** Navigate next/previous changed file and next/previous hunk.
+  - [x] Preview each changed file while navigating the Commit list with Arrow keys, Home, or End.
 - [ ] **P1** Open the source file at the selected changed line.
 - [ ] **P1** Add ignore-whitespace, word-diff, and side-by-side/inline preferences through native APIs.
 - [ ] **P1** Revert a file or hunk with explicit preview and confirmation.

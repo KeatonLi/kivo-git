@@ -2,6 +2,7 @@
 
 ## Unreleased
 
+- Previewed the focused changed file while navigating the Commit list with Arrow keys, Home, or End, so keyboard review follows the selected row without leaving the list.
 - Added Staged and Working tree choices to Commit file filtering, so partial staging and untracked edits can be found directly; existing saved type filters are preserved.
 - Added Show Line Blame to the editor context menu to identify the current line's author, commit time, message, and hash, with quick actions to copy the hash or open file history.
 - Explained detached HEAD in Repository status and the History title, showed its commit hash, and added a Create branch action that starts from that exact commit so new work stays easy to find.

@@ -2074,6 +2074,10 @@ function bind() {
       ui.selectionAnchor = target.dataset.diff;
     }
     focusFile(target.dataset.diff);
+    if (target.dataset.diff !== button.dataset.diff) {
+      clearTimeout(previewTimer);
+      previewTimer = setTimeout(() => postDiff(target, true), 140);
+    }
   });
   once('[data-checkout]', 'click', (event) => {
     const button = event.currentTarget;
