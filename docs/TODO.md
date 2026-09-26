@@ -116,6 +116,7 @@ Goal: reach strong IDE parity for the operations developers perform every day.
 - [ ] **P2** Select hunks or individual lines for a commit.
 - [ ] **P2** Move a hunk to another changelist directly from the diff.
 - [ ] **P2** Compare HEAD, index, and working tree when partial staging exists.
+  - [x] Open separate HEAD → Index and Index → Working Tree diffs from a partially staged file's context menu; conflicted files and working-tree renames need their own review flow.
 
 ### Commit workflow
 

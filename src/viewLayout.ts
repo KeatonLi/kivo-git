@@ -30,6 +30,8 @@ const sharedMessages = new Set([
 const messagesBySurface: Record<KivoSurface, ReadonlySet<string>> = {
   changes: new Set([
     'openDiff',
+    'openStagedDiff',
+    'openUnstagedDiff',
     'openFile',
     'copyPath',
     'moveFileToChangelist',

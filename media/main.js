@@ -823,8 +823,9 @@ function renderFileContextMenu() {
   const change = ui.snapshot?.changes.find((candidate) => candidate.path === menu.path) || menu.change || { path: menu.path, kind: menu.kind || 'modified' };
   const filename = change.path.split('/').pop() || change.path;
   const list = ui.snapshot?.changelists.find((candidate) => candidate.id === menu.listId);
+  const partialDiff = change.staged && change.kind !== 'conflict' && change.workingTreeStatus !== '.' && change.workingTreeStatus !== 'R';
   const width = 278;
-  const height = list?.changes.length && list.changes.length > 1 ? 278 : 248;
+  const height = (list?.changes.length && list.changes.length > 1 ? 278 : 248) + (partialDiff ? 52 : 0);
   const left = clamp(menu.x, 8, Math.max(8, window.innerWidth - width - 8));
   const top = clamp(menu.y, 8, Math.max(8, window.innerHeight - height - 8));
   const openFileDisabled = change.kind === 'deleted' || ui.busy;
@@ -836,6 +837,7 @@ function renderFileContextMenu() {
     </div>
     <div class="context-menu-separator" role="separator"></div>
     <button role="menuitem" data-file-context-action="open-diff" ${ui.busy ? 'disabled' : ''}>${icon('diff')}<span>Open Diff</span><kbd>Enter</kbd></button>
+    ${partialDiff ? `<button role="menuitem" data-file-context-action="open-staged-diff" ${ui.busy ? 'disabled' : ''}>${icon('diff')}<span>Staged Diff</span><kbd>HEAD → Index</kbd></button><button role="menuitem" data-file-context-action="open-unstaged-diff" ${ui.busy ? 'disabled' : ''}>${icon('diff')}<span>Unstaged Diff</span><kbd>Index → File</kbd></button>` : ''}
     <button role="menuitem" data-file-context-action="open-file" ${openFileDisabled ? 'disabled' : ''}>${icon('go-to-file')}<span>Open File</span></button>
     <button role="menuitem" data-file-context-action="history">${icon('history')}<span>Show File History</span></button>
     <button role="menuitem" data-file-context-action="reveal" ${change.kind === 'deleted' ? 'disabled' : ''}>${icon('folder-opened')}<span>Reveal in Explorer</span></button>
@@ -1225,6 +1227,8 @@ function runFileContextAction(event) {
   if (action === 'open-diff' && !ui.busy) {
     post('openDiff', { path: change.path, originalPath: change.originalPath, kind: change.kind, preview: false });
   }
+  if (action === 'open-staged-diff' && !ui.busy) post('openStagedDiff', { path: change.path });
+  if (action === 'open-unstaged-diff' && !ui.busy) post('openUnstagedDiff', { path: change.path });
   if (action === 'open-file' && !ui.busy && change.kind !== 'deleted') {
     post('openFile', { path: change.path });
   }

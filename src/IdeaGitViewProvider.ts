@@ -14,6 +14,7 @@ type WebviewMessage =
   | { type: 'commitDetails'; hash: string }
   | { type: 'showRecentCommit'; hash: string }
   | { type: 'openDiff'; path: string; originalPath?: string; kind?: string; preview?: boolean }
+  | { type: 'openStagedDiff' | 'openUnstagedDiff'; path: string }
   | { type: 'openFile'; path: string }
   | { type: 'copyPath'; path: string }
   | { type: 'moveFileToChangelist'; path: string }
@@ -135,11 +136,13 @@ export class IdeaGitViewProvider implements vscode.WebviewViewProvider, vscode.T
   }
 
   async provideTextDocumentContent(uri: vscode.Uri): Promise<string> {
-    if (uri.query === 'empty=1') return '';
+    const parameters = new URLSearchParams(uri.query);
+    if (parameters.get('empty') === '1') return '';
     const workspace = vscode.workspace.workspaceFolders?.[0];
     if (!workspace) return '';
     const client = await this.getClient();
-    const revision = new URLSearchParams(uri.query).get('commit');
+    if (parameters.get('index') === '1') return client.showIndexFile(uri.path.replace(/^\//, ''));
+    const revision = parameters.get('commit');
     return revision
       ? client.showFileAtRevision(revision, uri.path.replace(/^\//, ''))
       : client.showHeadFile(uri.path.replace(/^\//, ''));
@@ -384,6 +387,12 @@ export class IdeaGitViewProvider implements vscode.WebviewViewProvider, vscode.T
           return;
         case 'openDiff':
           await this.openDiff(message.path, message.originalPath, message.kind, message.preview);
+          return;
+        case 'openStagedDiff':
+          await this.openPartialDiff(message.path, 'staged');
+          return;
+        case 'openUnstagedDiff':
+          await this.openPartialDiff(message.path, 'unstaged');
           return;
         case 'openFile':
           await this.openFile(message.path);
@@ -674,6 +683,30 @@ export class IdeaGitViewProvider implements vscode.WebviewViewProvider, vscode.T
       ? vscode.Uri.from({ scheme: IdeaGitViewProvider.revisionScheme, path: `/${filePath}`, query: 'empty=1' })
       : vscode.Uri.file(path.join(workspace.uri.fsPath, filePath));
     await vscode.commands.executeCommand('vscode.diff', oldUri, currentUri, `${filePath} (HEAD ↔ Working Tree)`, { preview, preserveFocus: preview });
+  }
+
+  private async openPartialDiff(filePath: string, layer: 'staged' | 'unstaged'): Promise<void> {
+    const change = this.lastSnapshot?.changes.find((candidate) => candidate.path === filePath);
+    if (!change || !change.staged || change.kind === 'conflict' || change.workingTreeStatus === '.' || change.workingTreeStatus === 'R') {
+      throw new Error('This file no longer has both staged and unstaged changes. Refresh and try again.');
+    }
+    const file = this.workspaceFileUri(filePath);
+    const nonce = Date.now();
+    const revisionUri = (revisionPath: string, query: string) => vscode.Uri.from({
+      scheme: IdeaGitViewProvider.revisionScheme,
+      path: `/${revisionPath}`,
+      query: `${query}&view=${nonce}`
+    });
+    const indexUri = revisionUri(filePath, 'index=1');
+    if (layer === 'staged') {
+      const headPath = change.indexStatus === 'R' ? change.originalPath || filePath : filePath;
+      this.workspaceFileUri(headPath);
+      const headUri = change.indexStatus === 'A' ? revisionUri(headPath, 'empty=1') : revisionUri(headPath, 'head=1');
+      await vscode.commands.executeCommand('vscode.diff', headUri, indexUri, `${filePath} (HEAD ↔ Index)`, { preview: false });
+      return;
+    }
+    const workingUri = change.workingTreeStatus === 'D' ? revisionUri(filePath, 'empty=1') : file;
+    await vscode.commands.executeCommand('vscode.diff', indexUri, workingUri, `${filePath} (Index ↔ Working Tree)`, { preview: false });
   }
 
   private async openFile(filePath: string): Promise<void> {

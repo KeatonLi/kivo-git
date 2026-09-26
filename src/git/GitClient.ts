@@ -374,6 +374,14 @@ export class GitClient {
     }
   }
 
+  async showIndexFile(filePath: string): Promise<string> {
+    try {
+      return await this.run(['show', `:${filePath}`]);
+    } catch {
+      return '';
+    }
+  }
+
   async showFileAtRevision(revision: string, filePath: string): Promise<string> {
     if (!/^[0-9a-f]{7,40}$/i.test(revision)) return '';
     try {
