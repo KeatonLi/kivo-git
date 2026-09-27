@@ -12,12 +12,12 @@ async function handlers() {
   ];
   const context: Record<string, any> = {
     ui: { snapshot: { changes, changelists: [{ id: 'default', changes }] }, selected: new Set(), collapsed: new Set(), changeFilter: 'staged', changeQuery: '', commitMessage: 'message', busy: false },
-    post: vi.fn(), toast: vi.fn(), persist: vi.fn(), render: vi.fn()
+    post: vi.fn(), toast: vi.fn(), persist: vi.fn(), render: vi.fn(), requestAnimationFrame: vi.fn()
   };
   runInNewContext(await readFile('media/change-selection.js', 'utf8'), context);
   const source = await readFile('media/main.js', 'utf8');
   const ast = ts.createSourceFile('main.js', source, ts.ScriptTarget.Latest, true, ts.ScriptKind.JS);
-  const names = new Set(['changeSelection', 'orderedPaths', 'setSelection', 'commitBlocker', 'commit', 'handleAction', 'renderSelectionStatus', 'runFileContextAction', 'matchesChangeFilter']);
+  const names = new Set(['changeSelection', 'orderedPaths', 'setSelection', 'commitBlocker', 'commit', 'submitReviewedCommit', 'handleAction', 'renderSelectionStatus', 'runFileContextAction', 'matchesChangeFilter']);
   const handlers = ast.statements.filter((node) => ts.isFunctionDeclaration(node) && node.name && names.has(node.name.text));
   runInNewContext(handlers.map((node) => node.getText(ast)).join('\n'), context);
   return context;
@@ -39,6 +39,9 @@ describe('commit interaction safety', () => {
     expect(context.renderSelectionStatus()).toContain('1 hidden by filters');
     context.handleAction('clear-hidden-selection');
     context.commit();
+    expect(context.ui.commitReviewOpen).toBe(true);
+    expect(context.post).not.toHaveBeenCalled();
+    context.submitReviewedCommit();
     expect(context.post).toHaveBeenCalledWith('commit', { message: 'message', paths: ['visible.txt'] });
   });
 

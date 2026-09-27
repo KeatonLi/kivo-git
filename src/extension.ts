@@ -23,6 +23,7 @@ export function activate(context: vscode.ExtensionContext): void {
     vscode.commands.registerCommand('ideaGit.openResourceDiff', (uri?: vscode.Uri) => provider.openResourceDiff(uri)),
     vscode.commands.registerCommand('ideaGit.showFileHistory', (uri?: vscode.Uri) => provider.showFileHistory(uri)),
     vscode.commands.registerCommand('ideaGit.showLineBlame', () => provider.showLineBlame()),
+    vscode.commands.registerCommand('ideaGit.revealBlameCommit', (hash: string, resource?: string) => provider.showCommitInHistory(hash, typeof resource === 'string' ? vscode.Uri.parse(resource) : undefined)),
     vscode.commands.registerCommand('ideaGit.toggleInlineBlame', () => inlineBlame.toggle()),
     vscode.commands.registerCommand('ideaGit.moveResourceToChangelist', (uri?: vscode.Uri) => provider.moveResourceToChangelist(uri)),
     vscode.commands.registerCommand('ideaGit.showResourceInChanges', (uri?: vscode.Uri) => provider.showResourceInChanges(uri))

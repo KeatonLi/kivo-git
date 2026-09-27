@@ -3,7 +3,7 @@ import { promisify } from 'node:util';
 import path from 'node:path';
 import { ChangelistStore } from './ChangelistStore';
 import { parsePorcelainV2 } from './statusParser';
-import type { BranchSummary, CommitDetails, CommitFile, CommitSummary, GitRef, LineBlame, PullStrategy, RepositorySnapshot } from './types';
+import type { BranchSummary, CommitDetails, CommitFile, CommitSummary, GitRef, LineBlame, PullStrategy, PushPreview, RepositorySnapshot } from './types';
 
 const execFileAsync = promisify(execFile);
 
@@ -401,7 +401,46 @@ export class GitClient {
       : {});
   }
   async pull(strategy: PullStrategy = 'ff-only'): Promise<void> { await this.run(pullArgs(strategy)); }
-  async push(): Promise<void> { await this.run(['push']); }
+  async pushPreview(): Promise<PushPreview> {
+    const branch = (await this.run(['symbolic-ref', '--quiet', '--short', 'HEAD']).catch(() => '')).trim();
+    if (!branch) throw new Error('Create or switch to a branch before pushing from detached HEAD.');
+    const [remote, mergeRef, upstream, head] = await Promise.all([
+      this.run(['config', '--get', `branch.${branch}.remote`]).catch(() => ''),
+      this.run(['config', '--get', `branch.${branch}.merge`]).catch(() => ''),
+      this.run(['rev-parse', '--abbrev-ref', '--symbolic-full-name', '@{upstream}']).catch(() => ''),
+      this.run(['rev-parse', 'HEAD'])
+    ]);
+    const remoteName = remote.trim();
+    const targetBranch = mergeRef.trim().replace(/^refs\/heads\//, '');
+    if (!remoteName || remoteName === '.' || !mergeRef.trim().startsWith('refs/heads/') || !targetBranch || !upstream.trim()) {
+      throw new Error('This branch has no pushable upstream. Configure its remote tracking branch before pushing.');
+    }
+    const [upstreamOid, counts, commitsOutput, filesOutput] = await Promise.all([
+      this.run(['rev-parse', '@{upstream}']),
+      this.run(['rev-list', '--left-right', '--count', 'HEAD...@{upstream}']),
+      this.run(['log', '@{upstream}..HEAD', '-n', '12', '--format=%h%x1f%s']),
+      this.run(['diff', '--name-only', '-z', '@{upstream}..HEAD'])
+    ]);
+    const [ahead = 0, behind = 0] = counts.trim().split(/\s+/).map(Number);
+    return {
+      branch, upstream: upstream.trim(), upstreamOid: upstreamOid.trim(), remote: remoteName, targetBranch, head: head.trim(),
+      ahead, behind,
+      commits: commitsOutput.split('\n').filter(Boolean).map((entry) => {
+        const [hash = '', subject = ''] = entry.split('\x1f');
+        return { hash, subject };
+      }),
+      fileCount: filesOutput.split('\0').filter(Boolean).length
+    };
+  }
+
+  async push(expected?: PushPreview): Promise<void> {
+    const current = await this.pushPreview();
+    if (expected && (current.head !== expected.head || current.upstreamOid !== expected.upstreamOid || current.remote !== expected.remote || current.targetBranch !== expected.targetBranch || current.ahead !== expected.ahead || current.behind !== expected.behind)) {
+      throw new Error('The branch or outgoing commits changed during push review. Open the preview again.');
+    }
+    if (!current.ahead) throw new Error('There are no outgoing commits to push.');
+    await this.run(['push', '--porcelain', current.remote, `HEAD:refs/heads/${current.targetBranch}`]);
+  }
 
   async showHeadFile(filePath: string): Promise<string> {
     try {

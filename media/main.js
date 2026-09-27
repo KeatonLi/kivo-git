@@ -46,11 +46,13 @@ const ui = {
   selected: new Set(initialRepositoryState.selected || []),
   collapsed: new Set(initialRepositoryState.collapsed || []),
   branchOpen: false,
+  toolbarMenuOpen: false,
   branchQuery: '',
   changeQuery: initialRepositoryState.changeQuery || '',
   changeFilter: initialRepositoryState.changeFilter || initialRepositoryState.changeKindFilter || 'all',
   changeSearchOpen: false,
   logBranchQuery: initialRepositoryState.logBranchQuery || '',
+  historyFocusMode: initialRepositoryState.historyFocusMode === true,
   logBranchWidth: Number.isFinite(restoredBranchWidth)
     ? clamp(restoredBranchWidth, LOG_BRANCH_MIN_WIDTH, LOG_BRANCH_MAX_WIDTH)
     : LOG_BRANCH_DEFAULT_WIDTH,
@@ -88,6 +90,8 @@ const ui = {
   focusedPath: initialRepositoryState.focusedPath,
   selectionAnchor: undefined,
   commitMessage: initialRepositoryState.commitMessage || '',
+  commitReviewOpen: false,
+  commitReviewAndPush: false,
   graphQuery: initialRepositoryState.graphQuery || '',
   pendingRevealHash: undefined,
   graphPathFilter: initialRepositoryState.graphPathFilter || '',
@@ -160,13 +164,15 @@ const escapeHtml = (value = '') => String(value)
 
 const iconFor = (kind) => ({ modified: 'M', added: 'A', deleted: 'D', renamed: 'R', untracked: '?', conflict: '!' })[kind] || 'M';
 const describeFileState = (status) => ({ '.': 'unchanged', M: 'modified', A: 'added', D: 'deleted', R: 'renamed', C: 'copied', U: 'conflicted', '?': 'untracked' })[status] || 'changed';
-function fileStateLabel(change) {
-  if (change.kind === 'untracked') return '??';
-  return `${change.indexStatus === '.' ? '·' : change.indexStatus}${change.workingTreeStatus === '.' ? '·' : change.workingTreeStatus}`;
-}
 function fileStateTitle(change) {
   if (change.kind === 'untracked') return 'Untracked; not staged in the index';
   return `Index: ${describeFileState(change.indexStatus)} · Working tree: ${describeFileState(change.workingTreeStatus)}`;
+}
+function fileStateSummary(change) {
+  if (change.kind === 'conflict') return 'Conflict';
+  if (change.kind === 'untracked') return 'Untracked';
+  if (change.indexStatus !== '.' && change.workingTreeStatus !== '.') return 'Staged + working';
+  return change.indexStatus !== '.' ? 'Staged' : 'Working';
 }
 const icon = (name, classes = '') => `<span class="codicon codicon-${name} ${classes}" aria-hidden="true"></span>`;
 const kivoIcon = (name, classes = '') => `<svg class="kivo-icon ${classes}" aria-hidden="true" focusable="false"><use href="#kivo-${name}"></use></svg>`;
@@ -198,6 +204,7 @@ function serializeRepositoryState() {
     graphAuthorFilter: ui.graphAuthorFilter,
     graphAgeFilter: ui.graphAgeFilter,
     logBranchQuery: ui.logBranchQuery,
+    historyFocusMode: ui.historyFocusMode,
     logBranchWidth: ui.logBranchWidth,
     logDetailWidth: ui.logDetailWidth,
     logDetailHeight: ui.logDetailHeight,
@@ -241,12 +248,15 @@ function restoreRepositoryState(root, state = {}) {
   ui.changeSearchOpen = state.changeSearchOpen === true;
   ui.selectionAnchor = undefined;
   ui.commitMessage = state.commitMessage || '';
+  ui.commitReviewOpen = false;
+  ui.commitReviewAndPush = false;
   ui.graphQuery = state.graphQuery || '';
   ui.graphPathFilter = state.graphPathFilter || '';
   ui.graphBranchFilter = state.graphBranchFilter || '';
   ui.graphAuthorFilter = state.graphAuthorFilter || '';
   ui.graphAgeFilter = state.graphAgeFilter || 'all';
   ui.logBranchQuery = state.logBranchQuery || '';
+  ui.historyFocusMode = state.historyFocusMode === true;
   ui.logBranchWidth = Number.isFinite(branchWidth) ? clamp(branchWidth, LOG_BRANCH_MIN_WIDTH, LOG_BRANCH_MAX_WIDTH) : LOG_BRANCH_DEFAULT_WIDTH;
   ui.logDetailWidth = Number.isFinite(detailWidth) ? clamp(detailWidth, LOG_DETAIL_MIN_WIDTH, LOG_DETAIL_MAX_WIDTH) : LOG_DETAIL_DEFAULT_WIDTH;
   ui.logDetailHeight = Number.isFinite(detailHeight) ? Math.max(LOG_DETAIL_MIN_HEIGHT, detailHeight) : LOG_DETAIL_DEFAULT_HEIGHT;
@@ -274,6 +284,7 @@ function restoreRepositoryState(root, state = {}) {
   ui.commitDetailsLoading = false;
   ui.commitDetailsError = undefined;
   ui.branchOpen = false;
+  ui.toolbarMenuOpen = false;
   ui.branchQuery = '';
   ui.branchContextMenu = undefined;
   ui.commitContextMenu = undefined;
@@ -682,11 +693,12 @@ function render() {
     return;
   }
   patchApp(`
-    <section class="content ${surface}-content" aria-busy="${ui.busy}">
+    <section class="content ${surface}-content" aria-busy="${ui.busy}" ${ui.commitReviewOpen ? 'inert' : ''}>
       ${surface === 'changes' ? renderChanges(s) : renderGraph(s)}
     </section>
     ${surface === 'changes' && ui.branchOpen ? renderBranchPopup(s) : ''}
     ${surface === 'changes' ? renderBranchContextMenu() : ''}
+    ${surface === 'changes' && ui.commitReviewOpen ? renderCommitReview(s) : ''}
   `);
   const textarea = app.querySelector('#commit-message');
   if (textarea && document.activeElement !== textarea && textarea.value !== ui.commitMessage) textarea.value = ui.commitMessage;
@@ -724,11 +736,8 @@ function renderCommitToolbar(s) {
   const pushTitle = s.ahead ? `Push ${s.ahead} outgoing commit${s.ahead === 1 ? '' : 's'}` : 'No commits to push';
   return `<header class="commit-toolbar" aria-label="Commit tool window actions" aria-busy="${syncing}">
     <button class="idea-toolbar-button" data-action="refresh" aria-label="Refresh changes" title="Refresh changes" ${ui.busy ? 'disabled' : ''}>${icon('refresh')}</button>
-    <span class="idea-toolbar-divider" aria-hidden="true"></span>
-    <button class="idea-toolbar-button" data-action="show-log" aria-label="Open Kivo Git History in the bottom panel" title="Open Kivo Git History">${kivoIcon('graph', 'kivo-toolbar-mark')}</button>
     ${s.repositoryCount > 1 ? `<button class="idea-toolbar-button" data-action="choose-repository" aria-label="Choose repository, current ${escapeHtml(s.repositoryName)}" title="Repository: ${escapeHtml(s.repositoryName)}" ${ui.busy ? 'disabled' : ''}>${icon('repo')}</button>` : ''}
     <button class="idea-toolbar-button" data-action="branches" aria-label="${escapeHtml(branchActionLabel)}" title="Branches: ${escapeHtml(branchLabel)}" aria-haspopup="dialog" aria-expanded="${ui.branchOpen}">${icon('git-branch')}</button>
-    <button class="idea-toolbar-button ${syncing ? 'working' : ''}" data-action="fetch" aria-label="${syncing ? 'Checking remote' : 'Fetch remote updates'}" title="${syncing ? 'Checking remote' : 'Fetch remote updates'}" ${ui.busy || syncing ? 'disabled' : ''}>${icon(fetchIcon, syncing || ui.operationKind === 'fetch' ? 'codicon-modifier-spin' : '')}</button>
     <div class="sync-action-wrap compact-sync-action">
     <button class="idea-toolbar-button ${s.behind ? 'has-count incoming-count' : ''}" data-action="pull-menu" aria-label="${escapeHtml(pullTitle)}" title="${escapeHtml(pullTitle)}" aria-haspopup="menu" aria-expanded="${ui.pullMenuOpen}" ${!hasUpstream || !s.behind || ui.busy || syncing ? 'disabled' : ''}>${icon('arrow-down')}${s.behind ? `<span class="tool-count">${s.behind}</span>` : ''}</button>
       ${renderPullMenu()}
@@ -736,9 +745,17 @@ function renderCommitToolbar(s) {
     <button class="idea-toolbar-button ${s.ahead ? 'has-count outgoing-count' : ''}" data-action="push" aria-label="${escapeHtml(pushTitle)}" title="${escapeHtml(pushTitle)}" ${!hasUpstream || !s.ahead || ui.busy || syncing ? 'disabled' : ''}>${icon('arrow-up')}${s.ahead ? `<span class="tool-count">${s.ahead}</span>` : ''}</button>
     <span class="toolbar-spacer"></span>
     <button class="idea-toolbar-button" data-action="search-changes" aria-label="${ui.changeSearchOpen ? 'Close changed-file search' : 'Search changed files'}" title="${ui.changeSearchOpen ? 'Close changed-file search' : 'Search changed files'}" aria-expanded="${ui.changeSearchOpen}">${icon(ui.changeSearchOpen ? 'close' : 'search')}</button>
-    <button class="idea-toolbar-button" data-action="new-list" aria-label="Create changelist" title="Create changelist" ${ui.busy ? 'disabled' : ''}>${icon('add')}</button>
-    <button class="idea-toolbar-button" data-action="collapse-all" aria-label="Collapse all changelists" title="Collapse all">${icon('chevron-up')}</button>
-    <button class="idea-toolbar-button" data-action="expand-all" aria-label="Expand all changelists" title="Expand all">${icon('chevron-down')}</button>
+    <div class="commit-toolbar-more">
+      <button class="idea-toolbar-button" data-action="toolbar-more" aria-label="More Commit actions" title="More Commit actions" aria-haspopup="menu" aria-expanded="${ui.toolbarMenuOpen}">${icon('ellipsis')}</button>
+      <div class="commit-toolbar-menu ${ui.toolbarMenuOpen ? 'open' : ''}" role="menu" aria-label="More Commit actions" ${ui.toolbarMenuOpen ? '' : 'inert'}>
+        <button role="menuitem" data-toolbar-action="show-log">${kivoIcon('graph', 'kivo-toolbar-mark')}<span>Open History</span></button>
+        <button role="menuitem" data-toolbar-action="fetch" ${ui.busy || syncing ? 'disabled' : ''}>${icon(fetchIcon, syncing || ui.operationKind === 'fetch' ? 'codicon-modifier-spin' : '')}<span>${syncing ? 'Checking remote…' : 'Fetch remote updates'}</span></button>
+        <span class="commit-toolbar-menu-divider" role="separator"></span>
+        <button role="menuitem" data-toolbar-action="new-list" ${ui.busy ? 'disabled' : ''}>${icon('add')}<span>Create changelist</span></button>
+        <button role="menuitem" data-toolbar-action="collapse-all">${icon('chevron-up')}<span>Collapse all changelists</span></button>
+        <button role="menuitem" data-toolbar-action="expand-all">${icon('chevron-down')}<span>Expand all changelists</span></button>
+      </div>
+    </div>
   </header>`;
 }
 
@@ -802,6 +819,23 @@ function renderChanges(s) {
     ${renderFileContextMenu()}`;
 }
 
+function renderCommitReview(s) {
+  const { selectedChanges } = changeSelection();
+  const partial = selectedChanges.filter((change) => change.indexStatus !== '.' && change.workingTreeStatus !== '.').length;
+  const destination = ui.commitReviewAndPush ? `<p class="commit-review-push">After committing, you will review the push to <strong>${escapeHtml(s.upstream || 'the configured upstream')}</strong>.</p>` : '';
+  return `<div class="commit-review-overlay"><div class="commit-review-scrim" data-action="close-commit-review"></div>
+    <section class="commit-review-dialog" role="dialog" aria-modal="true" aria-labelledby="commit-review-title" aria-describedby="commit-review-description">
+      <header><div><small>BEFORE COMMIT</small><h2 id="commit-review-title">Review ${selectedChanges.length} selected ${selectedChanges.length === 1 ? 'file' : 'files'}</h2></div><button class="idea-toolbar-button" data-action="close-commit-review" aria-label="Close commit review" title="Close review">${icon('close')}</button></header>
+      <p id="commit-review-description">Kivo Git commits the current working-tree contents of these files, including both staged and unstaged edits. Other staged files stay untouched.</p>
+      ${partial ? `<p class="commit-review-warning" role="note">${icon('warning')} ${partial} ${partial === 1 ? 'file has' : 'files have'} both staged and working-tree edits. Both will be included.</p>` : ''}
+      <div class="commit-review-files" aria-label="Files in this commit">${selectedChanges.map((change) => `<div class="commit-review-file"><span class="commit-review-path" title="${escapeHtml(change.path)}">${escapeHtml(change.path)}</span><span class="commit-review-state">${escapeHtml(fileStateSummary(change))}</span><button data-review-diff="${escapeHtml(change.path)}" data-original-path="${escapeHtml(change.originalPath || '')}" data-kind="${escapeHtml(change.kind)}" aria-label="Review diff for ${escapeHtml(change.path)}">Review diff</button></div>`).join('')}</div>
+      <div class="commit-review-message"><span>Message</span><strong>${escapeHtml(ui.commitMessage.trim())}</strong></div>
+      ${destination}
+      <footer><button class="commit-review-cancel" data-action="close-commit-review">Back</button><button class="primary-button" data-action="confirm-commit-review">${ui.commitReviewAndPush ? 'Commit, then review push' : 'Commit these files'}</button></footer>
+    </section>
+  </div>`;
+}
+
 function renderRecentCommits(s) {
   const commits = (s.commits || []).slice(0, 2);
   return `<section class="commit-recent" aria-label="Recent commits">
@@ -858,7 +892,7 @@ function renderFile(change, listId) {
     <button class="file-main" data-diff="${escapeHtml(change.path)}" data-original-path="${escapeHtml(change.originalPath || '')}" data-kind="${escapeHtml(change.kind)}" tabindex="${ui.focusedPath === change.path ? '0' : '-1'}" aria-keyshortcuts="M" aria-label="Preview diff for ${escapeHtml(change.path)}; press M to move to another changelist" title="${escapeHtml(change.path)} · Press M to move to another changelist">
       ${renderFileTypeIcon(change)}<span class="file-name">${escapeHtml(filename)}</span>${parent ? `<span class="file-parent">${escapeHtml(parent)}</span>` : ''}
     </button>
-    <span class="status ${change.kind}" title="${escapeHtml(fileStateTitle(change))}" aria-label="${escapeHtml(fileStateTitle(change))}">${escapeHtml(fileStateLabel(change))}</span>
+    <span class="status file-state ${change.kind}" title="${escapeHtml(fileStateTitle(change))}" aria-label="${escapeHtml(fileStateTitle(change))}">${escapeHtml(fileStateSummary(change))}</span>
     <button class="file-more" data-file-menu aria-label="More actions for ${escapeHtml(change.path)}" title="More actions" aria-haspopup="menu" aria-expanded="${ui.fileContextMenu?.path === change.path}">${icon('more')}</button>
   </div>`;
 }
@@ -1123,6 +1157,7 @@ function renderLogActionRail(s) {
     <button class="idea-toolbar-button" data-action="fetch" aria-label="Fetch remote updates" title="Fetch remote updates" ${ui.busy || ui.syncPhase === 'fetching' ? 'disabled' : ''}>${icon(ui.syncPhase === 'fetching' ? 'loading' : 'cloud-download', ui.syncPhase === 'fetching' ? 'codicon-modifier-spin' : '')}</button>
     <span class="idea-toolbar-divider" aria-hidden="true"></span>
     <button class="idea-toolbar-button" data-action="clear-graph-filters" aria-label="Clear History filters" title="Clear History filters">${icon('clear-all')}</button>
+    <button class="idea-toolbar-button" data-action="toggle-history-focus" aria-label="${ui.historyFocusMode ? 'Show History side panels' : 'Focus on commit history'}" title="${ui.historyFocusMode ? 'Show branches and commit details' : 'Focus on commit history'}" aria-pressed="${ui.historyFocusMode}">${icon(ui.historyFocusMode ? 'screen-full' : 'screen-normal')}</button>
   </aside>`;
 }
 
@@ -1161,7 +1196,7 @@ function renderGraph(s) {
   const detailMinimum = detailUsesRows ? LOG_DETAIL_MIN_HEIGHT : LOG_DETAIL_MIN_WIDTH;
   const detailMaximum = detailUsesRows ? Math.max(LOG_DETAIL_DEFAULT_HEIGHT * 2, detailHeight) : LOG_DETAIL_MAX_WIDTH;
   return `<div class="graph-view log-view" role="tabpanel" aria-label="Kivo Git History">
-    <div class="log-workspace" style="--log-branch-width:${branchWidth}px;--log-detail-width:${detailWidth}px;--log-detail-height:${detailHeight}px">
+    <div class="log-workspace ${ui.historyFocusMode ? 'history-focus' : ''}" style="--log-branch-width:${branchWidth}px;--log-detail-width:${detailWidth}px;--log-detail-height:${detailHeight}px">
       ${renderLogActionRail(s)}
       ${renderLogBranchPane(s)}
       <div class="log-splitter" data-log-splitter role="separator" aria-label="Resize History branch tree" aria-controls="kivo-log-branches kivo-log-history" aria-orientation="vertical" aria-valuemin="${LOG_BRANCH_MIN_WIDTH}" aria-valuemax="${LOG_BRANCH_MAX_WIDTH}" aria-valuenow="${branchWidth}" tabindex="0" title="Drag to resize the branch tree. Double-click to reset."></div>
@@ -1795,6 +1830,41 @@ function bind() {
   });
   bindContextMenuDelegation();
   once('[data-action]', 'click', (event) => handleAction(event.currentTarget.dataset.action));
+  once('[data-toolbar-action]', 'click', (event) => {
+    event.stopPropagation();
+    const action = event.currentTarget.dataset.toolbarAction;
+    ui.toolbarMenuOpen = false;
+    render();
+    handleAction(action);
+  });
+  once('[data-review-diff]', 'click', (event) => {
+    const button = event.currentTarget;
+    post('openDiff', { path: button.dataset.reviewDiff, originalPath: button.dataset.originalPath || undefined, kind: button.dataset.kind, preview: false });
+  });
+  once('.commit-review-dialog', 'keydown', (event) => {
+    if (event.key !== 'Tab') return;
+    const items = [...event.currentTarget.querySelectorAll('button:not(:disabled)')];
+    if (!items.length) return;
+    const first = items[0];
+    const last = items[items.length - 1];
+    if (event.shiftKey && document.activeElement === first) { event.preventDefault(); last.focus(); }
+    else if (!event.shiftKey && document.activeElement === last) { event.preventDefault(); first.focus(); }
+  });
+  once('.commit-toolbar-menu', 'keydown', (event) => {
+    if (event.key === 'Escape') {
+      event.preventDefault();
+      ui.toolbarMenuOpen = false;
+      render();
+      app.querySelector('[data-action="toolbar-more"]')?.focus();
+      return;
+    }
+    if (!['ArrowDown', 'ArrowUp', 'Home', 'End'].includes(event.key)) return;
+    event.preventDefault();
+    const items = [...event.currentTarget.querySelectorAll('button:not(:disabled)')];
+    const current = items.indexOf(document.activeElement);
+    const next = event.key === 'Home' ? 0 : event.key === 'End' ? items.length - 1 : (current + (event.key === 'ArrowDown' ? 1 : -1) + items.length) % items.length;
+    items[Math.max(0, next)]?.focus();
+  });
   once('[data-file-menu]', 'click', (event) => openFileContextMenu(event, event.currentTarget.closest('[data-file-row]')));
   once('[data-graph-list]', 'scroll', onGraphScroll);
   bindGraphViewport();
@@ -2242,6 +2312,31 @@ function bind() {
 }
 
 function handleAction(action) {
+  if (action === 'close-commit-review') {
+    const andPush = ui.commitReviewAndPush;
+    ui.commitReviewOpen = false;
+    render();
+    requestAnimationFrame(() => app.querySelector(`[data-action="${andPush ? 'commit-and-push' : 'commit'}"]`)?.focus());
+    return;
+  }
+  if (action === 'confirm-commit-review') {
+    submitReviewedCommit();
+    return;
+  }
+  if (action === 'toolbar-more') {
+    ui.toolbarMenuOpen = !ui.toolbarMenuOpen;
+    ui.pullMenuOpen = false;
+    render();
+    if (ui.toolbarMenuOpen) requestAnimationFrame(() => app.querySelector('[data-toolbar-action]:not(:disabled)')?.focus());
+    return;
+  }
+  if (action === 'toggle-history-focus') {
+    ui.historyFocusMode = !ui.historyFocusMode;
+    persist();
+    render();
+    requestAnimationFrame(() => app.querySelector('[data-action="toggle-history-focus"]')?.focus());
+    return;
+  }
   if (action === 'choose-repository' && !ui.busy) post('chooseRepository');
   if (action === 'clear-selection' && !ui.busy) {
     ui.selected.clear();
@@ -2373,7 +2468,25 @@ function commit(andPush = false) {
     toast(blocker, 'error');
     return;
   }
-  post(andPush ? 'commitAndPush' : 'commit', { message: ui.commitMessage, paths: changeSelection().selectedChanges.map((change) => change.path) });
+  if (andPush && !ui.snapshot?.upstream) {
+    toast('Set an upstream before using Commit and Push. You can still commit locally.', 'error');
+    return;
+  }
+  ui.commitReviewAndPush = andPush;
+  ui.commitReviewOpen = true;
+  render();
+  requestAnimationFrame(() => app.querySelector('[data-action="confirm-commit-review"]')?.focus());
+}
+
+function submitReviewedCommit() {
+  if (!ui.commitReviewOpen) return;
+  const blocker = commitBlocker();
+  if (blocker) { toast(blocker, 'error'); return; }
+  const andPush = ui.commitReviewAndPush;
+  const paths = changeSelection().selectedChanges.map((change) => change.path);
+  ui.commitReviewOpen = false;
+  render();
+  post(andPush ? 'commitAndPush' : 'commit', { message: ui.commitMessage, paths });
 }
 
 function toast(message, phase = 'success') {
@@ -2407,6 +2520,8 @@ window.addEventListener('message', (event) => {
     return;
   }
   if (message.type === 'revealCommit' && surface === 'history') {
+    // A Blame jump needs the detail pane even if the user left History in focus mode.
+    ui.historyFocusMode = false;
     ui.graphBranchFilter = '';
     ui.graphPathFilter = '';
     ui.graphQuery = message.hash;
@@ -2475,6 +2590,10 @@ window.addEventListener('message', (event) => {
   if (message.type === 'snapshot') {
     const fingerprint = JSON.stringify(message.payload);
     if (fingerprint === lastSnapshot && !ui.historyRefLoading && !ui.graphLoadingMore) return;
+    if (ui.commitReviewOpen && lastSnapshot && fingerprint !== lastSnapshot) {
+      ui.commitReviewOpen = false;
+      toast('Repository changed during review. Check the selected files again.', 'error');
+    }
     const previousRoot = ui.snapshot?.root;
     const nextRoot = message.payload.root;
     if (previousRoot && previousRoot !== nextRoot) saveRepositoryState(previousRoot);
@@ -2622,6 +2741,18 @@ document.addEventListener('keydown', (event) => {
     app.querySelector('[data-action="pull-menu"]')?.focus();
     return;
   }
+  if (ui.commitReviewOpen) {
+    event.preventDefault();
+    handleAction('close-commit-review');
+    return;
+  }
+  if (ui.toolbarMenuOpen) {
+    event.preventDefault();
+    ui.toolbarMenuOpen = false;
+    render();
+    app.querySelector('[data-action="toolbar-more"]')?.focus();
+    return;
+  }
   if (ui.listMenuId) {
     event.preventDefault();
     const id = ui.listMenuId;
@@ -2675,6 +2806,11 @@ document.addEventListener('pointerdown', (event) => {
 
 document.addEventListener('click', (event) => {
   if (closeContextMenusOutside(event.target)) return;
+  if (ui.toolbarMenuOpen && !event.target.closest('.commit-toolbar-more')) {
+    ui.toolbarMenuOpen = false;
+    render();
+    return;
+  }
   if (ui.pullMenuOpen && !event.target.closest('.sync-action-wrap')) {
     ui.pullMenuOpen = false;
     render();

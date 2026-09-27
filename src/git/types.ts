@@ -77,6 +77,19 @@ export interface LineBlame {
   uncommitted: boolean;
 }
 
+export interface PushPreview {
+  branch: string;
+  upstream: string;
+  remote: string;
+  targetBranch: string;
+  head: string;
+  upstreamOid: string;
+  ahead: number;
+  behind: number;
+  commits: Array<{ hash: string; subject: string }>;
+  fileCount: number;
+}
+
 export interface ChangeList {
   id: string;
   name: string;

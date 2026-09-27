@@ -401,9 +401,34 @@ describe('GitClient integration', () => {
     await client.initialize();
     await client.commit('feat: commit and push', ['alpha.txt']);
     const localHead = await git(root, ['rev-parse', 'HEAD']);
-    await client.push();
+    const preview = await client.pushPreview();
+    expect(preview).toMatchObject({ branch: 'main', upstream: 'origin/main', upstreamOid: await git(remote, ['rev-parse', 'main']), remote: 'origin', targetBranch: 'main', head: localHead, ahead: 1, behind: 0, fileCount: 1 });
+    expect(preview.commits[0]?.subject).toBe('feat: commit and push');
+    await client.push(preview);
 
     expect(await git(remote, ['rev-parse', 'main'])).toBe(localHead);
+  });
+
+  it('does not push when the reviewed outgoing commits changed', async () => {
+    const root = await createRepository();
+    const remote = await fs.mkdtemp(path.join(os.tmpdir(), 'ideagit-reviewed-push-'));
+    temporaryRepositories.push(remote);
+    await git(remote, ['init', '--bare']);
+    await git(root, ['remote', 'add', 'origin', remote]);
+    await git(root, ['push', '-u', 'origin', 'main']);
+    const originalRemoteHead = await git(remote, ['rev-parse', 'main']);
+    await fs.appendFile(path.join(root, 'alpha.txt'), 'first\n');
+    await git(root, ['commit', '-am', 'first']);
+    const preview = await new GitClient(root).pushPreview();
+    await fs.appendFile(path.join(root, 'alpha.txt'), 'second\n');
+    await git(root, ['commit', '-am', 'second']);
+    await expect(new GitClient(root).push(preview)).rejects.toThrow('changed during push review');
+    expect(await git(remote, ['rev-parse', 'main'])).toBe(originalRemoteHead);
+  });
+
+  it('explains when a branch has no pushable upstream', async () => {
+    const root = await createRepository();
+    await expect(new GitClient(root).pushPreview()).rejects.toThrow('no pushable upstream');
   });
 
   it('tracks an active changelist and supports rename and delete lifecycle', async () => {

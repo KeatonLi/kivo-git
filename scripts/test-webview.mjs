@@ -81,7 +81,9 @@ try {
   await page.locator('.commit-repo-meta [data-action="branches"]').click();
   assert.equal(await page.locator('.branch-popup').count(), 1, 'The branch shortcut should open the existing branch picker.');
   await page.keyboard.press('Escape');
-  await page.locator('.commit-toolbar [data-action="fetch"]').click();
+  await page.locator('.commit-toolbar [data-action="toolbar-more"]').click();
+  assert.equal(await page.locator('.commit-toolbar-menu.open').count(), 1, 'Secondary Commit actions should open as a readable menu.');
+  await page.locator('[data-toolbar-action="fetch"]').click();
   assert.ok(await page.evaluate(() => window.__vscodeMessages.some((message) => message.type === 'fetch')), 'Fetch should reach the VS Code message bridge.');
   await page.evaluate(() => window.dispatchEvent(new MessageEvent('message', { data: { type: 'syncStatus', phase: 'error', error: 'Remote unavailable' } })));
   assert.match(await page.locator('.commit-repo-meta .has-error').textContent(), /Fetch failed/, 'The compact Commit status should expose remote errors.');
@@ -94,6 +96,10 @@ try {
   assert.ok(await page.evaluate(() => window.__vscodeMessages.some((message) => message.type === 'chooseRepository')), 'Repository switching should reach VS Code.');
 
   await openSurface(page, 'surface=changes');
+  assert.match(await page.locator('.file-row .file-state').first().textContent(), /Staged|Working|Untracked|Conflict/, 'File rows should explain Git state without symbolic XY codes.');
+  await page.locator('[data-action="toolbar-more"]').click();
+  await page.keyboard.press('Escape');
+  assert.equal(await page.locator('.commit-toolbar-menu.open').count(), 0, 'Escape should dismiss the Commit action menu.');
 
   const firstFile = page.locator('[data-select]').first();
   await firstFile.check({ force: true });
@@ -101,6 +107,15 @@ try {
   const commitButton = page.locator('[data-action="commit"]');
   assert.equal(await commitButton.isEnabled(), true, 'Selecting a file and entering a message should enable Commit.');
   await commitButton.click();
+  assert.equal(await page.getByRole('dialog', { name: /Review 1 selected file/ }).count(), 1, 'Commit should review the exact selection first.');
+  assert.equal(await page.locator('.commit-review-file').count(), 1);
+  assert.equal(await page.evaluate(() => window.__vscodeMessages.some((message) => message.type === 'commit')), false, 'Opening review must not commit yet.');
+  await page.locator('[data-review-diff]').click();
+  assert.ok(await page.evaluate(() => window.__vscodeMessages.some((message) => message.type === 'openDiff' && message.path.endsWith('EksClusterProvider.java') && message.preview === false)), 'Reviewing a file should open its full diff.');
+  await page.keyboard.press('Escape');
+  assert.equal(await page.getByRole('dialog').count(), 0, 'Escape should return to the Commit form without submitting.');
+  await commitButton.click();
+  await page.locator('[data-action="confirm-commit-review"]').click();
   const commitMessage = await page.evaluate(() => window.__vscodeMessages.find((message) => message.type === 'commit'));
   assert.equal(commitMessage?.message, 'test: verify browser commit flow');
   assert.equal(commitMessage?.paths?.length, 1, 'Commit should include only the selected file.');
@@ -117,12 +132,19 @@ try {
   assert.equal(await page.locator('[data-select]:checked').count(), 2);
   assert.match(await page.locator('.commit-selection-note').textContent(), /all working-tree changes/);
   await page.locator('[data-action="commit"]').click();
+  assert.equal(await page.locator('.commit-review-file').count(), 2, 'Review should show the post-filter selection.');
+  await page.locator('[data-action="confirm-commit-review"]').click();
   const filteredCommit = await page.evaluate(() => window.__vscodeMessages.find((message) => message.type === 'commit'));
   assert.equal(filteredCommit.paths.length, 2);
   assert.ok(!filteredCommit.paths.some((file) => file.endsWith('AwsWebClientInitializer.java')));
 
   await page.setViewportSize({ width: 1450, height: 650 });
   await openSurface(page, 'surface=history');
+  await page.locator('[data-action="toggle-history-focus"]').click();
+  assert.equal(await page.locator('.log-workspace.history-focus').count(), 1, 'History focus mode should enlarge the commit graph.');
+  assert.equal(await page.locator('.log-branch-pane:visible').count(), 0);
+  await page.locator('[data-action="toggle-history-focus"]').click();
+  assert.equal(await page.locator('.log-workspace.history-focus').count(), 0, 'History side panels should be recoverable.');
   const loadedCommitCount = await page.locator('.graph-row').count();
   const firstSubject = page.locator('.graph-row strong').first();
   assert.equal(await firstSubject.getAttribute('title'), await firstSubject.textContent(), 'Truncated commit subjects should expose their full text on hover.');
@@ -140,9 +162,11 @@ try {
   assert.ok(await page.evaluate(() => window.__vscodeMessages.some((message) => message.type === 'setHistoryRef' && message.branch === 'origin/master')), 'Ref filtering should request the selected history from VS Code.');
 
   await openSurface(page, 'surface=history');
+  await page.locator('[data-action="toggle-history-focus"]').click();
   await page.evaluate(() => window.dispatchEvent(new MessageEvent('message', {
     data: { type: 'revealCommit', hash: '2d4411f0a1b2c3d4e5f678901234567890abcd12' }
   })));
+  assert.equal(await page.locator('.log-workspace.history-focus').count(), 0, 'Blame navigation should reveal the commit detail pane.');
   assert.equal(await page.locator('.graph-row').count(), 1, 'Blame navigation should narrow History to the exact commit.');
   assert.equal(await page.locator('.graph-row.selected').count(), 1, 'Blame navigation should select the matching commit.');
   assert.ok(await page.evaluate(() => window.__vscodeMessages.some((message) => message.type === 'commitDetails' && message.hash === '2d4411f0a1b2c3d4e5f678901234567890abcd12')), 'Blame navigation should load commit details.');
@@ -188,7 +212,7 @@ try {
   assert.ok(await page.evaluate(() => window.__vscodeMessages.some((message) => message.type === 'loadMoreCommits')), 'Load more history should reach VS Code.');
 
   assert.deepEqual(pageErrors, [], 'The webview should not throw browser runtime errors.');
-  console.log('Webview E2E passed: commit, fetch, History search and filters, ref loading, branch-folder collapse, menu dismissal, commit details/diffs, and pagination.');
+  console.log('Webview E2E passed: reviewed commit, toolbar menu, file states, History focus and Blame reveal, search and filters, branch menus, commit details/diffs, and pagination.');
 } finally {
   await browser?.close();
   server.kill('SIGTERM');

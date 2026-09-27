@@ -195,6 +195,25 @@ export class IdeaGitViewProvider implements vscode.WebviewViewProvider, vscode.T
     }
   }
 
+  async showCommitInHistory(hash: string, uri?: vscode.Uri): Promise<void> {
+    try {
+      if (!/^[0-9a-f]{40}$/i.test(hash)) throw new Error('The Blame commit hash is invalid.');
+      if (uri) this.workspaceRelativePath(uri);
+      this.historyRef = undefined;
+      this.commitLimit = HISTORY_PAGE_SIZE;
+      this.lastSnapshot = undefined;
+      this.coordinator.reset();
+      this.pendingHistoryBranchFilter = undefined;
+      this.pendingHistoryPathFilter = undefined;
+      this.pendingHistoryCommitHash = hash;
+      await this.showLog();
+      await this.refresh(true);
+      await this.deliverPendingNavigation('history');
+    } catch (error) {
+      void vscode.window.showErrorMessage(`${IdeaGitViewProvider.productName}: ${this.errorText(error)}`);
+    }
+  }
+
   async showResourceInChanges(uri?: vscode.Uri): Promise<void> {
     try {
       const filePath = this.workspaceRelativePath(uri);
@@ -575,7 +594,8 @@ export class IdeaGitViewProvider implements vscode.WebviewViewProvider, vscode.T
           await this.operation('pull', `Pulling with ${message.strategy === 'ff-only' ? 'fast-forward only' : message.strategy}…`, () => client.pull(message.strategy), 'Repository updated');
           return;
         case 'push':
-          await this.operation('push', 'Pushing…', () => client.push(), 'Push complete');
+          await this.pushWithPreview(client);
+          return;
       }
     } catch (error) {
       const detail = this.errorText(error);
@@ -693,7 +713,50 @@ export class IdeaGitViewProvider implements vscode.WebviewViewProvider, vscode.T
   private async commitAndPush(client: GitClient, message: string, paths: string[]): Promise<void> {
     const committed = await this.operation('commit', 'Creating commit…', () => client.commit(message, paths), 'Commit created', true);
     if (!committed) return;
-    await this.operation('push', 'Pushing new commit…', () => client.push(), 'Commit pushed');
+    try {
+      if (!await this.pushWithPreview(client, true)) {
+        void vscode.window.showInformationMessage('The commit is saved locally. You can push it later from Kivo Git.');
+      }
+    } catch (error) {
+      void vscode.window.showWarningMessage(`The commit is saved locally, but push could not start: ${this.errorText(error)}`);
+    }
+  }
+
+  private async pushWithPreview(client: GitClient, afterCommit = false): Promise<boolean> {
+    const preview = await client.pushPreview();
+    if (!preview.ahead) {
+      void vscode.window.showInformationMessage('There are no outgoing commits to push.');
+      return false;
+    }
+    const commitLines = preview.commits.map((commit) => `• ${commit.hash} ${commit.subject}`);
+    const more = preview.ahead > preview.commits.length ? `\n…plus ${preview.ahead - preview.commits.length} older commits` : '';
+    const detail = [
+      `${preview.branch} → ${preview.remote}/${preview.targetBranch}`,
+      `${preview.ahead} outgoing commit${preview.ahead === 1 ? '' : 's'} · ${preview.fileCount} changed file${preview.fileCount === 1 ? '' : 's'}`,
+      preview.behind ? `${preview.behind} incoming commit${preview.behind === 1 ? '' : 's'} in the local tracking ref. Fetch and reconcile before pushing.` : '',
+      '', ...commitLines, more,
+      '', 'Counts are based on the local tracking ref; the server will verify the push.'
+    ].filter((line, index) => line || index > 0).join('\n');
+    if (preview.behind) {
+      const action = await vscode.window.showWarningMessage('Your branch is behind its upstream.', { modal: true, detail }, 'Fetch and Review');
+      if (action === 'Fetch and Review') await this.fetchAndReview(client);
+      return false;
+    }
+    const confirmation = `Push ${preview.ahead} commit${preview.ahead === 1 ? '' : 's'}`;
+    const choice = await vscode.window.showWarningMessage(afterCommit ? 'Commit created. Review its push destination.' : 'Review push destination and outgoing commits.', { modal: true, detail }, confirmation);
+    if (choice !== confirmation) return false;
+    const pushed = await this.operation('push', 'Pushing…', () => client.push(preview), 'Push complete');
+    if (!pushed && /rejected|non-fast-forward|fetch first|failed to push/i.test(this.syncError || '')) {
+      const action = await vscode.window.showWarningMessage('Push was rejected. Your local commits are safe.', { modal: true, detail: 'Fetch the latest remote commits and review them before choosing a pull strategy. Kivo Git will not force-push or retry automatically.' }, 'Fetch and Review');
+      if (action === 'Fetch and Review') await this.fetchAndReview(client);
+    }
+    return pushed;
+  }
+
+  private async fetchAndReview(client: GitClient): Promise<void> {
+    if (await this.operation('fetch', 'Fetching remote updates…', () => client.fetch(), 'Remote updates fetched')) {
+      await this.showLog();
+    }
   }
 
   private async moveFileToChangelist(client: GitClient, filePath: string): Promise<void> {
@@ -766,16 +829,7 @@ export class IdeaGitViewProvider implements vscode.WebviewViewProvider, vscode.T
       const actions = blame.uncommitted ? ['Show File History'] : ['Show Commit in History', 'Copy Commit Hash', 'Show File History'];
       const action = await vscode.window.showInformationMessage(message, ...actions);
       if (action === 'Show Commit in History' && !blame.uncommitted) {
-        this.historyRef = undefined;
-        this.commitLimit = HISTORY_PAGE_SIZE;
-        this.lastSnapshot = undefined;
-        this.coordinator.reset();
-        this.pendingHistoryBranchFilter = undefined;
-        this.pendingHistoryPathFilter = undefined;
-        this.pendingHistoryCommitHash = blame.hash;
-        await this.showLog();
-        await this.refresh(true);
-        await this.deliverPendingNavigation('history');
+        await this.showCommitInHistory(blame.hash, editor.document.uri);
       } else if (action === 'Copy Commit Hash' && !blame.uncommitted) {
         await vscode.env.clipboard.writeText(blame.hash);
         void vscode.window.showInformationMessage('Commit hash copied.');

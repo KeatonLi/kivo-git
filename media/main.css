@@ -1271,6 +1271,68 @@ body.commit-zone-resizing, body.commit-zone-resizing * { cursor: row-resize !imp
 .parity-mode .commit-repo-identity { display: flex; align-items: center; gap: 6px; margin-top: 7px; color: var(--muted); font-size: 10px; }
 .parity-mode .commit-repo-identity > .codicon { font-size: 12px; }
 .parity-mode .commit-repo-identity > span { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+
+/* Keep everyday Commit actions visible; give less frequent actions readable names. */
+.parity-mode .commit-toolbar { position: relative; z-index: 12; }
+.parity-mode .commit-toolbar-more { position: relative; flex: 0 0 auto; }
+.parity-mode .commit-toolbar-menu {
+  position: absolute;
+  z-index: 30;
+  top: 29px;
+  right: 0;
+  width: min(240px, calc(100vw - 18px));
+  display: none;
+  padding: 4px;
+  border: 1px solid var(--vscode-menu-border, var(--vscode-panel-border));
+  border-radius: 5px;
+  background: var(--vscode-menu-background, var(--vscode-editorWidget-background, var(--surface-base)));
+  box-shadow: var(--shadow-popover);
+}
+.parity-mode .commit-toolbar-menu.open { display: grid; }
+.parity-mode .commit-toolbar-menu button {
+  min-height: 28px;
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  padding: 3px 8px;
+  border-radius: 3px;
+  background: transparent;
+  color: var(--vscode-menu-foreground, var(--vscode-foreground));
+  text-align: left;
+  font: 11px var(--vscode-font-family);
+  cursor: pointer;
+}
+.parity-mode .commit-toolbar-menu button:hover:not(:disabled),
+.parity-mode .commit-toolbar-menu button:focus-visible {
+  background: var(--vscode-menu-selectionBackground, var(--vscode-toolbar-hoverBackground));
+  color: var(--vscode-menu-selectionForeground, var(--vscode-foreground));
+}
+.parity-mode .commit-toolbar-menu button:disabled { opacity: .45; cursor: default; }
+.parity-mode .commit-toolbar-menu .codicon,
+.parity-mode .commit-toolbar-menu .kivo-icon { width: 15px; height: 15px; flex: 0 0 15px; }
+.parity-mode .commit-toolbar-menu-divider { height: 1px; margin: 3px 5px; background: var(--vscode-menu-separatorBackground, var(--vscode-panel-border)); }
+
+.parity-mode .file-row .file-state {
+  width: auto;
+  max-width: 95px;
+  flex: 0 0 auto;
+  padding: 2px 5px;
+  border-radius: 3px;
+  background: color-mix(in srgb, currentColor 10%, transparent);
+  font-size: 9px;
+  font-weight: 600;
+  letter-spacing: 0;
+  line-height: 1.25;
+  text-align: right;
+  white-space: nowrap;
+}
+.parity-mode .log-action-rail [aria-pressed="true"] { color: var(--kivo-accent); background: var(--vscode-toolbar-activeBackground, var(--vscode-toolbar-hoverBackground)); }
+.parity-mode .log-workspace.history-focus { grid-template-columns: 32px minmax(0, 1fr); grid-template-rows: minmax(0, 1fr); }
+.parity-mode .log-workspace.history-focus .log-branch-pane,
+.parity-mode .log-workspace.history-focus .log-splitter,
+.parity-mode .log-workspace.history-focus .log-detail-splitter,
+.parity-mode .log-workspace.history-focus .commit-detail { display: none; }
+.parity-mode .log-workspace.history-focus .log-history-pane { grid-column: 2; grid-row: 1; }
 .parity-mode .commit-repo-identity.missing { color: var(--vscode-editorWarning-foreground, var(--warning)); }
 .parity-mode .commit-repo-identity button { flex: 0 0 auto; margin-left: auto; padding: 0; border: 0; background: transparent; color: var(--vscode-textLink-foreground, var(--kivo-accent)); font: inherit; cursor: pointer; }
 .parity-mode .commit-repo-identity button:hover:not(:disabled),
@@ -1294,3 +1356,45 @@ body.commit-zone-resizing, body.commit-zone-resizing * { cursor: row-resize !imp
 .parity-mode .commit-checks span { display: inline-flex; align-items: center; gap: 3px; }
 .parity-mode .commit-checks .codicon { color: var(--vscode-gitDecoration-addedResourceForeground, var(--success)); }
 .parity-mode .commit-checks .pending .codicon { color: var(--warning); }
+
+.commit-review-overlay { position: fixed; inset: 0; z-index: 80; display: grid; place-items: center; padding: 12px; }
+.commit-review-scrim { position: absolute; inset: 0; background: color-mix(in srgb, #000 58%, transparent); }
+.commit-review-dialog {
+  position: relative;
+  width: min(520px, 100%);
+  max-height: min(620px, calc(100vh - 24px));
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  overflow: auto;
+  padding: 15px;
+  border: 1px solid var(--vscode-widget-border, var(--vscode-panel-border, var(--border-subtle)));
+  border-radius: 8px;
+  background: var(--vscode-editorWidget-background, var(--surface-base));
+  box-shadow: var(--shadow-popover);
+}
+.commit-review-dialog header { display: flex; align-items: flex-start; justify-content: space-between; gap: 8px; }
+.commit-review-dialog header small { color: var(--muted); font-size: 9px; font-weight: 700; letter-spacing: .09em; }
+.commit-review-dialog h2 { margin: 2px 0 0; font-size: 15px; line-height: 1.35; }
+.commit-review-dialog p { margin: 0; color: var(--vscode-descriptionForeground, var(--muted)); font-size: 11px; line-height: 1.45; }
+.commit-review-dialog .commit-review-warning { display: flex; gap: 7px; padding: 8px; border-radius: 4px; background: color-mix(in srgb, var(--warning) 10%, transparent); color: var(--vscode-editorWarning-foreground, var(--warning)); }
+.commit-review-files { min-height: 0; max-height: 220px; overflow: auto; border: 1px solid var(--vscode-panel-border, var(--border-subtle)); border-radius: 5px; }
+.commit-review-file { display: flex; align-items: center; gap: 8px; min-height: 35px; padding: 5px 8px; border-bottom: 1px solid var(--vscode-panel-border, var(--border-subtle)); font-size: 11px; }
+.commit-review-file:last-child { border-bottom: 0; }
+.commit-review-path { min-width: 0; flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.commit-review-state { flex: 0 0 auto; color: var(--vscode-descriptionForeground, var(--muted)); font-size: 10px; }
+.commit-review-file button { flex: 0 0 auto; padding: 4px 5px; background: transparent; color: var(--vscode-textLink-foreground, var(--kivo-accent)); font: inherit; cursor: pointer; }
+.commit-review-file button:hover { text-decoration: underline; }
+.commit-review-message { display: grid; gap: 3px; padding: 8px; border-radius: 4px; background: var(--vscode-input-background, var(--surface-base)); font-size: 11px; }
+.commit-review-message > span { color: var(--muted); font-size: 10px; }
+.commit-review-message strong { overflow-wrap: anywhere; white-space: pre-wrap; font-weight: 500; }
+.commit-review-dialog .commit-review-push { color: var(--vscode-foreground); }
+.commit-review-dialog footer { display: flex; justify-content: flex-end; gap: 8px; padding-top: 5px; }
+.commit-review-dialog footer button { min-height: 29px; padding: 5px 11px; border-radius: 4px; font: 11px var(--vscode-font-family); cursor: pointer; }
+.commit-review-dialog .commit-review-cancel { background: var(--vscode-button-secondaryBackground, var(--vscode-toolbar-hoverBackground)); color: var(--vscode-button-secondaryForeground, var(--vscode-foreground)); }
+@media (max-width: 400px) {
+  .commit-review-file { flex-wrap: wrap; }
+  .commit-review-path { flex-basis: 100%; }
+  .commit-review-dialog footer { flex-direction: column-reverse; }
+  .commit-review-dialog footer button { width: 100%; }
+}

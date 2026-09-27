@@ -33,7 +33,12 @@ vi.mock('vscode', () => ({
     onDidChangeConfiguration: (listener: (...args: any[]) => void) => harness.listen('configuration', listener)
   },
   ThemeColor: class { constructor(readonly id: string) {} },
-  MarkdownString: class { appendText() {} }
+  MarkdownString: class {
+    value = '';
+    isTrusted?: { enabledCommands: string[] };
+    appendText(value: string) { this.value += value; }
+    appendMarkdown(value: string) { this.value += value; }
+  }
 }));
 
 vi.mock('../src/git/GitClient', () => ({
@@ -47,7 +52,7 @@ const result = { hash: 'a'.repeat(40), author: 'Tester', authorTime: 1_700_000_0
 
 function editor() {
   const document = {
-    uri: { scheme: 'file', fsPath: '/workspace/file.txt' }, isDirty: false, version: 1,
+    uri: { scheme: 'file', fsPath: '/workspace/file.txt', toString: () => 'file:///workspace/file.txt' }, isDirty: false, version: 1,
     lineAt: (line: number) => ({ range: { line } })
   };
   return {
@@ -84,6 +89,8 @@ describe('current-line blame controller', () => {
     await vi.advanceTimersByTimeAsync(1);
     expect(harness.blameLine).toHaveBeenCalledExactlyOnceWith('file.txt', 3, expect.objectContaining({ timeout: 5000, signal: expect.any(AbortSignal) }));
     expect(harness.editor.setDecorations.mock.lastCall?.[1]?.[0]?.renderOptions.after.contentText).toContain('Tester');
+    expect(harness.editor.setDecorations.mock.lastCall?.[1]?.[0]?.hoverMessage.value).toContain('Open commit in History');
+    expect(harness.editor.setDecorations.mock.lastCall?.[1]?.[0]?.hoverMessage.isTrusted.enabledCommands).toEqual(['ideaGit.revealBlameCommit']);
 
     harness.editor.selection.active.line = 0;
     harness.emit('selection', { textEditor: harness.editor });

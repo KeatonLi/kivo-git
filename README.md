@@ -27,6 +27,8 @@ Kivo Git keeps a familiar two-surface workflow in VS Code: **Commit** stays in t
 - Native VS Code diff preview on single-click and a pinned editor on double-click
 - Arrow-key file navigation, Space toggle, and Shift range selection
 - Changed-file icons resolved from the active VS Code file icon theme, including compound extensions
+- Readable Staged, Working, Untracked, and Conflict labels, with less-used toolbar actions in a named menu
+- A commit review step that lists the selected files and offers a diff shortcut for each before confirmation
 
 Commit operates on whole selected files, including their working-tree edits; the Staged filter does not turn it into an index-only commit. Unrelated staged files are preserved. Selection counts appear beside the commit form. Filtering never silently drops an existing selection: hidden selections must be reviewed by clearing the filter, or removed with **Remove hidden**, before committing. List checkboxes select matching files, while keyboard select-all and range selection use the expanded, visible rows.
 
@@ -40,10 +42,11 @@ Changelist data is stored in the worktree's Git directory under `ideagit/changel
 - Incremental history loading with branch, author, time-window, and text filters
 - A draggable branch-tree / history divider with keyboard resizing and saved per-view width
 - Keyboard-first navigation with roving focus, instant selection, and lazy detail loading
+- A remembered focus mode that expands the commit graph; Blame navigation restores the detail pane automatically
 
 ### Inline blame
 
-Kivo Git shows a quiet author, relative time, and commit summary after the current line in saved files. It waits until the cursor settles before asking Git, reuses recent results, and hides the annotation while the file has unsaved edits. Hover for the full commit details, or use **Kivo Git: Show Line Blame** from the editor context menu for its actions.
+Kivo Git shows a quiet author, relative time, and commit summary after the current line in saved files. It waits until the cursor settles before asking Git, reuses recent results, and hides the annotation while the file has unsaved edits. Hover for the full commit details and a direct **Open commit in History** link, or use **Kivo Git: Show Line Blame** from the editor context menu for its actions.
 
 Inline blame is on by default. Run **Kivo Git: Toggle Inline Blame** from the Command Palette, or change `ideaGit.inlineBlame.enabled` in Settings, to turn it off or back on.
 
@@ -52,6 +55,7 @@ Inline blame is on by default. Run **Kivo Git: Toggle Inline Blame** from the Co
 - Ahead/behind state with fetch, pull, and push actions
 - Quiet background auto-fetch with explicit incoming and outgoing commit counts
 - Explicit pull strategies: fast-forward only, Rebase, and Merge
+- A push review showing destination, outgoing commits, and changed-file count; rejection offers Fetch and Review without force-pushing
 - Clear loading, retry, disabled, and error feedback for remote sync and history
 - Theme-aware motion with reduced-motion accessibility
 

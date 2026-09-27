@@ -161,6 +161,11 @@ export class InlineBlameController implements vscode.Disposable {
     hover.appendText(blame.uncommitted
       ? 'Uncommitted changes on this line.'
       : `${blame.author} · ${blame.authorTime ? new Date(blame.authorTime * 1000).toLocaleString() : 'time unknown'}\n${blame.summary}\n${blame.hash}`);
+    if (!blame.uncommitted) {
+      const argumentsJson = encodeURIComponent(JSON.stringify([blame.hash, editor.document.uri.toString()]));
+      hover.isTrusted = { enabledCommands: ['ideaGit.revealBlameCommit'] };
+      hover.appendMarkdown(`\n\n[Open commit in History](command:ideaGit.revealBlameCommit?${argumentsJson})`);
+    }
     editor.setDecorations(this.decoration, [{
       range: line.range,
       hoverMessage: hover,
