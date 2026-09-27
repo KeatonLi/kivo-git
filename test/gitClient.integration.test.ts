@@ -132,6 +132,14 @@ describe('GitClient integration', () => {
     expect(working.content).toBe('working line');
   });
 
+  it('can cancel a background blame lookup when the cursor moves away', async () => {
+    const root = await createRepository();
+    const controller = new AbortController();
+    controller.abort();
+    await expect(new GitClient(root).blameLine('alpha.txt', 1, { signal: controller.signal }))
+      .rejects.toMatchObject({ name: 'AbortError' });
+  });
+
   it('opens an older branch even when its tip is outside the all-branches history window', async () => {
     const root = await createRepository();
     const initial = await git(root, ['rev-parse', 'HEAD']);

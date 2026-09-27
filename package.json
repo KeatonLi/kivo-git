@@ -26,9 +26,11 @@
     "source-control"
   ],
   "activationEvents": [
+    "onStartupFinished",
     "onView:ideaGit.changes",
     "onView:ideaGit.history",
-    "onCommand:ideaGit.showLineBlame"
+    "onCommand:ideaGit.showLineBlame",
+    "onCommand:ideaGit.toggleInlineBlame"
   ],
   "main": "./dist/extension.js",
   "files": [
@@ -119,6 +121,11 @@
         "icon": "$(git-commit)"
       },
       {
+        "command": "ideaGit.toggleInlineBlame",
+        "title": "Kivo Git: Toggle Inline Blame",
+        "icon": "$(eye)"
+      },
+      {
         "command": "ideaGit.moveResourceToChangelist",
         "title": "Move to Changelist…",
         "icon": "$(list-selection)"
@@ -200,6 +207,11 @@
           "default": 300000,
           "minimum": 60000,
           "description": "Minimum interval in milliseconds between automatic background fetches."
+        },
+        "ideaGit.inlineBlame.enabled": {
+          "type": "boolean",
+          "default": true,
+          "description": "Show a subtle Git blame annotation after the current line when the file is saved. Disable to use only the manual Show Line Blame command."
         }
       }
     }

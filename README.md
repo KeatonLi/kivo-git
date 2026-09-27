@@ -30,7 +30,7 @@ Kivo Git keeps a familiar two-surface workflow in VS Code: **Commit** stays in t
 
 Commit operates on whole selected files, including their working-tree edits; the Staged filter does not turn it into an index-only commit. Unrelated staged files are preserved. Selection counts appear beside the commit form. Filtering never silently drops an existing selection: hidden selections must be reviewed by clearing the filter, or removed with **Remove hidden**, before committing. List checkboxes select matching files, while keyboard select-all and range selection use the expanded, visible rows.
 
-Changelist data is stored in the worktree's Git directory under `ideagit/changelists.json`. Writes are atomic and serialized across windows, and tracked renames retain their list assignment. Invalid data is reported without overwriting it. If a crashed process leaves `changelists.json.lock`, close all Kivo Git windows and verify no operation is still running before removing that lock file; keep the JSON file.
+Changelist data is stored in the worktree's Git directory under `ideagit/changelists.json`. Writes are atomic and serialized across windows, and tracked renames retain their list assignment. Invalid data is reported without overwriting it. Locks left by a terminated local Kivo Git process are recovered automatically. If an older or unreadable `changelists.json.lock` persists, close all Kivo Git windows and verify no operation is still running before removing that lock file; keep the JSON file.
 
 ### History workspace
 
@@ -40,6 +40,12 @@ Changelist data is stored in the worktree's Git directory under `ideagit/changel
 - Incremental history loading with branch, author, time-window, and text filters
 - A draggable branch-tree / history divider with keyboard resizing and saved per-view width
 - Keyboard-first navigation with roving focus, instant selection, and lazy detail loading
+
+### Inline blame
+
+Kivo Git shows a quiet author, relative time, and commit summary after the current line in saved files. It waits until the cursor settles before asking Git, reuses recent results, and hides the annotation while the file has unsaved edits. Hover for the full commit details, or use **Kivo Git: Show Line Blame** from the editor context menu for its actions.
+
+Inline blame is on by default. Run **Kivo Git: Toggle Inline Blame** from the Command Palette, or change `ideaGit.inlineBlame.enabled` in Settings, to turn it off or back on.
 
 ### Sync and safety
 

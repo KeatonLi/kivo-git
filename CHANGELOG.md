@@ -2,6 +2,7 @@
 
 ## Unreleased
 
+- Added optional current-line inline blame with delayed, bounded Git lookups, short-lived caching, unsaved-edit safety, hover details, and a Command Palette toggle.
 - Preserved ID-keyed controls when opening file search so the file tree cannot inherit splitter drag handlers during DOM reuse.
 - Made checkbox decorations ignore pointer events so mouse selection reaches the actual input reliably.
 - Gave file review and the commit form 65% of the initial sidebar height while preserving user-resized layouts, and removed obsolete branch-flight animation bookkeeping.

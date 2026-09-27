@@ -89,6 +89,8 @@ export class IdeaGitViewProvider implements vscode.WebviewViewProvider, vscode.T
   );
   private readonly emitter = new vscode.EventEmitter<vscode.Uri>();
   readonly onDidChange = this.emitter.event;
+  private readonly repositoryEmitter = new vscode.EventEmitter<void>();
+  readonly onDidChangeRepository = this.repositoryEmitter.event;
 
   constructor(private readonly context: vscode.ExtensionContext) {
     this.context.subscriptions.push(
@@ -828,6 +830,7 @@ export class IdeaGitViewProvider implements vscode.WebviewViewProvider, vscode.T
       this.coordinator.beginWrite();
       writeStarted = true;
       await vscode.window.withProgress({ location: vscode.ProgressLocation.SourceControl, title: `${IdeaGitViewProvider.productName}: ${label}` }, action);
+      if (kind === 'commit' || kind === 'checkout' || kind === 'pull' || kind === 'branch') this.repositoryEmitter.fire();
       if (kind === 'fetch') await this.setSyncState('idle', Date.now());
       else if (kind === 'pull' || kind === 'push') await this.setSyncState('idle');
       await this.postToReadyViews({ type: 'operation', id, kind, phase: 'success', message: success, clearsCommit });
@@ -1044,5 +1047,6 @@ export class IdeaGitViewProvider implements vscode.WebviewViewProvider, vscode.T
     this.refreshDueAt = undefined;
     this.watcher?.dispose();
     this.emitter.dispose();
+    this.repositoryEmitter.dispose();
   }
 }

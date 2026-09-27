@@ -26,7 +26,7 @@ export class GitClient {
   private async run(
     args: string[],
     maxBuffer = 8 * 1024 * 1024,
-    options: { timeout?: number; env?: NodeJS.ProcessEnv } = {}
+    options: { timeout?: number; env?: NodeJS.ProcessEnv; signal?: AbortSignal } = {}
   ): Promise<string> {
     try {
       const result = await execFileAsync('git', args, {
@@ -34,11 +34,13 @@ export class GitClient {
         encoding: 'utf8',
         maxBuffer,
         timeout: options.timeout,
+        signal: options.signal,
         env: { ...process.env, GIT_OPTIONAL_LOCKS: '0', ...options.env }
       });
       return result.stdout;
     } catch (error) {
       const detail = error as Error & { stderr?: string };
+      if (detail.name === 'AbortError') throw detail;
       throw new Error(detail.stderr?.trim() || detail.message);
     }
   }
@@ -433,9 +435,9 @@ export class GitClient {
     }).filter((entry) => /^[0-9a-f]{40}$/.test(entry.hash));
   }
 
-  async blameLine(filePath: string, line: number): Promise<LineBlame> {
+  async blameLine(filePath: string, line: number, options: { timeout?: number; signal?: AbortSignal } = {}): Promise<LineBlame> {
     if (!Number.isInteger(line) || line < 1) throw new Error('Choose a valid line in the editor.');
-    const output = await this.run(['blame', '--line-porcelain', '-L', `${line},${line}`, '--', filePath]);
+    const output = await this.run(['blame', '--line-porcelain', '-L', `${line},${line}`, '--', filePath], 8 * 1024 * 1024, options);
     const [header = '', ...metadata] = output.split('\n');
     const match = /^([0-9a-f]+)\s+\d+\s+\d+(?:\s+\d+)?$/.exec(header.trim());
     if (!match) throw new Error(`Git did not return blame information for ${filePath}:${line}.`);

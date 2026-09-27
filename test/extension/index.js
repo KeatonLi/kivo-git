@@ -14,6 +14,7 @@ exports.run = async function run() {
     'ideaGit.openResourceDiff',
     'ideaGit.showFileHistory',
     'ideaGit.showLineBlame',
+    'ideaGit.toggleInlineBlame',
     'ideaGit.moveResourceToChangelist',
     'ideaGit.showResourceInChanges',
     'ideaGit.changes.focus',
@@ -26,5 +27,10 @@ exports.run = async function run() {
   // malformed contribution ID or a provider that did not activate correctly.
   await vscode.commands.executeCommand('ideaGit.showChanges');
   await vscode.commands.executeCommand('ideaGit.showLog');
+  const before = vscode.workspace.getConfiguration('ideaGit').get('inlineBlame.enabled');
+  await vscode.commands.executeCommand('ideaGit.toggleInlineBlame');
+  assert.equal(vscode.workspace.getConfiguration('ideaGit').get('inlineBlame.enabled'), !before);
+  await vscode.commands.executeCommand('ideaGit.toggleInlineBlame');
+  assert.equal(vscode.workspace.getConfiguration('ideaGit').get('inlineBlame.enabled'), before);
   console.log('Kivo Git Extension Host smoke tests passed.');
 };
