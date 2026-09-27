@@ -24,7 +24,8 @@ const sharedMessages = new Set([
   'pull',
   'push',
   'checkout',
-  'createBranch'
+  'createBranch',
+  'chooseRepository'
 ]);
 
 const messagesBySurface: Record<KivoSurface, ReadonlySet<string>> = {

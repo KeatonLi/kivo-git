@@ -20,7 +20,7 @@ describe('webview surface composition', () => {
     expect(main).toContain('function renderCommitToolbar(s)');
     expect(main).toContain('class="commit-changes-heading"');
     expect(main).toContain('Commit and Push…');
-    expect(main).toContain('function renderLogActionRail()');
+    expect(main).toContain('function renderLogActionRail(s)');
     expect(main).toContain('class="log-branch-pane"');
     expect(main).toContain('class="branch-current-sync');
     expect(main).not.toContain('class="branch-pane-footer"');

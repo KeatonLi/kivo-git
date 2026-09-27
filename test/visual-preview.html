@@ -49,6 +49,7 @@
       document.body.dataset.surface = visualSurface;
       const fixture = {
         repositoryName: 'ack-k8s',
+        repositoryCount: new URLSearchParams(location.search).get('state') === 'multi' ? 2 : 1,
         root: '/workspace/ack-k8s',
         branch: 'feature/keaton/ACKk8s',
         upstream: 'origin/feature/keaton/ACKk8s',

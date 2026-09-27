@@ -87,6 +87,14 @@ try {
   assert.match(await page.locator('.commit-repo-meta .has-error').textContent(), /Fetch failed/, 'The compact Commit status should expose remote errors.');
   await page.evaluate(() => window.dispatchEvent(new MessageEvent('message', { data: { type: 'syncStatus', phase: 'idle' } })));
 
+  await openSurface(page, 'surface=changes&state=multi');
+  const switchRepository = page.getByRole('button', { name: /Choose repository, current ack-k8s/ }).first();
+  assert.equal(await switchRepository.count(), 1, 'Multiple workspace folders should expose a repository switcher.');
+  await switchRepository.click();
+  assert.ok(await page.evaluate(() => window.__vscodeMessages.some((message) => message.type === 'chooseRepository')), 'Repository switching should reach VS Code.');
+
+  await openSurface(page, 'surface=changes');
+
   const firstFile = page.locator('[data-select]').first();
   await firstFile.check({ force: true });
   await page.locator('#commit-message').fill('test: verify browser commit flow');
@@ -132,6 +140,18 @@ try {
   assert.ok(await page.evaluate(() => window.__vscodeMessages.some((message) => message.type === 'setHistoryRef' && message.branch === 'origin/master')), 'Ref filtering should request the selected history from VS Code.');
 
   await openSurface(page, 'surface=history');
+  await page.evaluate(() => window.dispatchEvent(new MessageEvent('message', {
+    data: { type: 'revealCommit', hash: '2d4411f0a1b2c3d4e5f678901234567890abcd12' }
+  })));
+  assert.equal(await page.locator('.graph-row').count(), 1, 'Blame navigation should narrow History to the exact commit.');
+  assert.equal(await page.locator('.graph-row.selected').count(), 1, 'Blame navigation should select the matching commit.');
+  assert.ok(await page.evaluate(() => window.__vscodeMessages.some((message) => message.type === 'commitDetails' && message.hash === '2d4411f0a1b2c3d4e5f678901234567890abcd12')), 'Blame navigation should load commit details.');
+
+  await openSurface(page, 'surface=history&state=multi');
+  await page.locator('.log-action-rail [data-action="choose-repository"]').click();
+  assert.ok(await page.evaluate(() => window.__vscodeMessages.some((message) => message.type === 'chooseRepository')), 'History should also allow repository switching.');
+
+  await openSurface(page, 'surface=history');
   assert.equal(await page.locator('.log-branch-row.current .branch-current-sync').count(), 1, 'Sync status should sit beside the current branch.');
   assert.equal(await page.locator('.log-head-group, .branch-pane-footer').count(), 0, 'History should not duplicate the current branch or reserve a status footer.');
   assert.match(await page.locator('.log-branch-row.current .branch-current-sync').getAttribute('title'), /2 incoming, 6 outgoing/);
@@ -158,6 +178,8 @@ try {
   await page.locator('.commit-detail-head strong').waitFor();
   assert.equal(await page.locator('.commit-detail-head strong').textContent(), 'fix: #0000 补充迁移模板中的 ssl_cert_file 配置', 'Selecting a commit should show matching detail data.');
   await page.locator('.commit-file').first().waitFor();
+  assert.equal(await page.locator('.commit-file-folder').count(), 1, 'Single-child directory chains should collapse into one folder row.');
+  assert.match(await page.locator('.commit-file-folder').getAttribute('title'), /src\/main\/java\/com\/anker\/mvp\/config/);
   assert.ok(await page.locator('.commit-file .file-type-icon').count() > 0, 'Changed files should reserve a file icon slot.');
   assert.match(await page.locator('.commit-file').first().getAttribute('data-commit-file'), /AwsWebClientInitializer\.java$/, 'The selected commit should show its own changed files.');
   await page.locator('.commit-file').first().click();

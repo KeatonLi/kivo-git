@@ -43,6 +43,15 @@ jobs:
         name: Verify Extension Development Host entry points
         run: xvfb-run -a npm run test:extension
       - if: steps.existing.outputs.found == 'false'
+        name: Install browser-test runtime
+        run: npm install --no-save --package-lock=false playwright@1.62.1
+      - if: steps.existing.outputs.found == 'false'
+        name: Install Chromium for Webview E2E
+        run: npx playwright install --with-deps chromium
+      - if: steps.existing.outputs.found == 'false'
+        name: Verify Commit and History interactions
+        run: npm run test:webview
+      - if: steps.existing.outputs.found == 'false'
         run: npm run package
       - name: Create checksum
         if: steps.existing.outputs.found == 'false'

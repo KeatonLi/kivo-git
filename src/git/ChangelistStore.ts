@@ -1,5 +1,6 @@
 import { promises as fs } from 'node:fs';
 import path from 'node:path';
+import os from 'node:os';
 import { randomUUID } from 'node:crypto';
 import { setTimeout as delay } from 'node:timers/promises';
 import type { ChangeList, GitChange } from './types';
@@ -11,6 +12,7 @@ interface StoreData {
 }
 
 const DEFAULT_LIST = { id: 'default', name: 'Default Changelist' };
+type LockOwner = { pid: number; host: string; token: string };
 
 export class ChangelistStore {
   private readonly file: string;
@@ -64,21 +66,56 @@ export class ChangelistStore {
     await fs.mkdir(path.dirname(this.file), { recursive: true });
     const lockPath = `${this.file}.lock`;
     const deadline = Date.now() + 3000;
-    let lock;
+    const owner: LockOwner = { pid: process.pid, host: os.hostname(), token: randomUUID() };
+    const ownerText = JSON.stringify(owner);
+    let lock: Awaited<ReturnType<typeof fs.open>> | undefined;
     while (!lock) {
       try {
         lock = await fs.open(lockPath, 'wx');
       } catch (error) {
         if ((error as NodeJS.ErrnoException).code !== 'EEXIST') throw error;
+        if (await this.recoverStaleLock(lockPath)) continue;
         if (Date.now() >= deadline) throw new Error(`Changelists are locked by another operation. Retry after it finishes. If all other Kivo Git windows are closed, check ${lockPath}.`);
         await delay(25);
       }
     }
+    let wroteOwner = false;
     try {
+      await lock.writeFile(ownerText, 'utf8');
+      wroteOwner = true;
       return await action();
     } finally {
       await lock.close();
+      const current = await fs.readFile(lockPath, 'utf8').catch((error: NodeJS.ErrnoException) => {
+        if (error.code !== 'ENOENT') throw error;
+        return '';
+      });
+      if (!wroteOwner || current === ownerText) await fs.unlink(lockPath).catch((error: NodeJS.ErrnoException) => {
+        if (error.code !== 'ENOENT') throw error;
+      });
+    }
+  }
+
+  private async recoverStaleLock(lockPath: string): Promise<boolean> {
+    try {
+      const stat = await fs.stat(lockPath);
+      if (Date.now() - stat.mtimeMs < 5000) return false;
+      const content = await fs.readFile(lockPath, 'utf8');
+      const owner = JSON.parse(content) as LockOwner;
+      if (owner.host !== os.hostname() || !Number.isInteger(owner.pid) || owner.pid < 1 || typeof owner.token !== 'string') return false;
+      try {
+        process.kill(owner.pid, 0);
+        return false;
+      } catch (error) {
+        if ((error as NodeJS.ErrnoException).code !== 'ESRCH') return false;
+      }
+      const unchanged = await fs.stat(lockPath);
+      if (unchanged.ino !== stat.ino || unchanged.mtimeMs !== stat.mtimeMs || await fs.readFile(lockPath, 'utf8') !== content) return false;
       await fs.unlink(lockPath);
+      return true;
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code === 'ENOENT' || error instanceof SyntaxError) return false;
+      throw error;
     }
   }
 

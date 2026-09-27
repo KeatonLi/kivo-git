@@ -89,6 +89,7 @@ const ui = {
   selectionAnchor: undefined,
   commitMessage: initialRepositoryState.commitMessage || '',
   graphQuery: initialRepositoryState.graphQuery || '',
+  pendingRevealHash: undefined,
   graphPathFilter: initialRepositoryState.graphPathFilter || '',
   graphBranchFilter: initialRepositoryState.graphBranchFilter || '',
   graphAuthorFilter: initialRepositoryState.graphAuthorFilter || '',
@@ -603,6 +604,15 @@ function keyFor(node) {
   return null;
 }
 
+function interactionIdentity(node) {
+  if (node.nodeType !== Node.ELEMENT_NODE) return '';
+  return [...node.attributes]
+    .filter((attribute) => attribute.name.startsWith('data-') || attribute.name === 'role')
+    .map((attribute) => `${attribute.name}=${attribute.value}`)
+    .sort()
+    .join('|');
+}
+
 function patchNode(current, desired, pool) {
   if (current.nodeType === Node.TEXT_NODE) {
     if (current.textContent !== desired.textContent) current.textContent = desired.textContent;
@@ -621,7 +631,8 @@ function patchNode(current, desired, pool) {
     const wanted = desiredChildren[index];
     const key = keyFor(wanted);
     let child = key ? pool.get(key) : current.childNodes[index];
-    if (child && (child.nodeType !== wanted.nodeType || child.nodeName !== wanted.nodeName || (keyFor(child) && keyFor(child) !== key))) child = null;
+    if (child && (child.nodeType !== wanted.nodeType || child.nodeName !== wanted.nodeName || (keyFor(child) && keyFor(child) !== key) ||
+        (child.__ideaGitListeners && interactionIdentity(child) !== interactionIdentity(wanted)))) child = null;
     if (!child) child = wanted.cloneNode(true);
     if (child !== current.childNodes[index]) current.insertBefore(child, current.childNodes[index] || null);
     if (child !== wanted) patchNode(child, wanted, pool);
@@ -715,6 +726,7 @@ function renderCommitToolbar(s) {
     <button class="idea-toolbar-button" data-action="refresh" aria-label="Refresh changes" title="Refresh changes" ${ui.busy ? 'disabled' : ''}>${icon('refresh')}</button>
     <span class="idea-toolbar-divider" aria-hidden="true"></span>
     <button class="idea-toolbar-button" data-action="show-log" aria-label="Open Kivo Git History in the bottom panel" title="Open Kivo Git History">${kivoIcon('graph', 'kivo-toolbar-mark')}</button>
+    ${s.repositoryCount > 1 ? `<button class="idea-toolbar-button" data-action="choose-repository" aria-label="Choose repository, current ${escapeHtml(s.repositoryName)}" title="Repository: ${escapeHtml(s.repositoryName)}" ${ui.busy ? 'disabled' : ''}>${icon('repo')}</button>` : ''}
     <button class="idea-toolbar-button" data-action="branches" aria-label="${escapeHtml(branchActionLabel)}" title="Branches: ${escapeHtml(branchLabel)}" aria-haspopup="dialog" aria-expanded="${ui.branchOpen}">${icon('git-branch')}</button>
     <button class="idea-toolbar-button ${syncing ? 'working' : ''}" data-action="fetch" aria-label="${syncing ? 'Checking remote' : 'Fetch remote updates'}" title="${syncing ? 'Checking remote' : 'Fetch remote updates'}" ${ui.busy || syncing ? 'disabled' : ''}>${icon(fetchIcon, syncing || ui.operationKind === 'fetch' ? 'codicon-modifier-spin' : '')}</button>
     <div class="sync-action-wrap compact-sync-action">
@@ -829,7 +841,7 @@ function renderCommitRepositoryContext(s) {
       ? 'Checking remote'
       : s.upstream ? `Tracking ${s.upstream}` : 'No upstream';
   return `<section class="commit-repository-context" aria-label="Repository status">
-    <div class="commit-insight-title">${icon('repo')}<span>Repository status</span></div>
+    <div class="commit-insight-title">${icon('repo')}<span>${escapeHtml(s.repositoryName || 'Repository')} status</span>${s.repositoryCount > 1 ? `<button class="commit-repository-switch" data-action="choose-repository" aria-label="Choose repository, current ${escapeHtml(s.repositoryName)}" ${ui.busy ? 'disabled' : ''}>Switch…</button>` : ''}</div>
     <div class="commit-repo-state">${icon(s.changes.length ? 'circle-filled' : 'check')}<span>${s.changes.length ? `Working tree has ${s.changes.length} ${s.changes.length === 1 ? 'change' : 'changes'}` : 'Working tree clean'}</span></div>
     <div class="commit-repo-meta"><button data-action="branches" aria-label="${escapeHtml(branchActionLabel)}" title="Choose branch" aria-haspopup="dialog" aria-expanded="${ui.branchOpen}" ${ui.busy ? 'disabled' : ''}>${icon('git-branch')} ${escapeHtml(currentBranch)}</button><span>·</span><span class="${ui.syncPhase === 'error' ? 'has-error' : ''}" title="${escapeHtml(ui.syncError || syncState)}">${escapeHtml(syncState)}</span></div>
     <div class="commit-repo-identity ${s.identity?.ready ? '' : 'missing'}">${icon('account')}<span title="${escapeHtml(s.identity?.ready ? `${s.identity.name} <${s.identity.email}>` : 'Git author or committer identity is incomplete')}">${s.identity?.ready ? `${escapeHtml(s.identity.name)} &lt;${escapeHtml(s.identity.email)}&gt;` : 'Git identity missing'}</span><button data-action="configure-git-identity" ${ui.busy ? 'disabled' : ''}>${s.identity?.ready ? 'Edit' : 'Set identity…'}</button></div>
@@ -960,7 +972,16 @@ function buildPathTree(items) {
 
 function renderCommitFileTree(node, depth = 0) {
   const folders = [...node.directories.entries()].sort(([left], [right]) => left.localeCompare(right));
-  return `${folders.map(([name, child]) => `<div class="commit-file-folder" style="--tree-indent:${depth * 13}px">${icon('chevron-down')} ${icon('folder')}<span>${escapeHtml(name)}</span></div>${renderCommitFileTree(child, depth + 1)}`).join('')}${node.leaves.sort((left, right) => left.leaf.localeCompare(right.leaf)).map((file) => {
+  return `${folders.map(([name, child]) => {
+    const segments = [name];
+    while (!child.leaves.length && child.directories.size === 1) {
+      const [segment, next] = child.directories.entries().next().value;
+      segments.push(segment);
+      child = next;
+    }
+    const label = segments.join('/');
+    return `<div class="commit-file-folder" style="--tree-indent:${depth * 13}px" title="${escapeHtml(label)}">${icon('chevron-down')} ${icon('folder')}<span>${escapeHtml(label)}</span></div>${renderCommitFileTree(child, depth + 1)}`;
+  }).join('')}${node.leaves.sort((left, right) => left.leaf.localeCompare(right.leaf)).map((file) => {
     const kind = file.status === 'D' ? 'deleted' : file.status === 'A' ? 'added' : 'modified';
     return `<button class="commit-file tree-file" style="--tree-indent:${depth * 13}px" data-commit-file="${escapeHtml(file.path)}" data-commit-kind="${escapeHtml(file.status)}" data-commit-original="${escapeHtml(file.originalPath || '')}" title="Open diff for ${escapeHtml(file.path)}">${renderFileTypeIcon(file, ui.commitDetails?.fileIcons)}<span class="commit-file-name">${escapeHtml(file.leaf)}</span><span class="status ${kind}">${escapeHtml(file.status)}</span></button>`;
   }).join('')}`;
@@ -1094,9 +1115,10 @@ function renderCommitContextMenu() {
   </div>`;
 }
 
-function renderLogActionRail() {
+function renderLogActionRail(s) {
   return `<aside class="log-action-rail" aria-label="History actions">
     <button class="idea-toolbar-button" data-action="show-changes" aria-label="Open Commit tool window" title="Open Commit tool window">${kivoIcon('changes', 'kivo-toolbar-mark')}</button>
+    ${s.repositoryCount > 1 ? `<button class="idea-toolbar-button" data-action="choose-repository" aria-label="Choose repository, current ${escapeHtml(s.repositoryName)}" title="Repository: ${escapeHtml(s.repositoryName)}" ${ui.busy ? 'disabled' : ''}>${icon('repo')}</button>` : ''}
     <button class="idea-toolbar-button" data-action="refresh" aria-label="Refresh History" title="Refresh History">${icon('refresh')}</button>
     <button class="idea-toolbar-button" data-action="fetch" aria-label="Fetch remote updates" title="Fetch remote updates" ${ui.busy || ui.syncPhase === 'fetching' ? 'disabled' : ''}>${icon(ui.syncPhase === 'fetching' ? 'loading' : 'cloud-download', ui.syncPhase === 'fetching' ? 'codicon-modifier-spin' : '')}</button>
     <span class="idea-toolbar-divider" aria-hidden="true"></span>
@@ -1140,7 +1162,7 @@ function renderGraph(s) {
   const detailMaximum = detailUsesRows ? Math.max(LOG_DETAIL_DEFAULT_HEIGHT * 2, detailHeight) : LOG_DETAIL_MAX_WIDTH;
   return `<div class="graph-view log-view" role="tabpanel" aria-label="Kivo Git History">
     <div class="log-workspace" style="--log-branch-width:${branchWidth}px;--log-detail-width:${detailWidth}px;--log-detail-height:${detailHeight}px">
-      ${renderLogActionRail()}
+      ${renderLogActionRail(s)}
       ${renderLogBranchPane(s)}
       <div class="log-splitter" data-log-splitter role="separator" aria-label="Resize History branch tree" aria-controls="kivo-log-branches kivo-log-history" aria-orientation="vertical" aria-valuemin="${LOG_BRANCH_MIN_WIDTH}" aria-valuemax="${LOG_BRANCH_MAX_WIDTH}" aria-valuenow="${branchWidth}" tabindex="0" title="Drag to resize the branch tree. Double-click to reset."></div>
       <section class="log-history-pane" id="kivo-log-history" aria-label="Commit history">
@@ -2220,6 +2242,7 @@ function bind() {
 }
 
 function handleAction(action) {
+  if (action === 'choose-repository' && !ui.busy) post('chooseRepository');
   if (action === 'clear-selection' && !ui.busy) {
     ui.selected.clear();
     persist();
@@ -2386,10 +2409,19 @@ window.addEventListener('message', (event) => {
   if (message.type === 'revealCommit' && surface === 'history') {
     ui.graphBranchFilter = '';
     ui.graphPathFilter = '';
-    ui.graphQuery = '';
+    ui.graphQuery = message.hash;
     ui.graphAuthorFilter = '';
     ui.graphAgeFilter = 'all';
-    selectCommit(message.hash, { focus: true });
+    ui.pendingRevealHash = message.hash;
+    persist();
+    render();
+    if (ui.snapshot?.commits.some((commit) => commit.hash === message.hash)) {
+      ui.pendingRevealHash = undefined;
+      selectCommit(message.hash, { focus: true });
+    } else if (!requestOlderHistoryForHash()) {
+      ui.pendingRevealHash = undefined;
+      toast('Commit is not in the loaded history.', 'error');
+    }
   }
   if (message.type === 'applyPathFilter') {
     ui.graphPathFilter = message.path || '';
@@ -2470,6 +2502,14 @@ window.addEventListener('message', (event) => {
     persist();
     render();
     restoreGraphScroll(ui.graphScrollTop);
+    if (ui.pendingRevealHash && message.payload.commits.some((commit) => commit.hash === ui.pendingRevealHash)) {
+      const hash = ui.pendingRevealHash;
+      ui.pendingRevealHash = undefined;
+      selectCommit(hash, { focus: true });
+    } else if (ui.pendingRevealHash && !message.payload.commitsHasMore) {
+      ui.pendingRevealHash = undefined;
+      toast('Commit is not in the available history.', 'error');
+    }
     requestOlderHistoryForHash();
   }
   if (message.type === 'empty') {

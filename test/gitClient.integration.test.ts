@@ -113,6 +113,25 @@ describe('GitClient integration', () => {
     expect(edited.author).toBe('Not Committed Yet');
   });
 
+  it('keeps committed attribution beside staged and unstaged lines', async () => {
+    const root = await createRepository();
+    const client = new GitClient(root);
+    await client.initialize();
+    await fs.writeFile(path.join(root, 'alpha.txt'), 'alpha\nstaged line\n');
+    await git(root, ['add', 'alpha.txt']);
+    await fs.writeFile(path.join(root, 'alpha.txt'), 'alpha\nstaged line\nworking line\n');
+
+    const committed = await client.blameLine('alpha.txt', 1);
+    const staged = await client.blameLine('alpha.txt', 2);
+    const working = await client.blameLine('alpha.txt', 3);
+    expect(committed.summary).toBe('initial');
+    expect(committed.uncommitted).toBe(false);
+    expect(staged.uncommitted).toBe(true);
+    expect(working.uncommitted).toBe(true);
+    expect(staged.content).toBe('staged line');
+    expect(working.content).toBe('working line');
+  });
+
   it('opens an older branch even when its tip is outside the all-branches history window', async () => {
     const root = await createRepository();
     const initial = await git(root, ['rev-parse', 'HEAD']);

@@ -53,4 +53,16 @@ describe('changelist data safety', () => {
     expect(JSON.parse(await fs.readFile(file, 'utf8')).assignments.__proto__).toEqual(expect.any(String));
     expect(await fs.readdir(path.dirname(file))).toEqual(['changelists.json']);
   });
+
+  it('recovers a lock left by a terminated local process', async () => {
+    const { store, file } = await setup();
+    await fs.mkdir(path.dirname(file));
+    const lockPath = `${file}.lock`;
+    await fs.writeFile(lockPath, JSON.stringify({ pid: 99999999, host: os.hostname(), token: 'terminated' }));
+    const old = new Date(Date.now() - 10000);
+    await fs.utimes(lockPath, old, old);
+    await store.create('Recovered');
+    expect((await store.group([])).some((list) => list.name === 'Recovered')).toBe(true);
+    await expect(fs.stat(lockPath)).rejects.toMatchObject({ code: 'ENOENT' });
+  });
 });
