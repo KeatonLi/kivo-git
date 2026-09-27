@@ -2,6 +2,9 @@ import { describe, expect, it } from 'vitest';
 import { parsePorcelainV2 } from '../src/git/statusParser';
 
 describe('parsePorcelainV2', () => {
+  it.each(['DD', 'AU', 'UD', 'UA', 'DU', 'AA', 'UU'])('recognizes the %s unmerged state', (xy) => {
+    expect(parsePorcelainV2(`u ${xy} N... 100644 100644 100644 100644 a b c conflict.txt\0`).changes[0]?.kind).toBe('conflict');
+  });
   it('parses branch metadata and ordinary changes', () => {
     const result = parsePorcelainV2([
       '# branch.oid abc',

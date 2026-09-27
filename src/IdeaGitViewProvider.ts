@@ -42,7 +42,7 @@ type WebviewMessage =
   | { type: 'deleteChangelist'; id: string; name: string }
   | { type: 'setActiveChangelist'; id: string }
   | { type: 'moveFiles'; paths: string[]; listId: string };
-type OperationKind = 'commit' | 'checkout' | 'branch' | 'tag' | 'changelist' | 'move' | 'fetch' | 'pull' | 'push';
+type OperationKind = 'commit' | 'checkout' | 'branch' | 'tag' | 'changelist' | 'move' | 'fetch' | 'pull' | 'push' | 'identity';
 type WebviewRepositorySnapshot = RepositorySnapshot & { fileIcons: Record<string, WebviewFileIcon> };
 const HISTORY_PAGE_SIZE = 80;
 
@@ -308,9 +308,14 @@ export class IdeaGitViewProvider implements vscode.WebviewViewProvider, vscode.T
     this.watcher?.dispose();
     this.watchedRoot = workspace.uri.fsPath;
     this.watcher = vscode.workspace.createFileSystemWatcher(new vscode.RelativePattern(workspace, '**/*'));
-    this.watcher.onDidChange(() => this.scheduleRefresh());
-    this.watcher.onDidCreate(() => this.scheduleRefresh());
-    this.watcher.onDidDelete(() => this.scheduleRefresh());
+    const onChange = (uri: vscode.Uri) => {
+      // Snapshot reads acquire a changelist lock. Watching that lock would make
+      // every snapshot trigger another snapshot indefinitely.
+      if (!this.client?.isChangelistStorageFile(uri.fsPath)) this.scheduleRefresh();
+    };
+    this.watcher.onDidChange(onChange);
+    this.watcher.onDidCreate(onChange);
+    this.watcher.onDidDelete(onChange);
   }
 
   private refreshDueAt?: number;
@@ -675,9 +680,7 @@ export class IdeaGitViewProvider implements vscode.WebviewViewProvider, vscode.T
       validateInput: (value) => /^[^\s@<>]+@[^\s@<>]+$/.test(value.trim()) ? undefined : 'Enter a Git author email.'
     });
     if (email === undefined) return;
-    await client.setLocalCommitIdentity(name, email);
-    await this.refresh(true);
-    await this.postToView('changes', { type: 'notice', phase: 'success', message: 'Repository Git identity configuration saved' });
+    await this.operation('identity', 'Saving Git identity…', () => client.setLocalCommitIdentity(name, email), 'Repository Git identity configuration saved');
   }
 
   async showLineBlame(): Promise<void> {
@@ -746,8 +749,8 @@ export class IdeaGitViewProvider implements vscode.WebviewViewProvider, vscode.T
     this.operationRunning = true;
     const id = ++this.operationId;
     let writeStarted = false;
-    await this.postToReadyViews({ type: 'operation', id, kind, phase: 'loading', message: label });
     try {
+      await this.postToReadyViews({ type: 'operation', id, kind, phase: 'loading', message: label });
       if (this.autoFetchPromise) await this.autoFetchPromise;
       this.coordinator.beginWrite();
       writeStarted = true;
@@ -924,6 +927,7 @@ export class IdeaGitViewProvider implements vscode.WebviewViewProvider, vscode.T
     const cssUri = webview.asWebviewUri(vscode.Uri.joinPath(this.context.extensionUri, 'media', 'main.css'));
     const codiconUri = webview.asWebviewUri(vscode.Uri.joinPath(this.context.extensionUri, 'media', 'codicons', 'codicon.css'));
     const graphLayoutUri = webview.asWebviewUri(vscode.Uri.joinPath(this.context.extensionUri, 'media', 'graph-layout.js'));
+    const selectionUri = webview.asWebviewUri(vscode.Uri.joinPath(this.context.extensionUri, 'media', 'change-selection.js'));
     const jsUri = webview.asWebviewUri(vscode.Uri.joinPath(this.context.extensionUri, 'media', 'main.js'));
     const nonce = Math.random().toString(36).slice(2);
     return `<!doctype html>
@@ -948,6 +952,7 @@ export class IdeaGitViewProvider implements vscode.WebviewViewProvider, vscode.T
         <main id="app"></main>
         <div id="toast-region" aria-live="assertive"></div>
         <script nonce="${nonce}" src="${graphLayoutUri}"></script>
+        <script nonce="${nonce}" src="${selectionUri}"></script>
         <script nonce="${nonce}" src="${jsUri}"></script>
       </body>
       </html>`;

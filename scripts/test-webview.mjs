@@ -60,21 +60,31 @@ try {
   assert.equal(activeHint, '"Drop files here"', 'The drop instruction should appear while dragging over an empty list.');
 
   await openSurface(page, 'surface=changes');
+  const initialLayout = await page.evaluate(() => {
+    const upper = document.querySelector('.commit-upper').getBoundingClientRect();
+    const tree = document.querySelector('.commit-changes-tree').getBoundingClientRect();
+    const rows = [...document.querySelectorAll('[data-file-row]')].map((row) => row.getBoundingClientRect());
+    return { upperHeight: upper.height, height: window.innerHeight, rowsFit: rows.every((row) => row.top >= tree.top && row.bottom <= tree.bottom) };
+  });
+  assert.ok(initialLayout.upperHeight > initialLayout.height * .6, 'The primary commit workflow should have most of the initial sidebar height.');
+  assert.equal(initialLayout.rowsFit, true, 'All three fixture files should be visible without scrolling at the default sidebar size.');
+  await page.getByRole('checkbox', { name: 'Select matching files in Default Changelist', exact: true }).check();
+  assert.equal(await page.locator('[data-select]:checked').count(), 3, 'The checkbox decoration must not intercept mouse selection.');
+  await page.getByRole('checkbox', { name: 'Select matching files in Default Changelist', exact: true }).uncheck();
+  assert.equal(await page.locator('[data-select]:checked').count(), 0);
   assert.equal(await page.locator('.workspace-brief').count(), 0, 'The Commit view should leave repository status to History.');
   const repositoryContext = page.locator('.commit-repository-context');
   assert.equal(await repositoryContext.count(), 1, 'The Commit view should use its lower area for branch and remote context.');
-  assert.match(await page.locator('.current-branch-row').getAttribute('aria-label'), /feature\/keaton\/ACKk8s/);
-  assert.match(await page.locator('.remote-context-row').getAttribute('aria-label'), /tracking origin\/feature\/keaton\/ACKk8s/);
-  assert.match(await page.locator('.repo-sync-counts').getAttribute('aria-label'), /2 incoming · 6 outgoing/);
-  assert.equal(await page.locator('.commit-panel').evaluate((element) => getComputedStyle(element).flexBasis), '144px', 'The default Commit form should stay compact.');
-  await page.locator('.current-branch-row').click();
+  assert.match(await page.locator('.commit-repo-meta [data-action="branches"]').getAttribute('aria-label'), /feature\/keaton\/ACKk8s/);
+  assert.match(await page.locator('.commit-repo-meta').textContent(), /Tracking origin\/feature\/keaton\/ACKk8s/);
+  assert.equal(await page.locator('.commit-panel').evaluate((element) => getComputedStyle(element).flexBasis), '188px', 'The Commit form should reserve room for selection feedback.');
+  await page.locator('.commit-repo-meta [data-action="branches"]').click();
   assert.equal(await page.locator('.branch-popup').count(), 1, 'The branch shortcut should open the existing branch picker.');
   await page.keyboard.press('Escape');
   await page.locator('.commit-toolbar [data-action="fetch"]').click();
   assert.ok(await page.evaluate(() => window.__vscodeMessages.some((message) => message.type === 'fetch')), 'Fetch should reach the VS Code message bridge.');
   await page.evaluate(() => window.dispatchEvent(new MessageEvent('message', { data: { type: 'syncStatus', phase: 'error', error: 'Remote unavailable' } })));
-  assert.match(await page.locator('.repo-sync-state').textContent(), /Fetch failed/, 'The compact Commit status should expose remote errors.');
-  assert.ok((await page.locator('.remote-context-row').getAttribute('class')).includes('has-error'), 'Remote errors should have a distinct visual state.');
+  assert.match(await page.locator('.commit-repo-meta .has-error').textContent(), /Fetch failed/, 'The compact Commit status should expose remote errors.');
   await page.evaluate(() => window.dispatchEvent(new MessageEvent('message', { data: { type: 'syncStatus', phase: 'idle' } })));
 
   const firstFile = page.locator('[data-select]').first();
@@ -86,6 +96,22 @@ try {
   const commitMessage = await page.evaluate(() => window.__vscodeMessages.find((message) => message.type === 'commit'));
   assert.equal(commitMessage?.message, 'test: verify browser commit flow');
   assert.equal(commitMessage?.paths?.length, 1, 'Commit should include only the selected file.');
+
+  await openSurface(page, 'surface=changes');
+  await page.locator('[data-select]').nth(1).check({ force: true });
+  await page.locator('#commit-message').fill('test: filtered selection');
+  await page.locator('[data-action="search-changes"]').click();
+  await page.locator('#change-filter').selectOption('staged');
+  assert.match(await page.locator('.commit-selection-status').textContent(), /1 hidden/);
+  assert.equal(await page.locator('[data-action="commit"]').isEnabled(), false);
+  await page.locator('[data-action="clear-hidden-selection"]').click();
+  await page.locator('[data-select-list]').check({ force: true });
+  assert.equal(await page.locator('[data-select]:checked').count(), 2);
+  assert.match(await page.locator('.commit-selection-note').textContent(), /all working-tree changes/);
+  await page.locator('[data-action="commit"]').click();
+  const filteredCommit = await page.evaluate(() => window.__vscodeMessages.find((message) => message.type === 'commit'));
+  assert.equal(filteredCommit.paths.length, 2);
+  assert.ok(!filteredCommit.paths.some((file) => file.endsWith('AwsWebClientInitializer.java')));
 
   await page.setViewportSize({ width: 1450, height: 650 });
   await openSurface(page, 'surface=history');

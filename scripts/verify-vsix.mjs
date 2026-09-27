@@ -11,6 +11,8 @@ const requiredEntries = [
   'extension/package.json',
   'extension/dist/extension.js',
   'extension/media/main.js',
+  'extension/media/change-selection.js',
+  'extension/media/graph-layout.js',
   'extension/media/main.css',
   'extension/media/kivo-icon.png'
 ];

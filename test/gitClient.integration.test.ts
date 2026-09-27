@@ -32,6 +32,48 @@ afterEach(async () => {
 });
 
 describe('GitClient integration', () => {
+  it('restores newly staged files after a hook failure without disturbing unrelated staged content', async () => {
+    const root = await createRepository();
+    await fs.appendFile(path.join(root, 'beta.txt'), 'staged elsewhere\n');
+    await git(root, ['add', 'beta.txt']);
+    const before = await git(root, ['ls-files', '--stage']);
+    await fs.writeFile(path.join(root, 'new.txt'), 'keep this file\n');
+    await fs.writeFile(path.join(root, '.git', 'hooks', 'pre-commit'), '#!/bin/sh\nexit 1\n', { mode: 0o755 });
+    await expect(new GitClient(root).commit('fails', ['new.txt'])).rejects.toThrow();
+    expect(await git(root, ['ls-files', '--stage'])).toBe(before);
+    expect(await fs.readFile(path.join(root, 'new.txt'), 'utf8')).toBe('keep this file\n');
+  });
+
+  it('commits literal wildcard filenames without including matching unrelated files', async () => {
+    const root = await createRepository();
+    await fs.writeFile(path.join(root, 'file*.txt'), 'selected\n');
+    await fs.writeFile(path.join(root, 'file-other.txt'), 'not selected\n');
+    await git(root, ['add', 'file-other.txt']);
+    await new GitClient(root).commit('literal path', ['file*.txt']);
+    expect(await git(root, ['show', '--format=', '--name-only', 'HEAD'])).toBe('file*.txt');
+    expect(await git(root, ['diff', '--cached', '--name-only'])).toBe('file-other.txt');
+  });
+
+  it('commits both sides of a selected staged rename and rejects stale selections', async () => {
+    const root = await createRepository();
+    await git(root, ['mv', 'alpha.txt', 'renamed.txt']);
+    const client = new GitClient(root);
+    await client.commit('rename', ['renamed.txt']);
+    expect(await git(root, ['status', '--porcelain'])).toBe('');
+    expect(await git(root, ['ls-tree', '--name-only', 'HEAD'])).not.toContain('alpha.txt');
+    await expect(client.commit('stale', ['beta.txt'])).rejects.toThrow('no longer changed');
+  });
+
+  it('round-trips repository identity and recent commit messages', async () => {
+    const root = await createRepository();
+    const client = new GitClient(root);
+    await client.setLocalCommitIdentity('New Author', 'new@example.test');
+    expect((await client.snapshot()).identity).toMatchObject({ name: 'New Author', email: 'new@example.test', ready: true });
+    const recent = await client.recentCommitMessages();
+    expect(recent[0]?.subject).toBe('initial');
+    expect(recent[0]?.hash).toBe(await git(root, ['rev-parse', 'HEAD']));
+  });
+
   it('maps pull intent to explicit, predictable Git strategies', () => {
     expect(pullArgs('ff-only')).toEqual(['pull', '--ff-only']);
     expect(pullArgs('rebase')).toEqual(['pull', '--rebase']);

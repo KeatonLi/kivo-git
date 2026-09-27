@@ -19,6 +19,10 @@ export class GitClient {
 
   constructor(readonly workspaceRoot: string) {}
 
+  isChangelistStorageFile(filePath: string): boolean {
+    return this.store?.isStorageFile(filePath) ?? false;
+  }
+
   private async run(
     args: string[],
     maxBuffer = 8 * 1024 * 1024,
@@ -281,13 +285,42 @@ export class GitClient {
   }
 
   async commit(message: string, paths: string[]): Promise<void> {
+    if (typeof message !== 'string' || !Array.isArray(paths) || paths.some((file) => typeof file !== 'string' || !file || file.includes('\0'))) {
+      throw new Error('Invalid commit selection. Refresh and select the files again.');
+    }
     const trimmed = message.trim();
     if (!trimmed) throw new Error('Write a commit message first.');
     if (!paths.length) throw new Error('Select at least one changed file.');
-    const untracked = parsePorcelainV2(await this.run(['status', '--porcelain=v2', '-z', '--untracked-files=all']))
-      .changes.filter((change) => change.kind === 'untracked' && paths.includes(change.path)).map((change) => change.path);
-    if (untracked.length) await this.run(['add', '--', ...untracked]);
-    await this.run(['commit', '--only', '-m', trimmed, '--', ...paths]);
+    const changes = parsePorcelainV2(await this.run(['status', '--porcelain=v2', '-z', '--untracked-files=all'])).changes;
+    const byPath = new Map(changes.map((change) => [change.path, change]));
+    if (changes.some((change) => change.kind === 'conflict')) throw new Error('Resolve merge conflicts before committing.');
+    const selected = [...new Set(paths)].map((file) => {
+      const change = byPath.get(file);
+      if (!change) throw new Error(`The selected file is no longer changed: ${file}. Refresh and try again.`);
+      return change;
+    });
+    const untracked = selected.filter((change) => change.kind === 'untracked').map((change) => change.path);
+    const commitPaths = [...new Set(selected.flatMap((change) => change.originalPath && change.indexStatus === 'R'
+      ? [change.originalPath, change.path] : [change.path]))];
+    let added = false;
+    try {
+      if (untracked.length) {
+        await this.run(['--literal-pathspecs', 'add', '--', ...untracked]);
+        added = true;
+      }
+      await this.run(['--literal-pathspecs', 'commit', '--only', '-m', trimmed, '--', ...commitPaths]);
+    } catch (error) {
+      // These paths were absent from the index before this operation. Remove only
+      // those entries; never reset unrelated staged work or touch working files.
+      if (added) {
+        try {
+          await this.run(['update-index', '--force-remove', '--', ...untracked]);
+        } catch (restoreError) {
+          throw new Error(`${error instanceof Error ? error.message : String(error)}\nCould not restore newly staged files. Review the index before retrying: ${restoreError instanceof Error ? restoreError.message : String(restoreError)}`);
+        }
+      }
+      throw error;
+    }
   }
 
   async checkout(branchName: string, remote: boolean): Promise<void> {

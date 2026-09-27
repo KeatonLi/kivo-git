@@ -20,11 +20,13 @@ const LOG_DETAIL_MIN_HEIGHT = 112;
 const LOG_DETAIL_DEFAULT_HEIGHT = 190;
 const COMMIT_METADATA_MIN_HEIGHT = 96;
 const COMMIT_METADATA_DEFAULT_HEIGHT = 180;
-const COMMIT_PANEL_MIN_HEIGHT = 124;
-const COMMIT_PANEL_MAX_HEIGHT = 220;
+const COMMIT_PANEL_MIN_HEIGHT = 176;
+const COMMIT_PANEL_MAX_HEIGHT = 260;
 const COMMIT_PANEL_LEGACY_DEFAULT_HEIGHT = 188;
-const COMMIT_PANEL_DEFAULT_HEIGHT = 144;
-const COMMIT_ZONE_DEFAULT_PERCENT = window.innerHeight < 720 ? 47 : 40;
+const COMMIT_PANEL_DEFAULT_HEIGHT = 188;
+// Keep the primary file-review and commit workflow larger than optional insights.
+// Persisted user-resized proportions are still respected.
+const COMMIT_ZONE_DEFAULT_PERCENT = 65;
 const BRANCH_PAGE_SIZE = 36;
 const GRAPH_MAX_WIDTH = 176;
 const GRAPH_MIN_WIDTH = 64;
@@ -79,7 +81,6 @@ const ui = {
   syncPhase: 'idle',
   lastFetchedAt: undefined,
   syncError: undefined,
-  branchMotion: undefined,
   branchContextMenu: undefined,
   commitContextMenu: undefined,
   fileContextMenu: undefined,
@@ -118,6 +119,38 @@ let graphResizeObserver;
 let observedGraphList;
 let graphViewportFrame;
 let graphScrollFrame;
+const reducedMotion = window.matchMedia('(prefers-reduced-motion: reduce)');
+const runningMotion = new Set();
+const elementMotion = new WeakMap();
+
+function motionEnabled() { return !reducedMotion.matches && !document.hidden; }
+
+function playMotion(element, frames, options) {
+  if (!element || !motionEnabled()) return;
+  elementMotion.get(element)?.cancel();
+  const animation = element.animate(frames, options);
+  elementMotion.set(element, animation);
+  runningMotion.add(animation);
+  const cleanup = () => {
+    runningMotion.delete(animation);
+    if (elementMotion.get(element) === animation) elementMotion.delete(element);
+  };
+  animation.finished.then(cleanup, cleanup);
+}
+
+function stopMotion() {
+  for (const animation of runningMotion) animation.cancel();
+  runningMotion.clear();
+}
+reducedMotion.addEventListener('change', () => { if (reducedMotion.matches) stopMotion(); });
+document.addEventListener('visibilitychange', () => { if (document.hidden) stopMotion(); });
+
+function changelistMovement(before, after, viewportHeight) {
+  if (!before || before.listId === after.listId || !before.width || !before.height || !after.width || !after.height) return undefined;
+  const x = before.left - after.left;
+  const y = before.top - after.top;
+  return (x || y) && Math.abs(y) < viewportHeight ? { x, y } : undefined;
+}
 const commandKey = /Mac|iPhone|iPad/.test(navigator.platform) ? '⌘' : 'Ctrl';
 
 const escapeHtml = (value = '') => String(value)
@@ -499,17 +532,19 @@ function selectCommit(hash, { focus = false, immediate = true } = {}) {
   postCommitDetails(hash, immediate);
 }
 
+function changeSelection() {
+  return KivoChangeSelection.model(ui.snapshot, { filter: ui.changeFilter, query: ui.changeQuery, collapsed: ui.collapsed, selected: ui.selected });
+}
+
 function orderedPaths() {
-  return ui.snapshot?.changelists.flatMap((list) => list.changes.map((change) => change.path)) ?? [];
+  return changeSelection().visiblePaths;
 }
 
 function setSelection(path, checked, range = false) {
+  if (ui.busy) return;
   const paths = orderedPaths();
   const anchorIndex = range ? paths.indexOf(ui.selectionAnchor) : -1;
-  const pathIndex = paths.indexOf(path);
-  const affected = anchorIndex >= 0 && pathIndex >= 0
-    ? paths.slice(Math.min(anchorIndex, pathIndex), Math.max(anchorIndex, pathIndex) + 1)
-    : [path];
+  const affected = range ? KivoChangeSelection.range(paths, ui.selectionAnchor, path) : [path];
   for (const affectedPath of affected) checked ? ui.selected.add(affectedPath) : ui.selected.delete(affectedPath);
   if (!range || anchorIndex < 0) ui.selectionAnchor = path;
   persist();
@@ -560,8 +595,9 @@ function clearDragFeedback() {
 // are browser state, not something a fresh innerHTML string can reproduce reliably.
 function keyFor(node) {
   if (node.nodeType !== Node.ELEMENT_NODE) return null;
+  if (node.id) return `id:${node.id}`;
   if (node.dataset.path) return `file:${node.dataset.path}`;
-  if (node.dataset.listId) return `list:${node.dataset.listId}`;
+  if (node.dataset.listId && node.classList.contains('changelist')) return `list:${node.dataset.listId}`;
   if (node.dataset.checkout) return `branch:${node.dataset.checkout}`;
   if (node.dataset.hash) return `commit:${node.dataset.hash}`;
   return null;
@@ -601,25 +637,26 @@ function patchApp(html) {
   const target = document.createElement('main');
   target.id = 'app';
   target.innerHTML = html;
-  const pool = new Map([...app.querySelectorAll('[data-path], [data-list-id], [data-checkout], [data-hash]')].map((node) => [keyFor(node), node]));
-  const before = new Map([...app.querySelectorAll('.file-row')].map((node) => [node.dataset.path, node.getBoundingClientRect()]));
-  const counters = new Map([...app.querySelectorAll('.count, .sync-chip strong')].map((node) => [node, node.textContent]));
+  const pool = new Map([...app.querySelectorAll('[id], [data-path], [data-list-id], [data-checkout], [data-hash]')].map((node) => [keyFor(node), node]));
+  const before = new Map();
+  if (motionEnabled()) {
+    const destinations = new Map([...target.querySelectorAll('.file-row')].filter((row) => !row.closest('.collapsed')).map((row) => [row.dataset.path, row.dataset.listId]));
+    for (const row of app.querySelectorAll('.file-row')) {
+      const destination = destinations.get(row.dataset.path);
+      if (!destination || destination === row.dataset.listId || row.closest('.collapsed')) continue;
+      const rect = row.getBoundingClientRect();
+      before.set(row.dataset.path, { listId: row.dataset.listId, left: rect.left, top: rect.top, width: rect.width, height: rect.height });
+    }
+  }
   patchNode(app, target, pool);
-  if (!window.matchMedia('(prefers-reduced-motion: reduce)').matches) {
+  if (before.size && motionEnabled()) {
     for (const row of app.querySelectorAll('.file-row')) {
       const old = before.get(row.dataset.path);
       if (!old) continue;
       const next = row.getBoundingClientRect();
-      const dx = old.left - next.left;
-      const dy = old.top - next.top;
-      if ((dx || dy) && Math.abs(dy) < 1200) row.animate([
-        { transform: `translate(${dx}px, ${dy}px)` }, { transform: 'translate(0, 0)' }
-      ], { duration: 220, easing: 'cubic-bezier(.2,.8,.2,1)' });
-    }
-    for (const [node, value] of counters) {
-      if (node.isConnected && node.textContent !== value) node.animate([
-        { transform: 'translateY(3px) scale(.88)', opacity: .45 },
-        { transform: 'translateY(0) scale(1)', opacity: 1 }
+      const movement = changelistMovement(old, { listId: row.dataset.listId, left: next.left, top: next.top, width: next.width, height: next.height }, window.innerHeight);
+      if (movement) playMotion(row, [
+        { transform: `translate(${movement.x}px, ${movement.y}px)` }, { transform: 'translate(0, 0)' }
       ], { duration: 180, easing: 'cubic-bezier(.2,.8,.2,1)' });
     }
   }
@@ -649,9 +686,10 @@ function render() {
   app.querySelectorAll('[data-select]').forEach((input) => { input.checked = ui.selected.has(input.dataset.select); });
   app.querySelectorAll('[data-select-list]').forEach((input) => {
     const list = s.changelists.find((candidate) => candidate.id === input.dataset.selectList);
-    const selected = list?.changes.filter((change) => ui.selected.has(change.path)).length ?? 0;
-    input.checked = Boolean(list?.changes.length && selected === list.changes.length);
-    input.indeterminate = selected > 0 && selected < (list?.changes.length ?? 0);
+    const changes = list?.changes.filter(matchesChangeFilter) || [];
+    const selected = changes.filter((change) => ui.selected.has(change.path)).length;
+    input.checked = Boolean(changes.length && selected === changes.length);
+    input.indeterminate = selected > 0 && selected < changes.length;
   });
   bind();
 }
@@ -693,18 +731,13 @@ function renderCommitToolbar(s) {
 }
 
 function matchesChangeFilter(change) {
-  if (ui.changeFilter === 'staged') return change.staged && change.kind !== 'conflict';
-  if (ui.changeFilter === 'worktree') return change.workingTreeStatus !== '.';
-  return ui.changeFilter === 'all' || change.kind === ui.changeFilter;
+  return KivoChangeSelection.matches(change, ui.changeFilter, ui.changeQuery);
 }
 
 function renderChanges(s) {
   const query = ui.changeQuery.trim().toLowerCase();
   const filtersActive = Boolean(query || ui.changeFilter !== 'all');
-  const changesByList = new Map(s.changelists.map((list) => [list.id, list.changes.filter((change) =>
-    matchesChangeFilter(change)
-      && (!query || `${change.path} ${change.kind} ${change.indexStatus} ${change.workingTreeStatus}`.toLowerCase().includes(query))
-  )]));
+  const changesByList = new Map(changeSelection().lists.map((list) => [list.id, list.changes]));
   const filteredTotal = [...changesByList.values()].reduce((count, changes) => count + changes.length, 0);
   const visiblePaths = s.changelists
     .filter((list) => !ui.collapsed.has(list.id))
@@ -713,10 +746,10 @@ function renderChanges(s) {
   const lists = s.changelists.filter((list) => !filtersActive || changesByList.get(list.id)?.length).map((list) => {
     const collapsed = ui.collapsed.has(list.id);
     const changes = changesByList.get(list.id) || [];
-    const selected = list.changes.filter((change) => ui.selected.has(change.path)).length;
-    const allSelected = list.changes.length > 0 && selected === list.changes.length;
+    const selected = changes.filter((change) => ui.selected.has(change.path)).length;
+    const allSelected = changes.length > 0 && selected === changes.length;
     return `<section class="changelist ${collapsed ? 'collapsed' : ''} ${list.active ? 'active-list' : ''}" data-list-id="${escapeHtml(list.id)}">
-      <div class="list-heading"><label class="list-check check"><input type="checkbox" data-select-list="${escapeHtml(list.id)}" aria-label="Select all files in ${escapeHtml(list.name)}" ${allSelected ? 'checked' : ''} ${ui.busy || !list.changes.length ? 'disabled' : ''}><span></span></label><button class="list-collapse" data-collapse="${escapeHtml(list.id)}" aria-expanded="${!collapsed}">
+      <div class="list-heading"><label class="list-check check"><input type="checkbox" data-select-list="${escapeHtml(list.id)}" aria-label="Select matching files in ${escapeHtml(list.name)}" ${allSelected ? 'checked' : ''} ${ui.busy || !changes.length ? 'disabled' : ''}><span></span></label><button class="list-collapse" data-collapse="${escapeHtml(list.id)}" aria-expanded="${!collapsed}">
         ${icon('chevron-down', 'disclosure')}<span class="active-dot" title="${list.active ? 'Active changelist' : ''}"></span><span class="list-name">${escapeHtml(list.name)}</span><span class="count">${filtersActive ? `${changes.length}/${list.changes.length}` : list.changes.length}</span>
       </button><button class="list-more" data-list-menu="${escapeHtml(list.id)}" aria-label="Actions for ${escapeHtml(list.name)}" aria-expanded="${ui.listMenuId === list.id}">${icon('more')}</button></div>
       <div class="file-list-shell"><div class="file-list ${list.changes.length ? '' : 'empty'}" data-drop-list="${escapeHtml(list.id)}">
@@ -728,9 +761,8 @@ function renderChanges(s) {
       </div>
     </section>`;
   }).join('');
-  const selectedCount = ui.selected.size;
-  const canCommit = Boolean(selectedCount && ui.commitMessage.trim() && !ui.busy);
-  const commitHint = !selectedCount ? 'Select at least one changed file' : !ui.commitMessage.trim() ? 'Write a commit message' : 'Commit selected files';
+  const commitHint = commitBlocker() || 'Commit selected files';
+  const canCommit = !commitBlocker();
   return `
     <div class="commit-upper" id="kivo-commit-upper" style="flex-basis:${ui.commitZonePercent}%">
       ${renderCommitToolbar(s)}
@@ -739,6 +771,7 @@ function renderChanges(s) {
       <div class="lists commit-changes-tree" id="kivo-commit-changes">${lists || `<div class="commit-empty-list">${filtersActive ? 'No changed files match the current filters' : 'No changes'}</div>`}</div>
       <div class="commit-panel-splitter" data-commit-panel-splitter role="separator" aria-label="Resize changes and commit message" aria-controls="kivo-commit-changes kivo-commit-message" aria-orientation="horizontal" aria-valuemin="${COMMIT_PANEL_MIN_HEIGHT}" aria-valuenow="${Math.round(ui.commitPanelHeight)}" tabindex="0" title="Drag to resize. Double-click to reset."></div>
       <footer class="commit-panel" id="kivo-commit-message" style="--commit-panel-height:${Math.round(ui.commitPanelHeight)}px">
+      ${renderSelectionStatus()}
       <textarea id="commit-message" rows="4" placeholder="Commit Message" aria-label="Commit Message" spellcheck="true" ${ui.operationKind === 'commit' ? 'disabled' : ''}>${escapeHtml(ui.commitMessage)}</textarea>
       <div class="commit-actions">
         <button class="primary-button ${ui.operationKind === 'commit' ? 'working' : ''}" data-action="commit" title="${escapeHtml(commitHint)} (${commandKey}+Enter)" ${!canCommit ? 'disabled' : ''}>${ui.operationKind === 'commit' ? `${icon('loading', 'codicon-modifier-spin button-spinner')}<span>Committing…</span>` : '<span>Commit</span>'}</button>
@@ -857,7 +890,7 @@ function renderFileContextMenu() {
     <button role="menuitem" data-file-context-action="reveal" ${change.kind === 'deleted' ? 'disabled' : ''}>${icon('folder-opened')}<span>Reveal in Explorer</span></button>
     <div class="context-menu-separator" role="separator"></div>
     <button role="menuitem" data-file-context-action="move" ${ui.busy ? 'disabled' : ''}>${icon('arrow-swap')}<span>Move to Changelist…</span></button>
-    ${list?.changes.length && list.changes.length > 1 ? `<button role="menuitem" data-file-context-action="select-list" ${ui.busy ? 'disabled' : ''}>${icon('list-selection')}<span>Select All in Changelist</span></button>` : ''}
+    ${list?.changes.length && list.changes.length > 1 ? `<button role="menuitem" data-file-context-action="select-list" ${ui.busy ? 'disabled' : ''}>${icon('list-selection')}<span>Select Matching Files in Changelist</span></button>` : ''}
     <button role="menuitem" data-file-context-action="copy-path">${icon('copy')}<span>Copy Relative Path</span></button>
   </div>`;
 }
@@ -1251,13 +1284,14 @@ function runFileContextAction(event) {
   if (action === 'move' && !ui.busy) {
     post('moveFileToChangelist', { path: change.path });
   }
-  if (action === 'select-list') {
+  if (action === 'select-list' && !ui.busy) {
     const list = ui.snapshot?.changelists.find((candidate) => candidate.id === menu.listId);
     if (list) {
-      for (const item of list.changes) ui.selected.add(item.path);
+      const matching = list.changes.filter(matchesChangeFilter);
+      for (const item of matching) ui.selected.add(item.path);
       ui.selectionAnchor = change.path;
       persist();
-      toast(`Selected ${list.changes.length} files`, 'success');
+      toast(`Selected ${matching.length} matching files`, 'success');
     }
   }
   if (action === 'copy-path') post('copyPath', { path: change.path });
@@ -2001,7 +2035,7 @@ function bind() {
     const input = event.currentTarget;
     const list = ui.snapshot?.changelists.find((candidate) => candidate.id === input.dataset.selectList);
     if (!list) return;
-    for (const change of list.changes) input.checked ? ui.selected.add(change.path) : ui.selected.delete(change.path);
+    for (const change of list.changes.filter(matchesChangeFilter)) input.checked ? ui.selected.add(change.path) : ui.selected.delete(change.path);
     persist();
     render();
   });
@@ -2036,6 +2070,7 @@ function bind() {
     }
     if ((event.ctrlKey || event.metaKey) && !event.altKey && event.key.toLowerCase() === 'a') {
       event.preventDefault();
+      if (ui.busy) return;
       for (const path of orderedPaths()) ui.selected.add(path);
       focusFile(button.dataset.diff);
       return;
@@ -2053,6 +2088,7 @@ function bind() {
     }
     if (event.key === 'Enter') {
       event.preventDefault();
+      clearTimeout(previewTimer);
       postDiff(button);
       return;
     }
@@ -2084,10 +2120,6 @@ function bind() {
   once('[data-checkout]', 'click', (event) => {
     const button = event.currentTarget;
     if (button.classList.contains('current') || ui.busy) return;
-    const source = button.getBoundingClientRect();
-    const target = app.querySelector('.branch-pill')?.getBoundingClientRect();
-    const branch = button.dataset.remote === 'true' ? button.dataset.checkout.split('/').slice(1).join('/') : button.dataset.checkout;
-    if (target) ui.branchMotion = { branch, x: source.left - target.left, y: source.top - target.top };
     ui.branchOpen = false;
     ui.branchQuery = '';
     post('checkout', { branch: button.dataset.checkout, remote: button.dataset.remote === 'true' });
@@ -2188,6 +2220,17 @@ function bind() {
 }
 
 function handleAction(action) {
+  if (action === 'clear-selection' && !ui.busy) {
+    ui.selected.clear();
+    persist();
+    render();
+  }
+  if (action === 'clear-hidden-selection' && !ui.busy) {
+    const { filteredPaths } = changeSelection();
+    ui.selected = new Set([...ui.selected].filter((path) => filteredPaths.has(path)));
+    persist();
+    render();
+  }
   if (action === 'refresh') post('refresh');
   if (action === 'show-log') post('showLog');
   if (action === 'show-changes') post('showChanges');
@@ -2269,15 +2312,32 @@ function handleAction(action) {
   if (action === 'retry-commit' && ui.selectedCommitHash) selectCommit(ui.selectedCommitHash);
 }
 
+function commitBlocker() {
+  const selection = changeSelection();
+  if (ui.busy) return 'A Git operation is in progress';
+  if (!selection.selectedChanges.length) return 'Select at least one changed file';
+  if (selection.hiddenCount) return 'Review or remove hidden selected files before committing';
+  if (ui.snapshot?.changes.some((change) => change.kind === 'conflict')) return 'Resolve merge conflicts before committing';
+  if (ui.snapshot?.identity?.ready === false) return 'Set your Git identity before committing';
+  if (!ui.commitMessage.trim()) return 'Write a commit message';
+  return undefined;
+}
+
+function renderSelectionStatus() {
+  const { selectedChanges, hiddenCount } = changeSelection();
+  const wholeFiles = ui.changeFilter === 'staged' || selectedChanges.some((change) => change.staged && change.workingTreeStatus !== '.');
+  return `<div class="commit-selection-status" role="status"><span>${selectedChanges.length} ${selectedChanges.length === 1 ? 'file' : 'files'} selected${hiddenCount ? ` · ${hiddenCount} hidden by filters` : ''}</span>${selectedChanges.length ? `<button class="text-button" data-action="${hiddenCount ? 'clear-hidden-selection' : 'clear-selection'}" ${ui.busy ? 'disabled' : ''}>${hiddenCount ? 'Remove hidden' : 'Clear'}</button>` : ''}</div>${hiddenCount ? '<div class="commit-selection-note warning">Hidden selections must be reviewed or removed.</div>' : wholeFiles ? '<div class="commit-selection-note">Commits include all working-tree changes in selected files.</div>' : ''}`;
+}
+
 function syncCommitActionState() {
-  const enabled = Boolean(ui.selected.size && ui.commitMessage.trim() && !ui.busy);
+  const hint = commitBlocker();
+  const enabled = !hint;
   const messageCheck = app.querySelector('[data-commit-message-check]');
   if (messageCheck) {
     const ready = Boolean(ui.commitMessage.trim());
     messageCheck.classList.toggle('pending', !ready);
     messageCheck.innerHTML = `${icon(ready ? 'check' : 'circle-outline')} ${ready ? 'Message ready' : 'Message needed'}`;
   }
-  const hint = ui.busy ? 'A Git operation is in progress' : !ui.selected.size ? 'Select at least one changed file' : !ui.commitMessage.trim() ? 'Write a commit message' : undefined;
   for (const button of app.querySelectorAll('[data-action="commit"], [data-action="commit-and-push"]')) {
     button.disabled = !enabled;
     button.title = hint || (button.dataset.action === 'commit' ? `Commit selected files (${commandKey}+Enter)` : 'Commit selected files and push');
@@ -2285,11 +2345,12 @@ function syncCommitActionState() {
 }
 
 function commit(andPush = false) {
-  if (!ui.selected.size || !ui.commitMessage.trim() || ui.busy) {
-    if (!ui.commitMessage.trim()) toast('Write a commit message first', 'error');
+  const blocker = commitBlocker();
+  if (blocker) {
+    toast(blocker, 'error');
     return;
   }
-  post(andPush ? 'commitAndPush' : 'commit', { message: ui.commitMessage, paths: [...ui.selected] });
+  post(andPush ? 'commitAndPush' : 'commit', { message: ui.commitMessage, paths: changeSelection().selectedChanges.map((change) => change.path) });
 }
 
 function toast(message, phase = 'success') {
@@ -2303,6 +2364,7 @@ function toast(message, phase = 'success') {
 
 function dismissToast(element) {
   if (!element?.isConnected || element.classList.contains('leaving')) return;
+  if (!motionEnabled()) { element.remove(); return; }
   element.classList.add('leaving');
   element.addEventListener('animationend', () => element.remove(), { once: true });
   setTimeout(() => element.remove(), 240);
@@ -2409,16 +2471,6 @@ window.addEventListener('message', (event) => {
     render();
     restoreGraphScroll(ui.graphScrollTop);
     requestOlderHistoryForHash();
-    if (ui.branchMotion && message.payload.branch === ui.branchMotion.branch) {
-      if (!window.matchMedia('(prefers-reduced-motion: reduce)').matches) {
-        const { x, y } = ui.branchMotion;
-        app.querySelector('.branch-pill')?.animate([
-          { transform: `translate(${x}px, ${y}px) scale(.96)`, opacity: .55 },
-          { transform: 'translate(0, 0) scale(1)', opacity: 1 }
-        ], { duration: 260, easing: 'cubic-bezier(.2,.8,.2,1)' });
-      }
-      ui.branchMotion = undefined;
-    }
   }
   if (message.type === 'empty') {
     persist();
@@ -2442,7 +2494,6 @@ window.addEventListener('message', (event) => {
       const textarea = app.querySelector('#commit-message');
       if (textarea) textarea.value = '';
     }
-    if (message.phase === 'error') ui.branchMotion = undefined;
   }
   if (message.type === 'syncStatus') {
     ui.syncPhase = message.phase;

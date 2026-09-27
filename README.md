@@ -28,6 +28,10 @@ Kivo Git keeps a familiar two-surface workflow in VS Code: **Commit** stays in t
 - Arrow-key file navigation, Space toggle, and Shift range selection
 - Changed-file icons resolved from the active VS Code file icon theme, including compound extensions
 
+Commit operates on whole selected files, including their working-tree edits; the Staged filter does not turn it into an index-only commit. Unrelated staged files are preserved. Selection counts appear beside the commit form. Filtering never silently drops an existing selection: hidden selections must be reviewed by clearing the filter, or removed with **Remove hidden**, before committing. List checkboxes select matching files, while keyboard select-all and range selection use the expanded, visible rows.
+
+Changelist data is stored in the worktree's Git directory under `ideagit/changelists.json`. Writes are atomic and serialized across windows, and tracked renames retain their list assignment. Invalid data is reported without overwriting it. If a crashed process leaves `changelists.json.lock`, close all Kivo Git windows and verify no operation is still running before removing that lock file; keep the JSON file.
+
 ### History workspace
 
 - A dense, multi-lane Git Log with a branch/tag tree, author, Graph, commit, and date columns

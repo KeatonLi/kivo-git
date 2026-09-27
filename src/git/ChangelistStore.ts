@@ -1,5 +1,7 @@
 import { promises as fs } from 'node:fs';
 import path from 'node:path';
+import { randomUUID } from 'node:crypto';
+import { setTimeout as delay } from 'node:timers/promises';
 import type { ChangeList, GitChange } from './types';
 
 interface StoreData {
@@ -17,29 +19,83 @@ export class ChangelistStore {
     this.file = path.join(gitDirectory, 'ideagit', 'changelists.json');
   }
 
+  isStorageFile(filePath: string): boolean {
+    return path.dirname(path.resolve(filePath)) === path.dirname(path.resolve(this.file));
+  }
+
   private async read(): Promise<StoreData> {
     try {
       const raw = await fs.readFile(this.file, 'utf8');
       const data = JSON.parse(raw) as StoreData;
+      if (!data || !Array.isArray(data.lists) ||
+          data.lists.some((item) => !item || typeof item.id !== 'string' || !item.id || typeof item.name !== 'string') ||
+          new Set(data.lists.map((item) => item.id)).size !== data.lists.length ||
+          (data.assignments !== undefined && (!data.assignments || typeof data.assignments !== 'object' || Array.isArray(data.assignments) ||
+            Object.values(data.assignments).some((id) => typeof id !== 'string')))) {
+        throw new Error('Invalid changelist data');
+      }
       return {
         lists: data.lists.some((item) => item.id === DEFAULT_LIST.id) ? data.lists : [DEFAULT_LIST, ...data.lists],
-        assignments: data.assignments ?? {},
+        assignments: Object.assign(Object.create(null), data.assignments),
         activeId: data.lists.some((item) => item.id === data.activeId) ? data.activeId : DEFAULT_LIST.id
       };
-    } catch {
-      return { lists: [DEFAULT_LIST], assignments: {}, activeId: DEFAULT_LIST.id };
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code === 'ENOENT') {
+        return { lists: [{ ...DEFAULT_LIST }], assignments: Object.create(null), activeId: DEFAULT_LIST.id };
+      }
+      throw new Error(`Cannot read changelists at ${this.file}. The existing file has been preserved. ${error instanceof Error ? error.message : String(error)}`);
     }
   }
 
   private async write(data: StoreData): Promise<void> {
     await fs.mkdir(path.dirname(this.file), { recursive: true });
-    await fs.writeFile(this.file, JSON.stringify(data, null, 2), 'utf8');
+    const temporary = `${this.file}.${randomUUID()}.tmp`;
+    try {
+      await fs.writeFile(temporary, JSON.stringify(data, null, 2), { encoding: 'utf8', flag: 'wx' });
+      await fs.rename(temporary, this.file);
+    } finally {
+      await fs.rm(temporary, { force: true });
+    }
   }
 
-  async group(changes: GitChange[]): Promise<ChangeList[]> {
+  // Lock the entire read/modify/write, including reads that assign new changes.
+  // A second window must not overwrite a more recent assignment.
+  private async transaction<T>(action: () => Promise<T>): Promise<T> {
+    await fs.mkdir(path.dirname(this.file), { recursive: true });
+    const lockPath = `${this.file}.lock`;
+    const deadline = Date.now() + 3000;
+    let lock;
+    while (!lock) {
+      try {
+        lock = await fs.open(lockPath, 'wx');
+      } catch (error) {
+        if ((error as NodeJS.ErrnoException).code !== 'EEXIST') throw error;
+        if (Date.now() >= deadline) throw new Error(`Changelists are locked by another operation. Retry after it finishes. If all other Kivo Git windows are closed, check ${lockPath}.`);
+        await delay(25);
+      }
+    }
+    try {
+      return await action();
+    } finally {
+      await lock.close();
+      await fs.unlink(lockPath);
+    }
+  }
+
+  group(changes: GitChange[]): Promise<ChangeList[]> {
+    return this.transaction(() => this.groupUnlocked(changes));
+  }
+
+  private async groupUnlocked(changes: GitChange[]): Promise<ChangeList[]> {
     const data = await this.read();
     const existingPaths = new Set(changes.map((change) => change.path));
     let changed = false;
+    for (const change of changes) {
+      if (change.kind === 'renamed' && change.originalPath && !data.assignments[change.path] && data.assignments[change.originalPath]) {
+        data.assignments[change.path] = data.assignments[change.originalPath]!;
+        changed = true;
+      }
+    }
     for (const assignedPath of Object.keys(data.assignments)) {
       if (!existingPaths.has(assignedPath)) {
         delete data.assignments[assignedPath];
@@ -48,33 +104,38 @@ export class ChangelistStore {
     }
     const activeId = data.activeId ?? DEFAULT_LIST.id;
     const lists = data.lists.map((list) => ({ ...list, active: list.id === activeId, changes: [] as GitChange[] }));
+    const listsById = new Map(lists.map((list) => [list.id, list]));
     for (const change of changes) {
       const listId = data.assignments[change.path] ?? activeId;
       if (!data.assignments[change.path]) {
         data.assignments[change.path] = listId;
         changed = true;
       }
-      const list = lists.find((candidate) => candidate.id === listId) ?? lists[0];
+      const list = listsById.get(listId) ?? lists[0];
       list?.changes.push(change);
     }
     if (changed) await this.write(data);
     return lists;
   }
 
-  async create(name: string): Promise<void> {
+  create(name: string): Promise<void> { return this.transaction(() => this.createUnlocked(name)); }
+
+  private async createUnlocked(name: string): Promise<void> {
     const trimmed = name.trim();
     if (!trimmed) throw new Error('Changelist name cannot be empty.');
     const data = await this.read();
     if (data.lists.some((item) => item.name.toLowerCase() === trimmed.toLowerCase())) {
       throw new Error(`Changelist “${trimmed}” already exists.`);
     }
-    const id = `list-${Date.now().toString(36)}`;
+    const id = `list-${randomUUID()}`;
     data.lists.push({ id, name: trimmed });
     data.activeId = id;
     await this.write(data);
   }
 
-  async rename(id: string, name: string): Promise<void> {
+  rename(id: string, name: string): Promise<void> { return this.transaction(() => this.renameUnlocked(id, name)); }
+
+  private async renameUnlocked(id: string, name: string): Promise<void> {
     const trimmed = name.trim();
     if (!trimmed) throw new Error('Changelist name cannot be empty.');
     const data = await this.read();
@@ -87,7 +148,9 @@ export class ChangelistStore {
     await this.write(data);
   }
 
-  async delete(id: string): Promise<void> {
+  delete(id: string): Promise<void> { return this.transaction(() => this.deleteUnlocked(id)); }
+
+  private async deleteUnlocked(id: string): Promise<void> {
     if (id === DEFAULT_LIST.id) throw new Error('The default changelist cannot be deleted.');
     const data = await this.read();
     if (!data.lists.some((item) => item.id === id)) throw new Error('Changelist no longer exists.');
@@ -99,14 +162,18 @@ export class ChangelistStore {
     await this.write(data);
   }
 
-  async setActive(id: string): Promise<void> {
+  setActive(id: string): Promise<void> { return this.transaction(() => this.setActiveUnlocked(id)); }
+
+  private async setActiveUnlocked(id: string): Promise<void> {
     const data = await this.read();
     if (!data.lists.some((item) => item.id === id)) throw new Error('Changelist no longer exists.');
     data.activeId = id;
     await this.write(data);
   }
 
-  async move(paths: string[], listId: string): Promise<void> {
+  move(paths: string[], listId: string): Promise<void> { return this.transaction(() => this.moveUnlocked(paths, listId)); }
+
+  private async moveUnlocked(paths: string[], listId: string): Promise<void> {
     const data = await this.read();
     if (!data.lists.some((item) => item.id === listId)) throw new Error('Target changelist no longer exists.');
     for (const filePath of paths) data.assignments[filePath] = listId;

@@ -166,7 +166,7 @@ describe('webview surface composition', () => {
 
   it('keeps commit readiness and menu focus predictable', async () => {
     const main = await readFile(path.join(root, 'media', 'main.js'), 'utf8');
-    expect(main).toContain('selectedCount && ui.commitMessage.trim() && !ui.busy');
+    expect(main).toContain('const canCommit = !commitBlocker();');
     expect(main).toContain('function syncCommitActionState()');
     expect(main).toContain('syncCommitActionState();');
     expect(main).toContain("returnFocus: anchor ? 'menu' : 'file'");

@@ -69,7 +69,7 @@ export function parsePorcelainV2(output: string): ParsedStatus {
       const path = fields.slice(pathOffset).join(' ');
       changes.push({
         path,
-        kind: classify(xy[0] ?? '.', xy[1] ?? '.'),
+        kind: record.startsWith('u ') ? 'conflict' : classify(xy[0] ?? '.', xy[1] ?? '.'),
         indexStatus: xy[0] ?? '.',
         workingTreeStatus: xy[1] ?? '.',
         staged: (xy[0] ?? '.') !== '.'

@@ -2,6 +2,15 @@
 
 ## Unreleased
 
+- Preserved ID-keyed controls when opening file search so the file tree cannot inherit splitter drag handlers during DOM reuse.
+- Made checkbox decorations ignore pointer events so mouse selection reaches the actual input reliably.
+- Gave file review and the commit form 65% of the initial sidebar height while preserving user-resized layouts, and removed obsolete branch-flight animation bookkeeping.
+- Restricted file movement animation to actual changelist transfers, removed repeat row/detail entrance effects and counter bounce, and stopped active animations when motion is reduced or the view is hidden.
+- Improved keyboard focus, selected-row text contrast, high-contrast selection borders, narrow summary wrapping, and long notification text; reduced-motion mode now disables animations rather than accelerating them.
+- Unified filtered selection, list checkboxes, and keyboard ranges; added an inline selected-file count, hidden-selection guard, and whole-file commit explanation for staged changes.
+- Preserved unrelated staged work and restored newly staged files after commit failures; validated current selections, treated Git pathspecs literally, and committed both sides of selected staged renames.
+- Protected changelist data with schema validation, atomic writes, and cross-window locking; preserved assignments across tracked renames and recognized all unmerged Git states.
+- Serialized Git identity updates with other Git operations and added regression coverage for selection, persistence, failed hooks, literal paths, and recent messages.
 - Displayed the effective Git commit identity in Repository status and added a guided repository-local name and email setup action when it is missing, so commit authorship is clear before committing.
 - Added a Recent Messages action beside Commit that lists the current branch's last 20 commits and reuses the full selected message; replacing an existing draft requires confirmation, and edits made while choosing are preserved.
 - Previewed the focused changed file while navigating the Commit list with Arrow keys, Home, or End, so keyboard review follows the selected row without leaving the list.
