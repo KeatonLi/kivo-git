@@ -60,6 +60,11 @@ export class IdeaGitViewProvider implements vscode.WebviewViewProvider, vscode.T
   private selectedWorkspaceRoot?: string;
   private repositories: vscode.WorkspaceFolder[] = [];
   private repositoriesLoading?: Promise<void>;
+  private badgeCount = 0;
+  private badgeRefreshPromise?: Promise<void>;
+  private badgeRefreshQueued = false;
+  private badgeRefreshTimer?: NodeJS.Timeout;
+  private readonly badgePollTimer: NodeJS.Timeout;
   private refreshTimer?: NodeJS.Timeout;
   private autoFetchTimer?: NodeJS.Timeout;
   private autoFetchPromise?: Promise<void>;
@@ -98,10 +103,10 @@ export class IdeaGitViewProvider implements vscode.WebviewViewProvider, vscode.T
 
   constructor(private readonly context: vscode.ExtensionContext) {
     this.context.subscriptions.push(
-      vscode.workspace.onDidSaveTextDocument(() => this.scheduleRefresh(40)),
-      vscode.workspace.onDidCreateFiles(() => this.scheduleRefresh()),
-      vscode.workspace.onDidDeleteFiles(() => this.scheduleRefresh()),
-      vscode.workspace.onDidRenameFiles(() => this.scheduleRefresh()),
+      vscode.workspace.onDidSaveTextDocument(() => { this.scheduleRefresh(40); this.scheduleBadgeRefresh(); }),
+      vscode.workspace.onDidCreateFiles(() => { this.scheduleRefresh(); this.scheduleBadgeRefresh(); }),
+      vscode.workspace.onDidDeleteFiles(() => { this.scheduleRefresh(); this.scheduleBadgeRefresh(); }),
+      vscode.workspace.onDidRenameFiles(() => { this.scheduleRefresh(); this.scheduleBadgeRefresh(); }),
       vscode.workspace.onDidChangeConfiguration((event) => {
         if (event.affectsConfiguration('ideaGit')) this.configurePolling();
         if (event.affectsConfiguration('workbench.iconTheme')) void this.refreshFileIconTheme();
@@ -112,8 +117,11 @@ export class IdeaGitViewProvider implements vscode.WebviewViewProvider, vscode.T
         this.resetRepository();
         void this.postToReadyViews({ type: 'empty', message: 'Loading selected repository…' });
         this.configurePolling();
+        this.scheduleBadgeRefresh();
       })
     );
+    this.badgePollTimer = setInterval(() => void this.refreshBadge(), 10000);
+    void this.refreshBadge();
   }
 
   async resolveWebviewView(view: vscode.WebviewView): Promise<void> {
@@ -122,6 +130,7 @@ export class IdeaGitViewProvider implements vscode.WebviewViewProvider, vscode.T
     if (!surface) throw new Error(`Unsupported Kivo Git view type: ${view.viewType}`);
     this.views.set(surface, view);
     view.title = surface === 'changes' ? 'Commit' : 'History';
+    if (surface === 'changes') this.updateBadge();
     this.readyViews.delete(surface);
     await this.refreshFileIconTheme();
     this.configureWebviewResources(view);
@@ -307,7 +316,55 @@ export class IdeaGitViewProvider implements vscode.WebviewViewProvider, vscode.T
   }
 
   private async postSnapshotToReadyViews(snapshot: RepositorySnapshot): Promise<void> {
+    this.scheduleBadgeRefresh();
     await Promise.all([...this.readyViews].map((surface) => this.postSnapshotToView(surface, snapshot)));
+  }
+
+  private updateBadge(): void {
+    const view = this.views.get('changes');
+    if (view) view.badge = this.badgeCount ? {
+      value: this.badgeCount,
+      tooltip: `${this.badgeCount} uncommitted ${this.badgeCount === 1 ? 'file' : 'files'} across Git repositories`
+    } : undefined;
+  }
+
+  private scheduleBadgeRefresh(): void {
+    if (this.badgeRefreshTimer) clearTimeout(this.badgeRefreshTimer);
+    this.badgeRefreshTimer = setTimeout(() => {
+      this.badgeRefreshTimer = undefined;
+      void this.refreshBadge();
+    }, 180);
+  }
+
+  private async refreshBadge(): Promise<void> {
+    if (this.badgeRefreshPromise) {
+      this.badgeRefreshQueued = true;
+      return this.badgeRefreshPromise;
+    }
+    const task = (async () => {
+      await this.discoverRepositories();
+      const roots = [...new Set(this.availableRepositories().map((repository) => repository.uri.fsPath))];
+      if (!roots.length) {
+        this.badgeCount = 0;
+        this.updateBadge();
+        return;
+      }
+      const counts = await Promise.allSettled(roots.map((root) => new GitClient(root).changedFilesCount()));
+      // Keep the last complete count if a repository is temporarily unavailable.
+      if (counts.some((result) => result.status === 'rejected')) return;
+      this.badgeCount = counts.reduce((total, result) => total + (result.status === 'fulfilled' ? result.value : 0), 0);
+      this.updateBadge();
+    })();
+    this.badgeRefreshPromise = task;
+    try {
+      await task;
+    } finally {
+      this.badgeRefreshPromise = undefined;
+      if (this.badgeRefreshQueued) {
+        this.badgeRefreshQueued = false;
+        this.scheduleBadgeRefresh();
+      }
+    }
   }
 
   private async postSnapshotToView(surface: KivoSurface, snapshot: RepositorySnapshot): Promise<void> {
@@ -367,6 +424,7 @@ export class IdeaGitViewProvider implements vscode.WebviewViewProvider, vscode.T
           this.resetRepository();
         }
         void this.refresh(true);
+        this.scheduleBadgeRefresh();
       };
       this.context.subscriptions.push(api.onDidOpenRepository(update), api.onDidCloseRepository(update));
       update();
@@ -425,7 +483,10 @@ export class IdeaGitViewProvider implements vscode.WebviewViewProvider, vscode.T
     const onChange = (uri: vscode.Uri) => {
       // Snapshot reads acquire a changelist lock. Watching that lock would make
       // every snapshot trigger another snapshot indefinitely.
-      if (!this.client?.isChangelistStorageFile(uri.fsPath)) this.scheduleRefresh();
+      if (!this.client?.isChangelistStorageFile(uri.fsPath)) {
+        this.scheduleRefresh();
+        this.scheduleBadgeRefresh();
+      }
     };
     this.watcher.onDidChange(onChange);
     this.watcher.onDidCreate(onChange);
@@ -1144,6 +1205,8 @@ export class IdeaGitViewProvider implements vscode.WebviewViewProvider, vscode.T
   }
 
   dispose(): void {
+    clearInterval(this.badgePollTimer);
+    if (this.badgeRefreshTimer) clearTimeout(this.badgeRefreshTimer);
     if (this.refreshTimer) clearInterval(this.refreshTimer);
     if (this.autoFetchTimer) clearInterval(this.autoFetchTimer);
     if (this.debounceTimer) clearTimeout(this.debounceTimer);

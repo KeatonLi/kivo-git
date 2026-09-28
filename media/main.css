@@ -1081,6 +1081,7 @@ body[data-surface="history"] .content { min-width: 0; background: var(--vscode-p
   .parity-mode .log-workspace .commit-detail { grid-column: 2; }
   .parity-mode .log-column-header,
   .parity-mode .graph-row { grid-template-columns: var(--graph-width) minmax(0, 1fr) 80px; }
+  .parity-mode .graph-row .log-date { overflow: visible; white-space: normal; line-height: 1.2; }
   .parity-mode .log-column-header > span:first-child,
   .parity-mode .graph-row .log-author { display: none; }
 }

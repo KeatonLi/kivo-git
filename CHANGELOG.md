@@ -2,6 +2,11 @@
 
 ## Unreleased
 
+## 0.3.3 - 2026-09-28
+
+- Show the total number of uncommitted files on the Kivo Git Activity Bar icon, updating on file changes and while the view is hidden; clear the badge for a clean workspace.
+- Keep full History timestamps legible at narrow widths by wrapping the date and time.
+
 ## 0.3.2 - 2026-09-28
 
 - Show incoming and outgoing markers beside each local branch with a configured remote upstream when the refs differ.

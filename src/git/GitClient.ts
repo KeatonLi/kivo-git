@@ -52,6 +52,11 @@ export class GitClient {
     this.store = new ChangelistStore(gitDirectory);
   }
 
+  async changedFilesCount(): Promise<number> {
+    const output = await this.run(['status', '--porcelain=v2', '-z', '--untracked-files=all']);
+    return parsePorcelainV2(output).changes.length;
+  }
+
   async snapshot(commitLimit = 80, historyRef?: string): Promise<RepositorySnapshot> {
     if (!this.store) await this.initialize();
     const [statusOutput, branches, tags, topLevel, identity] = await Promise.all([

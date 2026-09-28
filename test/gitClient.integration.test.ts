@@ -32,6 +32,16 @@ afterEach(async () => {
 });
 
 describe('GitClient integration', () => {
+  it('counts changed files once, including staged renames and untracked files', async () => {
+    const root = await createRepository();
+    const client = new GitClient(root);
+    expect(await client.changedFilesCount()).toBe(0);
+    await git(root, ['mv', 'alpha.txt', 'renamed.txt']);
+    await fs.writeFile(path.join(root, 'new.txt'), 'new\n');
+    expect(await client.changedFilesCount()).toBe(2);
+    await git(root, ['add', 'new.txt']);
+    expect(await client.changedFilesCount()).toBe(2);
+  });
   it('restores newly staged files after a hook failure without disturbing unrelated staged content', async () => {
     const root = await createRepository();
     await fs.appendFile(path.join(root, 'beta.txt'), 'staged elsewhere\n');
