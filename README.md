@@ -15,7 +15,7 @@ Kivo Git keeps a familiar two-surface workflow in VS Code: **Commit** stays in t
 - **Native VS Code integration** — diffs, file icons, themes, keyboard navigation, and the local `git` executable stay part of the workflow.
 - **A focused visual language** — Kivo’s restrained cyan–violet accent system adds hierarchy and feedback without moving familiar Git controls.
 
-## Included in the beta
+## Features
 
 ### Commit workspace
 
@@ -59,15 +59,21 @@ Inline blame is on by default. Run **Kivo Git: Toggle Inline Blame** from the Co
 - Clear loading, retry, disabled, and error feedback for remote sync and history
 - Theme-aware motion with reduced-motion accessibility
 
-## Install the latest beta
+## Install
 
-Download the `.vsix` asset from the [latest GitHub Release](https://github.com/KeatonLi/kivo-git/releases), then install it from VS Code’s Extensions view (`⋯` → **Install from VSIX…**) or with:
+Install **Kivo Git** from the [VS Code Marketplace](https://marketplace.visualstudio.com/items?itemName=KeatonLi.idea-git), or run:
+
+```bash
+code --install-extension KeatonLi.idea-git
+```
+
+Alternatively, download the `.vsix` asset from the [latest GitHub Release](https://github.com/KeatonLi/kivo-git/releases), then install it from VS Code’s Extensions view (`⋯` → **Install from VSIX…**) or with:
 
 ```bash
 code --install-extension kivo-git-<version>.vsix
 ```
 
-Kivo Git is in active beta development. Use a disposable repository first and report problems through [GitHub Issues](https://github.com/KeatonLi/kivo-git/issues).
+Kivo Git is an early release. Report problems through [GitHub Issues](https://github.com/KeatonLi/kivo-git/issues).
 
 ## Run locally
 
