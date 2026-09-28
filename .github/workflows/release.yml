@@ -31,9 +31,9 @@ jobs:
             echo "found=true" >> "$GITHUB_OUTPUT"
             mkdir -p existing-release
             gh release download "$TAG" --pattern 'kivo-git-*.vsix' --dir existing-release || true
-            existing_id=$(unzip -p existing-release/kivo-git-*.vsix extension/package.json 2>/dev/null | node -e "let s=''; process.stdin.on('data', c => s += c).on('end', () => { try { const p = JSON.parse(s); console.log(p.publisher + '.' + p.name); } catch { console.log('missing'); } })")
-            current_id=$(node -e "const p = require('./package.json'); console.log(p.publisher + '.' + p.name)")
-            if [[ "$existing_id" == "$current_id" ]]; then
+            existing_manifest=$(unzip -p existing-release/kivo-git-*.vsix extension/package.json 2>/dev/null | node -e "let s=''; process.stdin.on('data', c => s += c).on('end', () => { try { const p = JSON.parse(s); console.log(JSON.stringify({ id: p.publisher + '.' + p.name, version: p.version, categories: p.categories })); } catch { console.log('missing'); } })")
+            current_manifest=$(node -e "const p = require('./package.json'); console.log(JSON.stringify({ id: p.publisher + '.' + p.name, version: p.version, categories: p.categories }))")
+            if [[ "$existing_manifest" == "$current_manifest" ]]; then
               echo "publish=false" >> "$GITHUB_OUTPUT"
             else
               echo "publish=true" >> "$GITHUB_OUTPUT"
