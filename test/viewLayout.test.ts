@@ -25,7 +25,7 @@ describe('Kivo Git two-surface routing', () => {
     expect(isMessageAllowedOnSurface('changes', 'loadMoreCommits')).toBe(false);
     expect(isMessageAllowedOnSurface('history', 'showChanges')).toBe(true);
     expect(isMessageAllowedOnSurface('changes', 'showChanges')).toBe(false);
-    for (const message of ['mergeBranch', 'renameBranch', 'deleteBranch', 'copyBranchName', 'createTag', 'checkoutRevision', 'copyCommitHash', 'copyCommitSubject']) {
+    for (const message of ['mergeBranch', 'updateBranch', 'renameBranch', 'deleteBranch', 'copyBranchName', 'createTag', 'checkoutRevision', 'copyCommitHash', 'copyCommitSubject']) {
       expect(isMessageAllowedOnSurface('history', message)).toBe(true);
       expect(isMessageAllowedOnSurface('changes', message)).toBe(false);
     }

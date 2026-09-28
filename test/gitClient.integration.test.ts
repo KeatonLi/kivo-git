@@ -249,6 +249,66 @@ describe('GitClient integration', () => {
     expect(current).toMatchObject({ upstream: 'origin/main', ahead: 1, behind: 1 });
   });
 
+  it('updates only a selected non-current branch from its remote without touching HEAD or the working tree', async () => {
+    const root = await createRepository();
+    const remote = await fs.mkdtemp(path.join(os.tmpdir(), 'ideagit-remote-'));
+    const peer = await fs.mkdtemp(path.join(os.tmpdir(), 'ideagit-peer-'));
+    temporaryRepositories.push(remote, peer);
+    await git(remote, ['init', '--bare']);
+    await git(root, ['remote', 'add', 'origin', remote]);
+    await git(root, ['push', '-u', 'origin', 'main']);
+    await git(root, ['switch', '-c', 'feature/selected']);
+    await git(root, ['push', '-u', 'origin', 'feature/selected']);
+    await git(root, ['switch', 'main']);
+    await git(root, ['branch', '--track', 'feature/untouched', 'origin/main']);
+    await git(peer, ['clone', '--branch', 'feature/selected', remote, '.']);
+    await git(peer, ['config', 'user.name', 'IdeaGit Peer']);
+    await git(peer, ['config', 'user.email', 'peer@example.test']);
+    await fs.writeFile(path.join(peer, 'remote.txt'), 'upstream commit\n');
+    await git(peer, ['add', '.']);
+    await git(peer, ['commit', '-m', 'upstream work']);
+    await git(peer, ['push', 'origin', 'feature/selected']);
+    await fs.writeFile(path.join(root, 'local.txt'), 'uncommitted work\n');
+    const head = await git(root, ['rev-parse', 'HEAD']);
+    const untouched = await git(root, ['rev-parse', 'feature/untouched']);
+    const client = new GitClient(root);
+    await client.updateLocalBranch('feature/selected');
+    expect(await git(root, ['rev-parse', 'feature/selected'])).toBe(await git(peer, ['rev-parse', 'HEAD']));
+    expect(await git(root, ['rev-parse', 'origin/feature/selected'])).toBe(await git(peer, ['rev-parse', 'HEAD']));
+    expect(await git(root, ['rev-parse', 'HEAD'])).toBe(head);
+    expect(await git(root, ['rev-parse', 'feature/untouched'])).toBe(untouched);
+    expect(await fs.readFile(path.join(root, 'local.txt'), 'utf8')).toBe('uncommitted work\n');
+    await expect(client.updateLocalBranch('main')).rejects.toThrow('Use Pull');
+    await expect(client.updateLocalBranch('missing')).rejects.toThrow('no longer exists');
+  });
+
+  it('refuses to overwrite local commits when a selected branch diverges', async () => {
+    const root = await createRepository();
+    const remote = await fs.mkdtemp(path.join(os.tmpdir(), 'ideagit-remote-'));
+    const peer = await fs.mkdtemp(path.join(os.tmpdir(), 'ideagit-peer-'));
+    temporaryRepositories.push(remote, peer);
+    await git(remote, ['init', '--bare']);
+    await git(root, ['remote', 'add', 'origin', remote]);
+    await git(root, ['switch', '-c', 'feature/diverged']);
+    await git(root, ['push', '-u', 'origin', 'feature/diverged']);
+    await git(peer, ['clone', '--branch', 'feature/diverged', remote, '.']);
+    await git(peer, ['config', 'user.name', 'IdeaGit Peer']);
+    await git(peer, ['config', 'user.email', 'peer@example.test']);
+    await fs.writeFile(path.join(peer, 'remote.txt'), 'remote\n');
+    await git(peer, ['add', '.']);
+    await git(peer, ['commit', '-m', 'remote work']);
+    await git(peer, ['push', 'origin', 'feature/diverged']);
+    await fs.writeFile(path.join(root, 'local.txt'), 'local\n');
+    await git(root, ['add', '.']);
+    await git(root, ['commit', '-m', 'local work']);
+    await git(root, ['switch', 'main']);
+    const before = await git(root, ['rev-parse', 'feature/diverged']);
+    const head = await git(root, ['rev-parse', 'HEAD']);
+    await expect(new GitClient(root).updateLocalBranch('feature/diverged')).rejects.toThrow('diverge');
+    expect(await git(root, ['rev-parse', 'feature/diverged'])).toBe(before);
+    expect(await git(root, ['rev-parse', 'HEAD'])).toBe(head);
+  });
+
   it('builds a real multi-parent graph with branch refs and commit details', async () => {
     const root = await createRepository();
     await git(root, ['branch', 'feature/graph']);

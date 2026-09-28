@@ -22,7 +22,7 @@ describe('webview surface composition', () => {
     expect(main).toContain('Commit and Push…');
     expect(main).toContain('function renderLogActionRail(s)');
     expect(main).toContain('class="log-branch-pane"');
-    expect(main).toContain('class="branch-current-sync');
+    expect(main).toContain('class="branch-sync-indicator');
     expect(main).not.toContain('class="branch-pane-footer"');
     expect(main).toContain('data-log-splitter');
     expect(main).toContain('Resize History branch tree');

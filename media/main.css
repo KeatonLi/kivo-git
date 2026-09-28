@@ -511,6 +511,9 @@ body.commit-panel-resizing .commit-panel-splitter::after { top: 1px; height: 3px
 .parity-mode .idea-toolbar-button:focus-visible { box-shadow: inset 0 0 0 1px var(--accent); }
 .parity-mode .idea-toolbar-button:disabled { opacity: .42; }
 .parity-mode .idea-toolbar-button .codicon { font-size: 14px; }
+.parity-mode .commit-toolbar [data-action="branches"] { color: var(--vscode-textLink-foreground, var(--kivo-accent)); background: color-mix(in srgb, var(--kivo-accent) 12%, transparent); }
+.parity-mode .commit-toolbar [data-action="branches"]:hover:not(:disabled),
+.parity-mode .commit-toolbar [data-action="branches"]:focus-visible { color: var(--vscode-textLink-activeForeground, var(--kivo-accent)); background: color-mix(in srgb, var(--kivo-accent) 21%, transparent); }
 .parity-mode .idea-toolbar-button .kivo-toolbar-mark { width: 14px; height: 14px; color: var(--kivo-accent); stroke-width: 1.8; }
 .parity-mode .idea-toolbar-divider {
   width: 1px;
@@ -848,10 +851,24 @@ body[data-surface="history"] .content { min-width: 0; background: var(--vscode-p
 .parity-mode .log-branch-group-title { min-height: 27px; color: var(--muted); font-size: 11px; font-weight: 500; }
 .parity-mode .log-branch-row { min-height: 27px; font-size: 12px; }
 .parity-mode .log-branch-row > span:not(.codicon) { font-size: 12px; }
+.parity-mode .log-branch-entry { display: flex; align-items: center; min-width: 0; }
+.parity-mode .log-branch-entry .log-branch-row { flex: 1 1 auto; width: 0; }
+.parity-mode .log-branch-update { flex: 0 0 24px; height: 25px; display: grid; place-items: center; border-radius: 3px; background: transparent; color: var(--vscode-textLink-foreground, var(--accent)); cursor: pointer; opacity: 0; }
+.parity-mode .log-branch-entry:hover .log-branch-update,
+.parity-mode .log-branch-entry.selected .log-branch-update,
+.parity-mode .log-branch-update:focus-visible { opacity: 1; }
+.parity-mode .log-branch-update:hover:not(:disabled),
+.parity-mode .log-branch-update:focus-visible { outline: none; background: var(--vscode-toolbar-hoverBackground); }
+.parity-mode .log-branch-update:disabled { opacity: .35; }
+.parity-mode .branch-popup { font-family: -apple-system, BlinkMacSystemFont, "SF Pro Text", "Segoe UI Variable Text", "Segoe UI", sans-serif; }
+.parity-mode .branch-popup .branch-row { font-size: 12px; }
+.parity-mode .branch-popup .branch-popup-group h3 { font-size: 12px; letter-spacing: 0; }
 .parity-mode .log-branch-row.current > .codicon { color: var(--vscode-textLink-foreground, var(--accent)); }
-.parity-mode .log-branch-row .branch-current-sync { flex: 0 0 auto; display: inline-flex; align-items: center; gap: 3px; overflow: visible; color: var(--muted); font-size: 11px; }
-.parity-mode .log-branch-row .branch-current-sync.has-count { color: var(--vscode-textLink-foreground, var(--accent)); }
-.parity-mode .branch-current-sync .codicon { font-size: 11px; }
+.parity-mode .log-branch-row .branch-sync-indicator { flex: 0 0 auto; display: inline-flex; align-items: center; gap: 2px; overflow: visible; }
+.parity-mode .branch-sync-indicator .codicon { font-size: 11px; }
+.parity-mode .branch-sync-incoming { color: var(--warning); }
+.parity-mode .branch-sync-outgoing { color: var(--success); }
+.parity-mode .branch-sync-error { color: var(--warning); }
 .parity-mode .log-branch-row small { margin-left: 2px; color: var(--muted); font-size: 9px; font-weight: 500; }
 .parity-mode .commit-file { font-size: 12px; }
 .parity-mode .commit-file .file-type-icon { width: 16px; height: 16px; flex-basis: 16px; }

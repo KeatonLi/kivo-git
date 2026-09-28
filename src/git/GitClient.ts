@@ -401,6 +401,41 @@ export class GitClient {
       : {});
   }
   async pull(strategy: PullStrategy = 'ff-only'): Promise<void> { await this.run(pullArgs(strategy)); }
+
+  /** Update one non-current local branch without switching HEAD or touching the worktree. */
+  async updateLocalBranch(branch: string): Promise<void> {
+    const ref = `refs/heads/${branch}`;
+    const oldOid = (await this.run(['show-ref', '--verify', '--hash', ref]).catch(() => '')).trim();
+    if (!oldOid) throw new Error(`Local branch ${branch} no longer exists. Refresh and try again.`);
+    const current = (await this.run(['symbolic-ref', '--quiet', 'HEAD']).catch(() => '')).trim();
+    if (current === ref) throw new Error('Use Pull to update the checked-out branch.');
+    const [remote, mergeRef, upstreamRef] = await Promise.all([
+      this.run(['config', '--get', `branch.${branch}.remote`]).catch(() => ''),
+      this.run(['config', '--get', `branch.${branch}.merge`]).catch(() => ''),
+      this.run(['rev-parse', '--symbolic-full-name', `${branch}@{upstream}`]).catch(() => '')
+    ]);
+    const remoteName = remote.trim();
+    const sourceRef = mergeRef.trim();
+    const trackingRef = upstreamRef.trim();
+    if (!remoteName || remoteName === '.' || !sourceRef.startsWith('refs/heads/') ||
+        !trackingRef.startsWith('refs/remotes/')) {
+      throw new Error(`Branch ${branch} has no remote upstream. Set its tracking branch first.`);
+    }
+    // Fetch only this upstream; other local branches and remote-tracking refs stay untouched.
+    await this.run(['fetch', '--no-tags', remoteName, `+${sourceRef}:${trackingRef}`]);
+    const nextOid = (await this.run(['rev-parse', '--verify', trackingRef])).trim();
+    if (nextOid === oldOid) return;
+    try {
+      await this.run(['merge-base', '--is-ancestor', oldOid, nextOid]);
+    } catch {
+      throw new Error(`${branch} has local commits that diverge from ${trackingRef}. Review its history before updating.`);
+    }
+    if ((await this.run(['show-ref', '--verify', '--hash', ref])).trim() !== oldOid) {
+      throw new Error(`${branch} changed during the update. Refresh and try again.`);
+    }
+    // `branch -f` refuses a branch checked out in any worktree.
+    await this.run(['branch', '-f', branch, nextOid]);
+  }
   async pushPreview(): Promise<PushPreview> {
     const branch = (await this.run(['symbolic-ref', '--quiet', '--short', 'HEAD']).catch(() => '')).trim();
     if (!branch) throw new Error('Create or switch to a branch before pushing from detached HEAD.');

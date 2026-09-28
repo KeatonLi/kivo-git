@@ -31,6 +31,7 @@ type WebviewMessage =
   | { type: 'checkout'; branch: string; remote: boolean }
   | { type: 'createBranch'; startPoint: string }
   | { type: 'mergeBranch'; branch: string }
+  | { type: 'updateBranch'; branch: string }
   | { type: 'renameBranch'; branch: string }
   | { type: 'deleteBranch'; branch: string; remote: boolean }
   | { type: 'copyBranchName'; branch: string }
@@ -544,6 +545,9 @@ export class IdeaGitViewProvider implements vscode.WebviewViewProvider, vscode.T
           return;
         case 'mergeBranch':
           await this.mergeBranch(client, message.branch);
+          return;
+        case 'updateBranch':
+          await this.operation('branch', `Updating ${message.branch}…`, () => client.updateLocalBranch(message.branch), `${message.branch} updated from its remote`);
           return;
         case 'renameBranch':
           await this.renameBranch(client, message.branch);

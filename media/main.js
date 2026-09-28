@@ -1056,7 +1056,24 @@ function renderCommitDetails(s) {
 function renderLogBranchRow(branch, depth = 0, sync = '') {
   const kind = branch.kind === 'tag' ? 'tag' : 'branch';
   const label = branch.leaf || branch.name;
-  return `<button class="log-branch-row ${branch.current ? 'current' : ''} ${ui.graphBranchFilter === branch.name ? 'selected' : ''}" style="--tree-indent:${depth * 13}px" data-log-branch="${escapeHtml(branch.name)}" data-branch-ref="${escapeHtml(branch.name)}" data-branch-remote="${branch.remote ? 'true' : 'false'}" data-branch-kind="${kind}" aria-pressed="${ui.graphBranchFilter === branch.name}" aria-haspopup="menu" title="Show ${escapeHtml(branch.name)} history · Right-click for ${kind} actions">${icon(branch.remote ? 'cloud' : kind === 'tag' ? 'tag' : 'git-branch')}<span>${escapeHtml(label)}</span>${sync}${branch.current ? '<small>HEAD</small>' : ''}</button>`;
+  const row = `<button class="log-branch-row ${branch.current ? 'current' : ''} ${ui.graphBranchFilter === branch.name ? 'selected' : ''}" style="--tree-indent:${depth * 13}px" data-log-branch="${escapeHtml(branch.name)}" data-branch-ref="${escapeHtml(branch.name)}" data-branch-remote="${branch.remote ? 'true' : 'false'}" data-branch-kind="${kind}" aria-pressed="${ui.graphBranchFilter === branch.name}" aria-haspopup="menu" title="Show ${escapeHtml(branch.name)} history · Right-click for ${kind} actions">${icon(branch.remote ? 'cloud' : kind === 'tag' ? 'tag' : 'git-branch')}<span>${escapeHtml(label)}</span>${sync}${branch.current ? '<small>HEAD</small>' : ''}</button>`;
+  if (branch.remote || branch.current || kind === 'tag' || !branch.upstream) return row;
+  const title = `Update ${branch.name} from ${branch.upstream} (fast-forward only)`;
+  return `<div class="log-branch-entry ${ui.graphBranchFilter === branch.name ? 'selected' : ''}">${row}<button class="log-branch-update" data-update-branch="${escapeHtml(branch.name)}" aria-label="${escapeHtml(title)}" title="${escapeHtml(title)}" ${ui.busy ? 'disabled' : ''}>${icon('arrow-down')}</button></div>`;
+}
+
+function renderLogBranchSync(branch, snapshot) {
+  if (branch.remote || branch.kind === 'tag') return '';
+  const upstream = branch.current ? snapshot.upstream : branch.upstream;
+  if (!upstream) return '';
+  const incoming = branch.current ? snapshot.behind > 0 : branch.tracking?.includes('<');
+  const outgoing = branch.current ? snapshot.ahead > 0 : branch.tracking?.includes('>');
+  const failed = branch.current && ui.syncPhase === 'error';
+  if (!incoming && !outgoing && !failed) return '';
+  const title = branch.current
+    ? `${snapshot.behind} incoming, ${snapshot.ahead} outgoing · ${upstream}${failed ? ' · Remote check failed' : ''}`
+    : `${incoming ? 'Incoming commits' : ''}${incoming && outgoing ? ', ' : ''}${outgoing ? 'Outgoing commits' : ''} · ${upstream}`;
+  return `<span class="branch-sync-indicator" role="img" aria-label="${escapeHtml(title)}" title="${escapeHtml(title)}">${incoming ? icon('arrow-down', 'branch-sync-incoming') : ''}${outgoing ? icon('arrow-up', 'branch-sync-outgoing') : ''}${failed ? icon('warning', 'branch-sync-error') : ''}</span>`;
 }
 
 function renderLogBranchTree(node, depth = 0, parentPath = '', forceExpanded = false) {
@@ -1071,25 +1088,18 @@ function renderLogBranchTree(node, depth = 0, parentPath = '', forceExpanded = f
 function renderLogBranchPane(s) {
   const query = ui.logBranchQuery.trim().toLowerCase();
   const matches = (item) => !query || item.name.toLowerCase().includes(query);
-  const current = s.branches.find((branch) => branch.current && !branch.remote);
   const local = s.branches.filter((branch) => !branch.remote && matches(branch))
     .sort((left, right) => Number(right.current) - Number(left.current) || left.name.localeCompare(right.name));
   const remote = s.branches.filter((branch) => branch.remote && matches(branch));
   const tags = (s.tags || []).filter(matches).map((tag) => ({ ...tag, path: tag.name, name: tag.name, remote: false, kind: 'tag' }));
   const tagCount = (s.tags || []).length;
-  const syncTitle = s.upstream
-    ? `${s.behind} incoming, ${s.ahead} outgoing · ${s.upstream}${ui.syncPhase === 'error' ? ' · Remote check failed' : ''}`
-    : 'No upstream branch';
-  const syncIcon = current
-    ? `<span class="branch-current-sync ${s.behind || s.ahead ? 'has-count' : ''}" title="${escapeHtml(syncTitle)}" aria-label="${escapeHtml(syncTitle)}">${icon(ui.syncPhase === 'fetching' ? 'loading' : ui.syncPhase === 'error' ? 'warning' : s.upstream ? 'sync' : 'circle-slash', ui.syncPhase === 'fetching' ? 'codicon-modifier-spin' : '')}</span>`
-    : '';
   const group = (key, label, items, emptyLabel) => {
     const expanded = Boolean(query) || ui.branchGroupsExpanded[key];
     const visibleCount = ui.branchVisibleCounts[key];
     const visible = expanded ? items.slice(0, visibleCount) : [];
     const remaining = Math.max(0, items.length - visible.length);
     const tree = key === 'local'
-      ? visible.map((branch) => renderLogBranchRow(branch, 0, branch.current ? syncIcon : '')).join('')
+      ? visible.map((branch) => renderLogBranchRow(branch, 0, renderLogBranchSync(branch, s))).join('')
       : visible.length ? renderLogBranchTree(buildPathTree(visible), 0, '', Boolean(query)) : '';
     return `<section class="log-branch-group ${expanded ? 'expanded' : 'collapsed'}" data-branch-group-section="${key}">
       <button class="log-branch-group-title" data-branch-group="${key}" aria-expanded="${expanded}">${icon('chevron-right', 'branch-group-chevron')}<span>${label}</span><small>${items.length}</small></button>
@@ -1112,7 +1122,8 @@ function renderBranchContextMenu() {
   const width = 264;
   const actionCount = 3
     + (menu.kind === 'branch' && !menu.current ? 3 : 0)
-    + (menu.kind === 'branch' && !menu.remote ? 1 : 0);
+    + (menu.kind === 'branch' && !menu.remote ? 1 : 0)
+    + (menu.kind === 'branch' && !menu.remote && !menu.current && ui.snapshot?.branches.some((branch) => branch.name === menu.ref && Boolean(branch.upstream)) ? 1 : 0);
   const height = 40 + actionCount * 27 + 12;
   const left = clamp(menu.x, 8, Math.max(8, window.innerWidth - width - 8));
   const top = clamp(menu.y, 8, Math.max(8, window.innerHeight - height - 8));
@@ -1120,6 +1131,7 @@ function renderBranchContextMenu() {
   return `<div class="context-menu branch-context-menu" data-branch-context role="menu" aria-label="Actions for ${escapeHtml(menu.ref)}" style="left:${left}px;top:${top}px">
     <div class="context-menu-title branch-context-title"><span>${icon(menu.remote ? 'cloud' : menu.kind === 'tag' ? 'tag' : 'git-branch')}</span><strong title="${escapeHtml(menu.ref)}">${escapeHtml(menu.ref)}</strong></div>
     ${menu.kind === 'branch' && !menu.current ? `<button role="menuitem" data-branch-context-action="checkout" ${ui.busy ? 'disabled' : ''}>${icon('check')}<span>Checkout</span></button>` : ''}
+    ${menu.kind === 'branch' && !menu.remote && !menu.current && ui.snapshot?.branches.some((branch) => branch.name === menu.ref && Boolean(branch.upstream)) ? `<button role="menuitem" data-branch-context-action="update" ${ui.busy ? 'disabled' : ''}>${icon('arrow-down')}<span>Update from Remote</span></button>` : ''}
     <button role="menuitem" data-branch-context-action="new" ${ui.busy ? 'disabled' : ''}>${icon('git-branch-create')}<span>New Branch from this ${refLabel}…</span></button>
     ${menu.kind === 'branch' && !menu.current ? `<button role="menuitem" data-branch-context-action="merge" ${ui.busy ? 'disabled' : ''}>${icon('git-merge')}<span>Merge into Current…</span></button>` : ''}
     ${menu.kind === 'branch' ? '<div class="context-menu-separator" role="separator"></div>' : ''}
@@ -1453,6 +1465,7 @@ function runBranchContextAction(event) {
   if (action === 'new' && !ui.busy) post('createBranch', { startPoint: menu.ref });
   if (action === 'checkout' && !ui.busy) post('checkout', { branch: menu.ref, remote: menu.remote });
   if (action === 'merge' && !ui.busy) post('mergeBranch', { branch: menu.ref });
+  if (action === 'update' && !ui.busy && !menu.remote && !menu.current) post('updateBranch', { branch: menu.ref });
   if (action === 'rename' && !ui.busy) post('renameBranch', { branch: menu.ref });
   if (action === 'delete' && !ui.busy) post('deleteBranch', { branch: menu.ref, remote: menu.remote });
   if (action === 'copy') post('copyBranchName', { branch: menu.ref });
@@ -2030,6 +2043,9 @@ function bind() {
   });
   once('[data-log-branch]', 'click', (event) => {
     setHistoryRef(event.currentTarget.dataset.logBranch || '');
+  });
+  once('[data-update-branch]', 'click', (event) => {
+    if (!ui.busy) post('updateBranch', { branch: event.currentTarget.dataset.updateBranch });
   });
   once('[data-log-branch]', 'keydown', (event) => {
     if (event.key !== 'ContextMenu' && !(event.shiftKey && event.key === 'F10')) return;

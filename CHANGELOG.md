@@ -2,6 +2,12 @@
 
 ## Unreleased
 
+## 0.3.2 - 2026-09-28
+
+- Show incoming and outgoing markers beside each local branch with a configured remote upstream when the refs differ.
+- Add an Update action to tracked non-current local branches in History; fetch only the selected upstream and fast-forward only that branch without switching HEAD or changing the working tree. Diverged branches remain untouched.
+- Align the Commit branch picker typography with History and highlight the branch toolbar button.
+
 ## 0.3.1 - 2026-09-28
 
 - Kept Pull available on tracking branches even when no incoming commits are cached; Push still requires outgoing commits.

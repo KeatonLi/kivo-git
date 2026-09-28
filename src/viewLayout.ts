@@ -60,6 +60,7 @@ const messagesBySurface: Record<KivoSurface, ReadonlySet<string>> = {
     'openCommitDiff',
     'showChanges',
     'mergeBranch',
+    'updateBranch',
     'renameBranch',
     'deleteBranch',
     'copyBranchName',
