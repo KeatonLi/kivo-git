@@ -200,6 +200,7 @@ try {
   await openSurface(page, 'surface=history');
   assert.equal(await page.locator('.log-workspace').evaluate((element) => getComputedStyle(element).fontFamily), popupFont, 'Branch picker and History should use the same font family.');
   assert.equal(await page.locator('.log-branch-row.current .branch-sync-indicator').count(), 1, 'Incoming and outgoing icons should sit beside the current branch.');
+  assert.match(await page.locator('.log-date').first().textContent(), /^\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}$/, 'History dates should include local date and time to the second.');
   assert.equal(await page.locator('.log-head-group, .branch-pane-footer').count(), 0, 'History should not duplicate the current branch or reserve a status footer.');
   assert.match(await page.locator('.log-branch-row.current .branch-sync-indicator').getAttribute('title'), /2 incoming, 6 outgoing/);
   assert.equal(await page.locator('.log-branch-row.current .branch-sync-incoming, .log-branch-row.current .branch-sync-outgoing').count(), 2, 'A diverged branch should show both directions.');
@@ -209,6 +210,12 @@ try {
   await page.locator(`[data-update-branch="${otherBranch}"]`).click();
   assert.ok(await page.evaluate((branch) => window.__vscodeMessages.some((message) => message.type === 'updateBranch' && message.branch === branch), otherBranch), 'Update should target the selected local branch without changing checkout.');
   assert.equal(await page.locator('.log-branch-row.current').getAttribute('data-log-branch'), 'feature/keaton/ACKk8s', 'Updating another branch must not switch the checked-out branch.');
+  await page.locator(`.log-branch-row[data-log-branch="${otherBranch}"]`).click({ button: 'right' });
+  assert.equal(await page.locator('[data-branch-context-action="update"]').count(), 1, 'Tracked branches expose Update in the context menu.');
+  assert.equal(await page.locator('[data-branch-context-action="push"]').count(), 1, 'Tracked branches expose Push in the context menu.');
+  await page.locator('[data-branch-context-action="push"]').click();
+  assert.ok(await page.evaluate((branch) => window.__vscodeMessages.some((message) => message.type === 'pushBranch' && message.branch === branch), otherBranch), 'Push should target the selected local branch.');
+  await openSurface(page, 'surface=history');
   const remoteBranchCount = await page.locator('.log-branch-row[data-branch-remote="true"]').count();
   const originFolder = page.locator('[data-log-folder-toggle="origin"]');
   assert.equal(await originFolder.getAttribute('aria-expanded'), 'true', 'Remote folder nodes should start expanded.');
@@ -238,8 +245,9 @@ try {
   assert.match(await page.locator('.commit-file').first().getAttribute('data-commit-file'), /AwsWebClientInitializer\.java$/, 'The selected commit should show its own changed files.');
   await page.locator('.commit-file').first().click();
   assert.ok(await page.evaluate(() => window.__vscodeMessages.some((message) => message.type === 'openCommitDiff' && message.hash === '2d4411f0a1b2c3d4e5f678901234567890abcd12')), 'Opening a changed file should request its diff in VS Code.');
-  await page.locator('[data-action="load-more-commits"]').click();
-  assert.ok(await page.evaluate(() => window.__vscodeMessages.some((message) => message.type === 'loadMoreCommits')), 'Load more history should reach VS Code.');
+  assert.equal(await page.locator('[data-action="load-more-commits"]').count(), 0, 'History should not require a Load more button.');
+  await page.locator('[data-graph-list]').evaluate((list) => { list.scrollTop = list.scrollHeight; list.dispatchEvent(new Event('scroll')); });
+  assert.ok(await page.evaluate(() => window.__vscodeMessages.some((message) => message.type === 'loadMoreCommits')), 'Scrolling to older history should load the next page.');
 
   assert.deepEqual(pageErrors, [], 'The webview should not throw browser runtime errors.');
   console.log('Webview E2E passed: reviewed commit, toolbar menu, file states, History focus and Blame reveal, search and filters, branch menus, commit details/diffs, and pagination.');

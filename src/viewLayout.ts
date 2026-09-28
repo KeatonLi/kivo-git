@@ -61,6 +61,7 @@ const messagesBySurface: Record<KivoSurface, ReadonlySet<string>> = {
     'showChanges',
     'mergeBranch',
     'updateBranch',
+    'pushBranch',
     'renameBranch',
     'deleteBranch',
     'copyBranchName',

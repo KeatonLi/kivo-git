@@ -184,6 +184,12 @@ const relativeTime = (date) => {
   if (seconds < 86400) return `${Math.floor(seconds / 3600)}h`;
   return `${Math.floor(seconds / 86400)}d`;
 };
+const absoluteTime = (value) => {
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return '—';
+  const pad = (part) => String(part).padStart(2, '0');
+  return `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())} ${pad(date.getHours())}:${pad(date.getMinutes())}:${pad(date.getSeconds())}`;
+};
 const updatedLabel = (date) => {
   const relative = relativeTime(date);
   return relative === 'now' ? 'Updated just now' : `Updated ${relative} ago`;
@@ -818,7 +824,6 @@ function renderChanges(s) {
     <div class="commit-lower" id="kivo-commit-lower">
       ${renderRecentCommits(s)}
       ${renderCommitRepositoryContext(s)}
-      ${renderCommitSummary(s)}
     </div>
     ${renderFileContextMenu()}`;
 }
@@ -841,32 +846,13 @@ function renderCommitReview(s) {
 }
 
 function renderRecentCommits(s) {
-  const commits = (s.commits || []).slice(0, 2);
+  const commits = (s.commits || []).slice(0, 5);
   return `<section class="commit-recent" aria-label="Recent commits">
-    <div class="commit-lower-heading">${icon('history')}<span>Recent commits</span><button data-action="show-log" aria-label="Show all commit history">View all</button></div>
+    <div class="commit-lower-heading">${icon('history')}<span>Git history</span><button data-action="show-log" aria-label="Show all commit history">View all</button></div>
     <div class="commit-recent-list">${commits.length ? commits.map((commit) => `<button class="commit-recent-row" data-recent-commit="${escapeHtml(commit.hash)}" title="Open ${escapeHtml(commit.subject)} in History">
-      ${icon('git-commit')}<span class="commit-recent-copy"><strong>${escapeHtml(commit.subject)}</strong><code>${escapeHtml(commit.shortHash)}</code></span><time title="${escapeHtml(commit.date)}">${relativeTime(commit.date)}</time>
+      <span class="commit-recent-node" aria-hidden="true"></span><span class="commit-recent-copy"><strong>${escapeHtml(commit.subject)}</strong><code>${escapeHtml(commit.shortHash)} · ${escapeHtml(commit.author)}</code></span><time title="${escapeHtml(commit.date)}">${relativeTime(commit.date)}</time>
     </button>`).join('') : '<div class="commit-recent-empty">No commits yet</div>'}</div>
   </section>`;
-}
-
-function renderCommitSummary(s) {
-  const modified = s.changes.filter((change) => change.kind === 'modified').length;
-  const added = s.changes.filter((change) => change.kind === 'added' || change.kind === 'untracked').length;
-  const other = s.changes.length - modified - added;
-  const listCount = s.changelists.length;
-  const conflicts = s.changes.filter((change) => change.kind === 'conflict').length;
-  return `<section class="commit-insight-card" aria-label="Change summary">
-    <div class="commit-insight-title">${icon('diff')}<span>Change summary</span></div>
-    <div class="commit-insight-total"><strong>${s.changes.length}</strong><span>changed ${s.changes.length === 1 ? 'file' : 'files'}</span></div>
-    <div class="commit-insight-kinds"><span class="modified">${modified} modified</span><span class="added">${added} added</span>${other ? `<span>${other} other</span>` : ''}</div>
-    <div class="commit-insight-footer"><span>Across changelists</span><strong>${listCount} ${listCount === 1 ? 'list' : 'lists'}</strong></div>
-    <div class="commit-checks"><span>${icon(selectedCountForSummary(s) ? 'check' : 'circle-outline')} ${selectedCountForSummary(s)} selected</span><span data-commit-message-check class="${ui.commitMessage.trim() ? '' : 'pending'}">${icon(ui.commitMessage.trim() ? 'check' : 'circle-outline')} ${ui.commitMessage.trim() ? 'Message ready' : 'Message needed'}</span>${conflicts ? `<span class="pending">${icon('warning')} ${conflicts} ${conflicts === 1 ? 'conflict' : 'conflicts'}</span>` : ''}</div>
-  </section>`;
-}
-
-function selectedCountForSummary(s) {
-  return s.changes.filter((change) => ui.selected.has(change.path)).length;
 }
 
 function renderCommitRepositoryContext(s) {
@@ -880,7 +866,7 @@ function renderCommitRepositoryContext(s) {
       : s.upstream ? `Tracking ${s.upstream}` : 'No upstream';
   return `<section class="commit-repository-context" aria-label="Repository status">
     <div class="commit-insight-title">${icon('repo')}<span>${escapeHtml(s.repositoryName || 'Repository')} status</span>${s.repositoryCount > 1 ? `<button class="commit-repository-switch" data-action="choose-repository" aria-label="Choose repository, current ${escapeHtml(s.repositoryName)}" ${ui.busy ? 'disabled' : ''}>Switch…</button>` : ''}</div>
-    <div class="commit-repo-state">${icon(s.changes.length ? 'circle-filled' : 'check')}<span>${s.changes.length ? `Working tree has ${s.changes.length} ${s.changes.length === 1 ? 'change' : 'changes'}` : 'Working tree clean'}</span></div>
+    <div class="commit-repo-state">${icon(s.changes.length ? 'circle-filled' : 'check')}<span>${s.changes.length ? `${s.changes.length} changed ${s.changes.length === 1 ? 'file' : 'files'}` : 'Working tree clean'}</span>${s.upstream ? `<span class="commit-repo-sync" title="${s.behind} incoming and ${s.ahead} outgoing commits">${s.behind ? `${icon('arrow-down')} ${s.behind}` : ''}${s.ahead ? `${icon('arrow-up')} ${s.ahead}` : ''}${!s.behind && !s.ahead ? 'In sync' : ''}</span>` : ''}</div>
     <div class="commit-repo-meta"><button data-action="branches" aria-label="${escapeHtml(branchActionLabel)}" title="Choose branch" aria-haspopup="dialog" aria-expanded="${ui.branchOpen}" ${ui.busy ? 'disabled' : ''}>${icon('git-branch')} ${escapeHtml(currentBranch)}</button><span>·</span><span class="${ui.syncPhase === 'error' ? 'has-error' : ''}" title="${escapeHtml(ui.syncError || syncState)}">${escapeHtml(syncState)}</span></div>
     <div class="commit-repo-identity ${s.identity?.ready ? '' : 'missing'}">${icon('account')}<span title="${escapeHtml(s.identity?.ready ? `${s.identity.name} <${s.identity.email}>` : 'Git author or committer identity is incomplete')}">${s.identity?.ready ? `${escapeHtml(s.identity.name)} &lt;${escapeHtml(s.identity.email)}&gt;` : 'Git identity missing'}</span><button data-action="configure-git-identity" ${ui.busy ? 'disabled' : ''}>${s.identity?.ready ? 'Edit' : 'Set identity…'}</button></div>
     ${detached ? `<div class="commit-repo-warning" role="note">${icon('warning')}<span>New commits here have no branch name. Create a branch to keep them easy to find.</span><button data-action="save-detached-head" ${ui.busy ? 'disabled' : ''}>Create branch…</button></div>` : ''}
@@ -1120,10 +1106,11 @@ function renderBranchContextMenu() {
   const menu = ui.branchContextMenu;
   if (!menu) return '';
   const width = 264;
+  const trackedLocal = menu.kind === 'branch' && !menu.remote && ui.snapshot?.branches.some((branch) => branch.name === menu.ref && Boolean(branch.upstream));
   const actionCount = 3
     + (menu.kind === 'branch' && !menu.current ? 3 : 0)
     + (menu.kind === 'branch' && !menu.remote ? 1 : 0)
-    + (menu.kind === 'branch' && !menu.remote && !menu.current && ui.snapshot?.branches.some((branch) => branch.name === menu.ref && Boolean(branch.upstream)) ? 1 : 0);
+    + (trackedLocal ? 2 : 0);
   const height = 40 + actionCount * 27 + 12;
   const left = clamp(menu.x, 8, Math.max(8, window.innerWidth - width - 8));
   const top = clamp(menu.y, 8, Math.max(8, window.innerHeight - height - 8));
@@ -1131,7 +1118,7 @@ function renderBranchContextMenu() {
   return `<div class="context-menu branch-context-menu" data-branch-context role="menu" aria-label="Actions for ${escapeHtml(menu.ref)}" style="left:${left}px;top:${top}px">
     <div class="context-menu-title branch-context-title"><span>${icon(menu.remote ? 'cloud' : menu.kind === 'tag' ? 'tag' : 'git-branch')}</span><strong title="${escapeHtml(menu.ref)}">${escapeHtml(menu.ref)}</strong></div>
     ${menu.kind === 'branch' && !menu.current ? `<button role="menuitem" data-branch-context-action="checkout" ${ui.busy ? 'disabled' : ''}>${icon('check')}<span>Checkout</span></button>` : ''}
-    ${menu.kind === 'branch' && !menu.remote && !menu.current && ui.snapshot?.branches.some((branch) => branch.name === menu.ref && Boolean(branch.upstream)) ? `<button role="menuitem" data-branch-context-action="update" ${ui.busy ? 'disabled' : ''}>${icon('arrow-down')}<span>Update from Remote</span></button>` : ''}
+    ${trackedLocal ? `<button role="menuitem" data-branch-context-action="update" ${ui.busy ? 'disabled' : ''}>${icon('arrow-down')}<span>Update from Remote</span></button><button role="menuitem" data-branch-context-action="push" ${ui.busy ? 'disabled' : ''}>${icon('arrow-up')}<span>Push…</span></button>` : ''}
     <button role="menuitem" data-branch-context-action="new" ${ui.busy ? 'disabled' : ''}>${icon('git-branch-create')}<span>New Branch from this ${refLabel}…</span></button>
     ${menu.kind === 'branch' && !menu.current ? `<button role="menuitem" data-branch-context-action="merge" ${ui.busy ? 'disabled' : ''}>${icon('git-merge')}<span>Merge into Current…</span></button>` : ''}
     ${menu.kind === 'branch' ? '<div class="context-menu-separator" role="separator"></div>' : ''}
@@ -1167,13 +1154,12 @@ function renderCommitContextMenu() {
 
 function renderLogActionRail(s) {
   return `<aside class="log-action-rail" aria-label="History actions">
-    <button class="idea-toolbar-button" data-action="show-changes" aria-label="Open Commit tool window" title="Open Commit tool window">${kivoIcon('changes', 'kivo-toolbar-mark')}</button>
-    ${s.repositoryCount > 1 ? `<button class="idea-toolbar-button" data-action="choose-repository" aria-label="Choose repository, current ${escapeHtml(s.repositoryName)}" title="Repository: ${escapeHtml(s.repositoryName)}" ${ui.busy ? 'disabled' : ''}>${icon('repo')}</button>` : ''}
-    <button class="idea-toolbar-button" data-action="refresh" aria-label="Refresh History" title="Refresh History">${icon('refresh')}</button>
-    <button class="idea-toolbar-button" data-action="fetch" aria-label="Fetch remote updates" title="Fetch remote updates" ${ui.busy || ui.syncPhase === 'fetching' ? 'disabled' : ''}>${icon(ui.syncPhase === 'fetching' ? 'loading' : 'cloud-download', ui.syncPhase === 'fetching' ? 'codicon-modifier-spin' : '')}</button>
+    <button class="idea-toolbar-button" data-action="show-changes" aria-label="Open Commit tool window" title="Open Commit tool window">${kivoIcon('changes', 'kivo-toolbar-mark')}<span class="rail-text">Commit</span></button>
+    ${s.repositoryCount > 1 ? `<button class="idea-toolbar-button" data-action="choose-repository" aria-label="Choose repository, current ${escapeHtml(s.repositoryName)}" title="Repository: ${escapeHtml(s.repositoryName)}" ${ui.busy ? 'disabled' : ''}>${icon('repo')}<span class="rail-text">Repos</span></button>` : ''}
+    <button class="idea-toolbar-button" data-action="refresh" aria-label="Refresh History" title="Refresh History">${icon('refresh')}<span class="rail-text">Refresh</span></button>
+    <button class="idea-toolbar-button" data-action="fetch" aria-label="Fetch remote updates" title="Fetch remote updates" ${ui.busy || ui.syncPhase === 'fetching' ? 'disabled' : ''}>${icon(ui.syncPhase === 'fetching' ? 'loading' : 'cloud-download', ui.syncPhase === 'fetching' ? 'codicon-modifier-spin' : '')}<span class="rail-text">Fetch</span></button>
     <span class="idea-toolbar-divider" aria-hidden="true"></span>
-    <button class="idea-toolbar-button" data-action="clear-graph-filters" aria-label="Clear History filters" title="Clear History filters">${icon('clear-all')}</button>
-    <button class="idea-toolbar-button" data-action="toggle-history-focus" aria-label="${ui.historyFocusMode ? 'Show History side panels' : 'Focus on commit history'}" title="${ui.historyFocusMode ? 'Show branches and commit details' : 'Focus on commit history'}" aria-pressed="${ui.historyFocusMode}">${icon(ui.historyFocusMode ? 'screen-full' : 'screen-normal')}</button>
+    <button class="idea-toolbar-button" data-action="toggle-history-focus" aria-label="${ui.historyFocusMode ? 'Show History side panels' : 'Focus on commit history'}" title="${ui.historyFocusMode ? 'Show branches and commit details' : 'Focus on commit history'}" aria-pressed="${ui.historyFocusMode}">${icon(ui.historyFocusMode ? 'screen-full' : 'screen-normal')}<span class="rail-text">${ui.historyFocusMode ? 'Panels' : 'Focus'}</span></button>
   </aside>`;
 }
 
@@ -1220,9 +1206,8 @@ function renderGraph(s) {
         ${renderLogFilterBar(s, commits, filtersActive)}
         <div class="log-column-header" aria-hidden="true" style="--graph-width:${graphWidth}px"><span>AUTHOR</span><span>GRAPH</span><span>COMMIT</span><span>DATE</span></div>
         <div class="graph-list ${graph.compressed ? 'graph-compressed' : ''} ${ui.graphLoadingMore ? 'is-loading' : ''}" data-graph-list role="listbox" aria-label="Commit history${graph.compressed ? `, compact ${laneCount}-lane topology` : ''}" aria-busy="${ui.graphLoadingMore || ui.historyRefLoading}" aria-setsize="${commits.length}" style="--lane-count:${laneCount};--graph-width:${graphWidth}px;--graph-row-height:${GRAPH_ROW_HEIGHT}px">${ui.historyRefLoading ? `<div class="inline-empty" role="status">${icon('loading', 'codicon-modifier-spin')} Loading branch history…</div>` : commits.length ? `${windowed.topSpacer ? `<div class="graph-virtual-spacer" aria-hidden="true" style="height:${windowed.topSpacer}px"></div>` : ''}${visibleCommits.map((commit, index) => `<article class="graph-row ${commit.parents.length > 1 ? 'merge-row' : ''} ${ui.selectedCommitHash === commit.hash ? 'selected' : ''}" data-commit="${escapeHtml(commit.hash)}" data-hash="${escapeHtml(commit.hash)}" role="option" aria-selected="${ui.selectedCommitHash === commit.hash}" aria-posinset="${windowed.start + index + 1}" tabindex="${focusHash === commit.hash ? '0' : '-1'}">
-          <span class="log-author" title="${escapeHtml(commit.author)}">${escapeHtml(commit.author)}</span><div class="graph-canvas">${renderGraphSvg(commit, graph)}</div><div class="graph-commit"><div class="log-subject"><strong title="${escapeHtml(commit.subject)}">${escapeHtml(commit.subject)}</strong>${(commit.refs || []).slice(0, 3).map(renderRef).join('')}</div><span class="log-meta"><code>${escapeHtml(commit.shortHash)}</code>${commit.parents?.length > 1 ? '<span class="merge-note">Merge</span>' : ''}</span></div><time class="log-date" title="${escapeHtml(commit.date)}">${relativeTime(commit.date)}</time>
-        </article>`).join('')}${windowed.bottomSpacer ? `<div class="graph-virtual-spacer" aria-hidden="true" style="height:${windowed.bottomSpacer}px"></div>` : ''}` : `<div class="inline-empty" role="status">${ui.graphLoadingMore && searchingHash ? `Searching older history for ${escapeHtml(ui.graphQuery.trim())}…` : s.commitsHasMore ? `No matches in ${s.commits.length} loaded commits. Load more to search older history.` : s.commits.length ? 'No matching commits' : 'No commits yet'}</div>`}${ui.graphLoadingMore ? `<div class="graph-loading-row" role="status">${icon('loading', 'codicon-modifier-spin')}<span>Loading more history…</span></div>` : ''}</div>
-        ${s.commitsHasMore && !ui.graphLoadingMore && !ui.historyRefLoading ? `<button class="load-more" data-action="load-more-commits" ${ui.busy ? 'disabled' : ''}>${icon('history')}<span>Load more history</span><small>Loaded ${s.commits.length} · Scroll for more</small></button>` : ''}
+          <span class="log-author" title="${escapeHtml(commit.author)}">${escapeHtml(commit.author)}</span><div class="graph-canvas">${renderGraphSvg(commit, graph)}</div><div class="graph-commit"><div class="log-subject"><strong title="${escapeHtml(commit.subject)}">${escapeHtml(commit.subject)}</strong>${(commit.refs || []).slice(0, 3).map(renderRef).join('')}</div><span class="log-meta"><code>${escapeHtml(commit.shortHash)}</code>${commit.parents?.length > 1 ? '<span class="merge-note">Merge</span>' : ''}</span></div><time class="log-date" datetime="${escapeHtml(commit.date)}" title="${escapeHtml(commit.date)}">${absoluteTime(commit.date)}</time>
+        </article>`).join('')}${windowed.bottomSpacer ? `<div class="graph-virtual-spacer" aria-hidden="true" style="height:${windowed.bottomSpacer}px"></div>` : ''}` : `<div class="inline-empty" role="status">${ui.graphLoadingMore && searchingHash ? `Searching older history for ${escapeHtml(ui.graphQuery.trim())}…` : s.commitsHasMore ? `No matches in ${s.commits.length} loaded commits. Scroll down to search older history.` : s.commits.length ? 'No matching commits' : 'No commits yet'}</div>`}${s.commitsHasMore && !ui.historyRefLoading ? `<div class="graph-load-sentinel" aria-hidden="true" style="min-height:${Math.max(56, (ui.graphViewportHeight || 280) - commits.length * GRAPH_ROW_HEIGHT + 64)}px">${ui.graphLoadingMore ? 'Loading older commits…' : 'Scroll for older commits'}</div>` : ''}${ui.graphLoadingMore ? `<div class="graph-loading-row" role="status">${icon('loading', 'codicon-modifier-spin')}<span>Loading more history…</span></div>` : ''}</div>
       </section>
       <div class="log-detail-splitter" data-log-detail-splitter role="separator" aria-label="Resize commit history and details" aria-controls="kivo-log-history kivo-log-details" aria-orientation="${detailUsesRows ? 'horizontal' : 'vertical'}" aria-valuemin="${detailMinimum}" aria-valuemax="${detailMaximum}" aria-valuenow="${detailSize}" tabindex="0" title="Drag to resize. Double-click to reset."></div>
       ${renderCommitDetails(s)}
@@ -1236,7 +1221,7 @@ function logBranchBounds(splitter) {
   const workspace = splitter.closest('.log-workspace');
   const compact = window.matchMedia('(max-width: 860px)').matches;
   const narrow = window.matchMedia('(max-width: 1180px)').matches;
-  const railWidth = compact || narrow ? 30 : 32;
+  const railWidth = compact || narrow ? 30 : 56;
   const detailWidth = compact ? 0 : ui.logDetailWidth;
   const historyMinimum = compact ? 220 : narrow ? 300 : 430;
   const splitterWidth = compact ? 6 : 12;
@@ -1465,7 +1450,14 @@ function runBranchContextAction(event) {
   if (action === 'new' && !ui.busy) post('createBranch', { startPoint: menu.ref });
   if (action === 'checkout' && !ui.busy) post('checkout', { branch: menu.ref, remote: menu.remote });
   if (action === 'merge' && !ui.busy) post('mergeBranch', { branch: menu.ref });
-  if (action === 'update' && !ui.busy && !menu.remote && !menu.current) post('updateBranch', { branch: menu.ref });
+  if (action === 'update' && !ui.busy && !menu.remote) {
+    if (menu.current) post('pull', { strategy: 'ff-only' });
+    else post('updateBranch', { branch: menu.ref });
+  }
+  if (action === 'push' && !ui.busy && !menu.remote) {
+    if (menu.current) post('push');
+    else post('pushBranch', { branch: menu.ref });
+  }
   if (action === 'rename' && !ui.busy) post('renameBranch', { branch: menu.ref });
   if (action === 'delete' && !ui.busy) post('deleteBranch', { branch: menu.ref, remote: menu.remote });
   if (action === 'copy') post('copyBranchName', { branch: menu.ref });

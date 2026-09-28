@@ -7,6 +7,10 @@
 - Show incoming and outgoing markers beside each local branch with a configured remote upstream when the refs differ.
 - Add an Update action to tracked non-current local branches in History; fetch only the selected upstream and fast-forward only that branch without switching HEAD or changing the working tree. Diverged branches remain untouched.
 - Align the Commit branch picker typography with History and highlight the branch toolbar button.
+- Automatically load older History while scrolling, show local timestamps to the second, and strengthen the graph lanes and selected commits.
+- Add Update and Push to tracked local branch menus, including other local branches without switching checkout; review the destination and outgoing commits before pushing.
+- Label History's action rail, remove the duplicate clear control and change summary, and show five recent commits in a compact timeline with working tree and remote counts.
+- Discover repositories through VS Code's Git integration so nested repositories appear in the switcher and file actions use the matching repository.
 
 ## 0.3.1 - 2026-09-28
 

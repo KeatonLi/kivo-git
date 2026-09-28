@@ -32,6 +32,7 @@ type WebviewMessage =
   | { type: 'createBranch'; startPoint: string }
   | { type: 'mergeBranch'; branch: string }
   | { type: 'updateBranch'; branch: string }
+  | { type: 'pushBranch'; branch: string }
   | { type: 'renameBranch'; branch: string }
   | { type: 'deleteBranch'; branch: string; remote: boolean }
   | { type: 'copyBranchName'; branch: string }
@@ -57,6 +58,8 @@ export class IdeaGitViewProvider implements vscode.WebviewViewProvider, vscode.T
   private readonly readyViews = new Set<KivoSurface>();
   private client?: GitClient;
   private selectedWorkspaceRoot?: string;
+  private repositories: vscode.WorkspaceFolder[] = [];
+  private repositoriesLoading?: Promise<void>;
   private refreshTimer?: NodeJS.Timeout;
   private autoFetchTimer?: NodeJS.Timeout;
   private autoFetchPromise?: Promise<void>;
@@ -105,8 +108,7 @@ export class IdeaGitViewProvider implements vscode.WebviewViewProvider, vscode.T
       }),
       vscode.window.onDidChangeActiveColorTheme(() => void this.refreshFileIconTheme()),
       vscode.workspace.onDidChangeWorkspaceFolders(() => {
-        const folders = vscode.workspace.workspaceFolders || [];
-        if (!folders.some((folder) => folder.uri.fsPath === this.selectedWorkspaceRoot)) this.selectedWorkspaceRoot = undefined;
+        void this.discoverRepositories();
         this.resetRepository();
         void this.postToReadyViews({ type: 'empty', message: 'Loading selected repository…' });
         this.configurePolling();
@@ -115,6 +117,7 @@ export class IdeaGitViewProvider implements vscode.WebviewViewProvider, vscode.T
   }
 
   async resolveWebviewView(view: vscode.WebviewView): Promise<void> {
+    await this.discoverRepositories();
     const surface = surfaceForViewType(view.viewType);
     if (!surface) throw new Error(`Unsupported Kivo Git view type: ${view.viewType}`);
     this.views.set(surface, view);
@@ -136,11 +139,12 @@ export class IdeaGitViewProvider implements vscode.WebviewViewProvider, vscode.T
   }
 
   async provideTextDocumentContent(uri: vscode.Uri): Promise<string> {
+    await this.discoverRepositories();
     const parameters = new URLSearchParams(uri.query);
     if (parameters.get('empty') === '1') return '';
     const root = parameters.get('repo');
     const workspace = root
-      ? vscode.workspace.workspaceFolders?.find((folder) => folder.uri.fsPath === root)
+      ? this.availableRepositories().find((folder) => folder.uri.fsPath === root)
       : this.selectedWorkspace();
     if (!workspace) return '';
     const client = workspace.uri.fsPath === this.selectedWorkspace()?.uri.fsPath
@@ -156,7 +160,7 @@ export class IdeaGitViewProvider implements vscode.WebviewViewProvider, vscode.T
   async refresh(silent = false): Promise<void> {
     if (!this.hasVisibleView()) return;
     this.coordinator.request();
-    if (!silent && !vscode.workspace.workspaceFolders?.length) void vscode.window.showInformationMessage(`${IdeaGitViewProvider.productName}: Open a Git repository to start.`);
+    if (!silent && !this.availableRepositories().length) void vscode.window.showInformationMessage(`${IdeaGitViewProvider.productName}: Open a Git repository to start.`);
   }
 
   async showChanges(): Promise<void> {
@@ -169,7 +173,7 @@ export class IdeaGitViewProvider implements vscode.WebviewViewProvider, vscode.T
 
   async openResourceDiff(uri?: vscode.Uri): Promise<void> {
     try {
-      const filePath = this.workspaceRelativePath(uri);
+      const filePath = await this.workspaceRelativePath(uri);
       const client = await this.getClient();
       const snapshot = await client.snapshot(this.commitLimit);
       const change = snapshot.changes.find((candidate) => candidate.path === filePath);
@@ -185,7 +189,7 @@ export class IdeaGitViewProvider implements vscode.WebviewViewProvider, vscode.T
 
   async showFileHistory(uri?: vscode.Uri): Promise<void> {
     try {
-      const filePath = this.workspaceRelativePath(uri);
+      const filePath = await this.workspaceRelativePath(uri);
       this.historyRef = undefined;
       this.pendingHistoryBranchFilter = undefined;
       this.pendingHistoryPathFilter = filePath;
@@ -199,7 +203,7 @@ export class IdeaGitViewProvider implements vscode.WebviewViewProvider, vscode.T
   async showCommitInHistory(hash: string, uri?: vscode.Uri): Promise<void> {
     try {
       if (!/^[0-9a-f]{40}$/i.test(hash)) throw new Error('The Blame commit hash is invalid.');
-      if (uri) this.workspaceRelativePath(uri);
+      if (uri) await this.workspaceRelativePath(uri);
       this.historyRef = undefined;
       this.commitLimit = HISTORY_PAGE_SIZE;
       this.lastSnapshot = undefined;
@@ -217,7 +221,7 @@ export class IdeaGitViewProvider implements vscode.WebviewViewProvider, vscode.T
 
   async showResourceInChanges(uri?: vscode.Uri): Promise<void> {
     try {
-      const filePath = this.workspaceRelativePath(uri);
+      const filePath = await this.workspaceRelativePath(uri);
       const snapshot = await (await this.getClient()).snapshot(this.commitLimit);
       if (!snapshot.changes.some((change) => change.path === filePath)) {
         void vscode.window.showInformationMessage(`${IdeaGitViewProvider.productName}: ${filePath} has no working tree changes.`);
@@ -233,21 +237,24 @@ export class IdeaGitViewProvider implements vscode.WebviewViewProvider, vscode.T
 
   async moveResourceToChangelist(uri?: vscode.Uri): Promise<void> {
     try {
-      const filePath = this.workspaceRelativePath(uri);
+      const filePath = await this.workspaceRelativePath(uri);
       await this.moveFileToChangelist(await this.getClient(), filePath);
     } catch (error) {
       void vscode.window.showErrorMessage(`${IdeaGitViewProvider.productName}: ${this.errorText(error)}`);
     }
   }
 
-  private workspaceRelativePath(uri?: vscode.Uri): string {
+  private async workspaceRelativePath(uri?: vscode.Uri): Promise<string> {
+    await this.discoverRepositories();
     const resource = uri ?? vscode.window.activeTextEditor?.document.uri;
     if (!resource || resource.scheme !== 'file') throw new Error('Choose a file in the current workspace.');
-    const workspace = vscode.workspace.getWorkspaceFolder(resource);
+    const resolved = path.resolve(resource.fsPath);
+    const workspace = this.availableRepositories()
+      .filter((candidate) => resolved.startsWith(`${path.resolve(candidate.uri.fsPath)}${path.sep}`))
+      .sort((left, right) => right.uri.fsPath.length - left.uri.fsPath.length)[0];
     if (!workspace) throw new Error('The selected file is outside the open workspaces.');
     this.selectWorkspace(workspace);
     const root = path.resolve(workspace.uri.fsPath);
-    const resolved = path.resolve(resource.fsPath);
     if (resolved === root || !resolved.startsWith(`${root}${path.sep}`)) throw new Error('The selected file is outside the current workspace.');
     return path.relative(root, resolved).split(path.sep).join('/');
   }
@@ -309,7 +316,7 @@ export class IdeaGitViewProvider implements vscode.WebviewViewProvider, vscode.T
     if (!view) return;
     const payload: WebviewRepositorySnapshot = {
       ...snapshot,
-      repositoryCount: vscode.workspace.workspaceFolders?.length || 0,
+      repositoryCount: this.availableRepositories().length,
       fileIcons: surface === 'changes'
         ? this.fileIconTheme.iconsFor(view.webview, snapshot.changes.map((change) => change.path))
         : {}
@@ -318,6 +325,7 @@ export class IdeaGitViewProvider implements vscode.WebviewViewProvider, vscode.T
   }
 
   private async getClient(): Promise<GitClient> {
+    await this.discoverRepositories();
     const workspace = this.selectedWorkspace();
     if (!workspace) throw new Error('Open a folder containing a Git repository.');
     if (!this.client || this.client.workspaceRoot !== workspace.uri.fsPath) {
@@ -329,8 +337,41 @@ export class IdeaGitViewProvider implements vscode.WebviewViewProvider, vscode.T
   }
 
   private selectedWorkspace(): vscode.WorkspaceFolder | undefined {
-    return vscode.workspace.workspaceFolders?.find((folder) => folder.uri.fsPath === this.selectedWorkspaceRoot)
-      || vscode.workspace.workspaceFolders?.[0];
+    return this.availableRepositories().find((folder) => folder.uri.fsPath === this.selectedWorkspaceRoot)
+      || this.availableRepositories()[0];
+  }
+
+  private availableRepositories(): vscode.WorkspaceFolder[] {
+    return this.repositories.length ? this.repositories : [...(vscode.workspace.workspaceFolders || [])];
+  }
+
+  private async discoverRepositories(): Promise<void> {
+    if (this.repositoriesLoading) return this.repositoriesLoading;
+    this.repositoriesLoading = (async () => {
+      type GitRepository = { rootUri: vscode.Uri };
+      type GitApi = {
+        repositories: GitRepository[];
+        onDidOpenRepository: vscode.Event<GitRepository>;
+        onDidCloseRepository: vscode.Event<GitRepository>;
+      };
+      const extension = vscode.extensions.getExtension<{ getAPI(version: 1): GitApi }>('vscode.git');
+      if (!extension) return;
+      const api = (await extension.activate()).getAPI(1);
+      const update = () => {
+        const previous = this.repositories.map((repository) => repository.uri.fsPath).join('\0');
+        this.repositories = api.repositories.filter((repository) => repository.rootUri.scheme === 'file')
+          .map((repository, index) => ({ uri: repository.rootUri, name: path.basename(repository.rootUri.fsPath), index }));
+        if (previous === this.repositories.map((repository) => repository.uri.fsPath).join('\0')) return;
+        if (this.selectedWorkspaceRoot && !this.availableRepositories().some((repository) => repository.uri.fsPath === this.selectedWorkspaceRoot)) {
+          this.selectedWorkspaceRoot = undefined;
+          this.resetRepository();
+        }
+        void this.refresh(true);
+      };
+      this.context.subscriptions.push(api.onDidOpenRepository(update), api.onDidCloseRepository(update));
+      update();
+    })().catch(() => { /* Fall back to the workspace folders when Git is unavailable. */ });
+    return this.repositoriesLoading;
   }
 
   private selectWorkspace(workspace: vscode.WorkspaceFolder): void {
@@ -361,13 +402,14 @@ export class IdeaGitViewProvider implements vscode.WebviewViewProvider, vscode.T
   }
 
   private async chooseRepository(): Promise<void> {
-    const folders = vscode.workspace.workspaceFolders || [];
+    await this.discoverRepositories();
+    const folders = this.availableRepositories();
     if (folders.length < 2) return;
     const selected = await vscode.window.showQuickPick(folders.map((folder) => ({
       label: folder.name,
       description: folder.uri.fsPath,
       folder
-    })), { title: 'Choose Kivo Git Repository', placeHolder: 'Select an open workspace folder' });
+    })), { title: 'Choose Kivo Git Repository', placeHolder: 'Select a detected Git repository' });
     if (!selected) return;
     try {
       this.selectWorkspace(selected.folder);
@@ -549,6 +591,9 @@ export class IdeaGitViewProvider implements vscode.WebviewViewProvider, vscode.T
         case 'updateBranch':
           await this.operation('branch', `Updating ${message.branch}…`, () => client.updateLocalBranch(message.branch), `${message.branch} updated from its remote`);
           return;
+        case 'pushBranch':
+          await this.pushWithPreview(client, false, message.branch);
+          return;
         case 'renameBranch':
           await this.renameBranch(client, message.branch);
           return;
@@ -726,8 +771,8 @@ export class IdeaGitViewProvider implements vscode.WebviewViewProvider, vscode.T
     }
   }
 
-  private async pushWithPreview(client: GitClient, afterCommit = false): Promise<boolean> {
-    const preview = await client.pushPreview();
+  private async pushWithPreview(client: GitClient, afterCommit = false, branch?: string): Promise<boolean> {
+    const preview = branch ? await client.pushBranchPreview(branch) : await client.pushPreview();
     if (!preview.ahead) {
       void vscode.window.showInformationMessage('There are no outgoing commits to push.');
       return false;
@@ -749,7 +794,7 @@ export class IdeaGitViewProvider implements vscode.WebviewViewProvider, vscode.T
     const confirmation = `Push ${preview.ahead} commit${preview.ahead === 1 ? '' : 's'}`;
     const choice = await vscode.window.showWarningMessage(afterCommit ? 'Commit created. Review its push destination.' : 'Review push destination and outgoing commits.', { modal: true, detail }, confirmation);
     if (choice !== confirmation) return false;
-    const pushed = await this.operation('push', 'Pushing…', () => client.push(preview), 'Push complete');
+    const pushed = await this.operation('push', 'Pushing…', () => branch ? client.pushBranch(branch, preview) : client.push(preview), 'Push complete');
     if (!pushed && /rejected|non-fast-forward|fetch first|failed to push/i.test(this.syncError || '')) {
       const action = await vscode.window.showWarningMessage('Push was rejected. Your local commits are safe.', { modal: true, detail: 'Fetch the latest remote commits and review them before choosing a pull strategy. Kivo Git will not force-push or retry automatically.' }, 'Fetch and Review');
       if (action === 'Fetch and Review') await this.fetchAndReview(client);
@@ -821,7 +866,7 @@ export class IdeaGitViewProvider implements vscode.WebviewViewProvider, vscode.T
         if (choice !== 'Save and Blame') return;
         if (!await editor.document.save()) throw new Error('The file could not be saved. Line history was not checked.');
       }
-      const filePath = this.workspaceRelativePath(editor.document.uri);
+      const filePath = await this.workspaceRelativePath(editor.document.uri);
       const line = editor.selection.active.line + 1;
       const blame = await (await this.getClient()).blameLine(filePath, line);
       const shortHash = blame.hash.slice(0, 8);

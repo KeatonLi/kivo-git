@@ -486,6 +486,32 @@ describe('GitClient integration', () => {
     expect(await git(remote, ['rev-parse', 'main'])).toBe(originalRemoteHead);
   });
 
+  it('pushes a reviewed non-current local branch without changing checkout or working files', async () => {
+    const root = await createRepository();
+    const remote = await fs.mkdtemp(path.join(os.tmpdir(), 'ideagit-selected-push-'));
+    temporaryRepositories.push(remote);
+    await git(remote, ['init', '--bare']);
+    await git(root, ['remote', 'add', 'origin', remote]);
+    await git(root, ['push', '-u', 'origin', 'main']);
+    await git(root, ['switch', '-c', 'feature/selected']);
+    await git(root, ['push', '-u', 'origin', 'feature/selected']);
+    await fs.writeFile(path.join(root, 'feature.txt'), 'feature\n');
+    await git(root, ['add', 'feature.txt']);
+    await git(root, ['commit', '-m', 'selected work']);
+    const selectedHead = await git(root, ['rev-parse', 'HEAD']);
+    await git(root, ['switch', 'main']);
+    await fs.writeFile(path.join(root, 'local.txt'), 'keep this work\n');
+    const mainHead = await git(root, ['rev-parse', 'HEAD']);
+    const client = new GitClient(root);
+    const preview = await client.pushBranchPreview('feature/selected');
+    expect(preview).toMatchObject({ branch: 'feature/selected', ahead: 1, behind: 0, targetBranch: 'feature/selected' });
+    await client.pushBranch('feature/selected', preview);
+    expect(await git(remote, ['rev-parse', 'feature/selected'])).toBe(selectedHead);
+    expect(await git(root, ['rev-parse', 'HEAD'])).toBe(mainHead);
+    expect(await fs.readFile(path.join(root, 'local.txt'), 'utf8')).toBe('keep this work\n');
+    expect(await git(remote, ['rev-parse', 'main'])).toBe(mainHead);
+  });
+
   it('explains when a branch has no pushable upstream', async () => {
     const root = await createRepository();
     await expect(new GitClient(root).pushPreview()).rejects.toThrow('no pushable upstream');
