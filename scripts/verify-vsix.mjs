@@ -1,5 +1,5 @@
 import { execFileSync } from 'node:child_process';
-import { existsSync } from 'node:fs';
+import { existsSync, readFileSync } from 'node:fs';
 import path from 'node:path';
 
 const [vsixPath] = process.argv.slice(2);
@@ -21,6 +21,8 @@ for (const entry of requiredEntries) {
 }
 
 const manifest = JSON.parse(execFileSync('unzip', ['-p', vsixPath, 'extension/package.json'], { encoding: 'utf8' }));
+if (`${manifest.publisher}.${manifest.name}` !== 'KeatonLi.kivo-git') throw new Error('VSIX has the wrong Marketplace extension ID.');
+if (manifest.version !== JSON.parse(readFileSync('package.json', 'utf8')).version) throw new Error('VSIX has the wrong release version.');
 const changes = manifest?.contributes?.views?.ideaGitChanges ?? [];
 const history = manifest?.contributes?.views?.ideaGitHistory ?? [];
 if (!changes.some((view) => view.id === 'ideaGit.changes')) throw new Error('VSIX is missing the left Changes view.');
