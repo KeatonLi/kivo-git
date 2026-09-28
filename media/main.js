@@ -77,6 +77,7 @@ const ui = {
   collapsedLogBranchFolders: new Set(initialRepositoryState.collapsedLogBranchFolders || []),
   branchVisibleCounts: { local: BRANCH_PAGE_SIZE, remote: BRANCH_PAGE_SIZE, tags: BRANCH_PAGE_SIZE },
   branchPopupVisibleCounts: { local: BRANCH_PAGE_SIZE, remote: BRANCH_PAGE_SIZE },
+  branchPopupRemoteExpanded: false,
   busy: false,
   operationKind: undefined,
   operationId: 0,
@@ -273,6 +274,7 @@ function restoreRepositoryState(root, state = {}) {
   ui.collapsedLogBranchFolders = new Set(state.collapsedLogBranchFolders || []);
   ui.branchVisibleCounts = { local: BRANCH_PAGE_SIZE, remote: BRANCH_PAGE_SIZE, tags: BRANCH_PAGE_SIZE };
   ui.branchPopupVisibleCounts = { local: BRANCH_PAGE_SIZE, remote: BRANCH_PAGE_SIZE };
+  ui.branchPopupRemoteExpanded = false;
   ui.graphScrollTop = Number(state.graphScrollTop) || 0;
   ui.graphViewportWidth = 0;
   ui.graphViewportHeight = 0;
@@ -732,23 +734,25 @@ function renderCommitToolbar(s) {
   const branchActionLabel = s.branch === '(detached)' ? 'Git branches, detached HEAD' : `Git branches, current branch ${s.branch}`;
   const fetchIcon = syncing || ui.operationKind === 'fetch' ? 'loading' : 'refresh';
   const hasUpstream = Boolean(s.upstream);
-  const pullTitle = s.behind ? `Pull ${s.behind} incoming commit${s.behind === 1 ? '' : 's'}` : 'No incoming commits';
+  const pullTitle = hasUpstream
+    ? s.behind ? `Pull ${s.behind} known incoming commit${s.behind === 1 ? '' : 's'} (checks remote)` : 'Pull from upstream (checks remote for new commits)'
+    : 'Set an upstream branch before pulling';
   const pushTitle = s.ahead ? `Push ${s.ahead} outgoing commit${s.ahead === 1 ? '' : 's'}` : 'No commits to push';
   return `<header class="commit-toolbar" aria-label="Commit tool window actions" aria-busy="${syncing}">
     <button class="idea-toolbar-button" data-action="refresh" aria-label="Refresh changes" title="Refresh changes" ${ui.busy ? 'disabled' : ''}>${icon('refresh')}</button>
     ${s.repositoryCount > 1 ? `<button class="idea-toolbar-button" data-action="choose-repository" aria-label="Choose repository, current ${escapeHtml(s.repositoryName)}" title="Repository: ${escapeHtml(s.repositoryName)}" ${ui.busy ? 'disabled' : ''}>${icon('repo')}</button>` : ''}
     <button class="idea-toolbar-button" data-action="branches" aria-label="${escapeHtml(branchActionLabel)}" title="Branches: ${escapeHtml(branchLabel)}" aria-haspopup="dialog" aria-expanded="${ui.branchOpen}">${icon('git-branch')}</button>
     <div class="sync-action-wrap compact-sync-action">
-    <button class="idea-toolbar-button ${s.behind ? 'has-count incoming-count' : ''}" data-action="pull-menu" aria-label="${escapeHtml(pullTitle)}" title="${escapeHtml(pullTitle)}" aria-haspopup="menu" aria-expanded="${ui.pullMenuOpen}" ${!hasUpstream || !s.behind || ui.busy || syncing ? 'disabled' : ''}>${icon('arrow-down')}${s.behind ? `<span class="tool-count">${s.behind}</span>` : ''}</button>
+    <button class="idea-toolbar-button ${s.behind ? 'has-count incoming-count' : ''}" data-action="pull-menu" aria-label="${escapeHtml(pullTitle)}" title="${escapeHtml(pullTitle)}" aria-haspopup="menu" aria-expanded="${ui.pullMenuOpen}" ${!hasUpstream || ui.busy || syncing ? 'disabled' : ''}>${icon('arrow-down')}${s.behind ? `<span class="tool-count">${s.behind}</span>` : ''}</button>
       ${renderPullMenu()}
     </div>
     <button class="idea-toolbar-button ${s.ahead ? 'has-count outgoing-count' : ''}" data-action="push" aria-label="${escapeHtml(pushTitle)}" title="${escapeHtml(pushTitle)}" ${!hasUpstream || !s.ahead || ui.busy || syncing ? 'disabled' : ''}>${icon('arrow-up')}${s.ahead ? `<span class="tool-count">${s.ahead}</span>` : ''}</button>
+    <button class="idea-toolbar-button" data-action="show-log" aria-label="Open Kivo Git History in bottom Panel" title="Open History in bottom Panel">${kivoIcon('graph', 'kivo-toolbar-mark')}</button>
     <span class="toolbar-spacer"></span>
     <button class="idea-toolbar-button" data-action="search-changes" aria-label="${ui.changeSearchOpen ? 'Close changed-file search' : 'Search changed files'}" title="${ui.changeSearchOpen ? 'Close changed-file search' : 'Search changed files'}" aria-expanded="${ui.changeSearchOpen}">${icon(ui.changeSearchOpen ? 'close' : 'search')}</button>
     <div class="commit-toolbar-more">
       <button class="idea-toolbar-button" data-action="toolbar-more" aria-label="More Commit actions" title="More Commit actions" aria-haspopup="menu" aria-expanded="${ui.toolbarMenuOpen}">${icon('ellipsis')}</button>
       <div class="commit-toolbar-menu ${ui.toolbarMenuOpen ? 'open' : ''}" role="menu" aria-label="More Commit actions" ${ui.toolbarMenuOpen ? '' : 'inert'}>
-        <button role="menuitem" data-toolbar-action="show-log">${kivoIcon('graph', 'kivo-toolbar-mark')}<span>Open History</span></button>
         <button role="menuitem" data-toolbar-action="fetch" ${ui.busy || syncing ? 'disabled' : ''}>${icon(fetchIcon, syncing || ui.operationKind === 'fetch' ? 'codicon-modifier-spin' : '')}<span>${syncing ? 'Checking remote…' : 'Fetch remote updates'}</span></button>
         <span class="commit-toolbar-menu-divider" role="separator"></span>
         <button role="menuitem" data-toolbar-action="new-list" ${ui.busy ? 'disabled' : ''}>${icon('add')}<span>Create changelist</span></button>
@@ -1802,7 +1806,7 @@ function adjustCommitZonePercent(event) {
 function renderBranchPopup(s) {
   const query = ui.branchQuery.trim().toLowerCase();
   const filtered = s.branches.filter((branch) => branch.name.toLowerCase().includes(query));
-  const local = filtered.filter((branch) => !branch.remote);
+  const local = filtered.filter((branch) => !branch.remote).sort((a, b) => Number(b.current) - Number(a.current));
   const remote = filtered.filter((branch) => branch.remote);
   const rows = (items) => items.map((branch) => `<button class="branch-row ${branch.current ? 'current' : ''}" data-checkout="${escapeHtml(branch.name)}" data-remote="${branch.remote}" ${ui.busy ? 'disabled' : ''}>
       ${icon(branch.current ? 'check' : branch.remote ? 'cloud' : 'git-branch')}<span class="branch-row-name">${escapeHtml(branch.name)}</span>${branch.tracking ? `<small>${escapeHtml(branch.tracking)}</small>` : ''}
@@ -1811,7 +1815,8 @@ function renderBranchPopup(s) {
     const count = ui.branchPopupVisibleCounts[key];
     const visible = items.slice(0, count);
     const remaining = Math.max(0, items.length - visible.length);
-    return `<section class="branch-popup-group"><h3>${label}<span>${items.length}</span></h3>${rows(visible) || `<p class="no-results">No ${label.toLowerCase()}</p>`}${remaining ? `<button class="branch-popup-more" data-branch-popup-more="${key}">Show ${Math.min(BRANCH_PAGE_SIZE, remaining)} more</button>` : ''}</section>`;
+    const expanded = key !== 'remote' || ui.branchPopupRemoteExpanded || Boolean(query);
+    return `<section class="branch-popup-group"><h3>${key === 'remote' ? `<button class="branch-popup-toggle" data-branch-popup-toggle="remote" aria-expanded="${expanded}">${icon(expanded ? 'chevron-down' : 'chevron-right')}${label}<span>${items.length}</span></button>` : `${label}<span>${items.length}</span>`}</h3>${expanded ? `${rows(visible) || `<p class="no-results">No ${label.toLowerCase()}</p>`}${remaining ? `<button class="branch-popup-more" data-branch-popup-more="${key}">Show ${Math.min(BRANCH_PAGE_SIZE, remaining)} more</button>` : ''}` : ''}</section>`;
   };
   return `<div class="branch-overlay ${ui.branchOpen ? 'open' : ''}" ${ui.branchOpen ? '' : 'inert'} aria-hidden="${!ui.branchOpen}"><div class="scrim" data-action="close-branches"></div><aside class="branch-popup" role="dialog" aria-modal="true" aria-label="Git branches">
     <div class="popup-title"><strong>Git Branches</strong><button class="icon-button" aria-label="Close branches" data-action="close-branches">${icon('close')}</button></div>
@@ -2309,6 +2314,11 @@ function bind() {
     render();
     requestAnimationFrame(() => (app.querySelector(`[data-branch-popup-more="${group}"]`) || app.querySelector('#branch-search'))?.focus());
   });
+  once('[data-branch-popup-toggle]', 'click', () => {
+    ui.branchPopupRemoteExpanded = !ui.branchPopupRemoteExpanded;
+    render();
+    requestAnimationFrame(() => app.querySelector('[data-branch-popup-toggle]')?.focus());
+  });
 }
 
 function handleAction(action) {
@@ -2384,6 +2394,7 @@ function handleAction(action) {
   if (action === 'branches') {
     ui.branchOpen = !ui.branchOpen;
     if (!ui.branchOpen) ui.branchQuery = '';
+    else ui.branchPopupRemoteExpanded = false;
     render();
     if (ui.branchOpen) setTimeout(() => app.querySelector('#branch-search')?.focus(), 30);
   }

@@ -376,7 +376,7 @@ body.commit-panel-resizing .commit-panel-splitter::after { top: 1px; height: 3px
 
 .branch-overlay { position: fixed; inset: 0; z-index: 10; pointer-events: none; }
 .scrim { position: absolute; inset: 0; background: rgba(0,0,0,.25); opacity: 0; transition: opacity 140ms ease; backdrop-filter: blur(1px); }
-.branch-popup { position: absolute; z-index: 1; left: 7px; right: 7px; top: 7px; max-height: calc(100vh - 14px); display: flex; flex-direction: column; border: 1px solid var(--vscode-widget-border, var(--border-subtle)); border-radius: var(--radius-lg); background: var(--vscode-editorWidget-background); box-shadow: var(--shadow-popover); opacity: 0; transform: translateY(-5px) scale(.985); transform-origin: top center; transition: opacity 170ms ease, transform 190ms var(--ease); overflow: hidden; }
+.branch-popup { position: absolute; z-index: 1; left: 7px; right: 7px; top: 35px; max-height: min(520px, calc(100vh - 45px)); display: flex; flex-direction: column; border: 1px solid var(--vscode-widget-border, var(--border-subtle)); border-radius: var(--radius-lg); background: var(--vscode-editorWidget-background); box-shadow: var(--shadow-popover); opacity: 0; transform: translateY(-5px) scale(.985); transform-origin: top center; transition: opacity 170ms ease, transform 190ms var(--ease); overflow: hidden; }
 .branch-overlay.open { pointer-events: auto; }
 .branch-overlay.open .scrim { opacity: 1; }
 .branch-overlay.open .branch-popup { opacity: 1; transform: translateY(0) scale(1); }
@@ -388,6 +388,9 @@ body.commit-panel-resizing .commit-panel-splitter::after { top: 1px; height: 3px
 .branch-groups h3 { margin: 9px 7px 4px; color: var(--muted); font-size: 9px; letter-spacing: .55px; }
 .branch-popup-group h3 { display: flex; align-items: center; justify-content: space-between; }
 .branch-popup-group h3 span { font-weight: 500; letter-spacing: 0; }
+.branch-popup-toggle { display: flex; align-items: center; gap: 5px; width: 100%; padding: 2px 0; background: transparent; color: inherit; font: inherit; letter-spacing: inherit; text-align: left; cursor: pointer; }
+.branch-popup-toggle span { margin-left: auto; }
+.branch-popup-toggle:hover, .branch-popup-toggle:focus-visible { color: var(--vscode-foreground); outline: none; }
 .branch-row { width: 100%; display: flex; align-items: center; gap: 7px; padding: 6px 7px; border-radius: var(--radius-sm); background: transparent; text-align: left; cursor: pointer; }
 .branch-row:hover, .branch-row:focus-visible { background: var(--vscode-list-hoverBackground); outline: none; }
 .branch-row.current { color: var(--accent); }
