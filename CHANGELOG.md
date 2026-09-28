@@ -2,6 +2,12 @@
 
 ## Unreleased
 
+## 0.3.1 - 2026-09-28
+
+- Kept Pull available on tracking branches even when no incoming commits are cached; Push still requires outgoing commits.
+- Made the branch picker compact, placed the current branch first, and collapsed remote branches until expanded or searched.
+- Added a visible Commit toolbar button that opens Kivo Git History in the bottom Panel.
+
 ## 0.3.0 - 2026-09-28
 
 - Corrected the Marketplace category to `SCM Providers` so the release can be uploaded.

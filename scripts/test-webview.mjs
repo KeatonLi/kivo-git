@@ -78,8 +78,20 @@ try {
   assert.match(await page.locator('.commit-repo-meta [data-action="branches"]').getAttribute('aria-label'), /feature\/keaton\/ACKk8s/);
   assert.match(await page.locator('.commit-repo-meta').textContent(), /Tracking origin\/feature\/keaton\/ACKk8s/);
   assert.equal(await page.locator('.commit-panel').evaluate((element) => getComputedStyle(element).flexBasis), '188px', 'The Commit form should reserve room for selection feedback.');
+  assert.equal(await page.locator('.commit-toolbar [data-action="show-log"]').count(), 1, 'History should have a visible bottom-Panel shortcut.');
+  await page.locator('.commit-toolbar [data-action="show-log"]').click();
+  assert.ok(await page.evaluate(() => window.__vscodeMessages.some((message) => message.type === 'showLog')), 'The shortcut should focus History through VS Code.');
   await page.locator('.commit-repo-meta [data-action="branches"]').click();
   assert.equal(await page.locator('.branch-popup').count(), 1, 'The branch shortcut should open the existing branch picker.');
+  const picker = await page.locator('.branch-popup').boundingBox();
+  assert.ok(picker && picker.y >= 30 && picker.height <= 520, 'The branch picker should stay below the toolbar and leave the rest of the sidebar visible.');
+  assert.equal(await page.locator('.branch-popup [data-checkout]').first().getAttribute('data-checkout'), 'feature/keaton/ACKk8s', 'The current branch should be first.');
+  assert.equal(await page.locator('.branch-popup [data-checkout][data-remote="true"]').count(), 0, 'Remote branches should start collapsed.');
+  await page.locator('[data-branch-popup-toggle="remote"]').click();
+  assert.equal(await page.locator('.branch-popup [data-checkout][data-remote="true"]').count(), 3, 'The remote group should expand on demand.');
+  await page.locator('[data-branch-popup-toggle="remote"]').click();
+  await page.locator('#branch-search').fill('origin/master');
+  assert.equal(await page.locator('.branch-popup [data-checkout][data-remote="true"]').count(), 1, 'Search should find remote branches even while their group is collapsed.');
   await page.keyboard.press('Escape');
   await page.locator('.commit-toolbar [data-action="toolbar-more"]').click();
   assert.equal(await page.locator('.commit-toolbar-menu.open').count(), 1, 'Secondary Commit actions should open as a readable menu.');
@@ -88,6 +100,15 @@ try {
   await page.evaluate(() => window.dispatchEvent(new MessageEvent('message', { data: { type: 'syncStatus', phase: 'error', error: 'Remote unavailable' } })));
   assert.match(await page.locator('.commit-repo-meta .has-error').textContent(), /Fetch failed/, 'The compact Commit status should expose remote errors.');
   await page.evaluate(() => window.dispatchEvent(new MessageEvent('message', { data: { type: 'syncStatus', phase: 'idle' } })));
+
+  await openSurface(page, 'surface=changes&state=sync-clean');
+  assert.equal(await page.locator('[data-action="pull-menu"]').isEnabled(), true, 'Pull should stay available with an upstream when cached incoming count is zero.');
+  assert.equal(await page.locator('.commit-toolbar [data-action="push"]').isEnabled(), false, 'Push needs outgoing commits.');
+  await page.locator('[data-action="pull-menu"]').click();
+  await page.locator('[data-pull-strategy="ff-only"]').click();
+  assert.ok(await page.evaluate(() => window.__vscodeMessages.some((message) => message.type === 'pull')), 'Pull should reach Git even when no incoming commits were cached.');
+  await openSurface(page, 'surface=changes&state=no-upstream');
+  assert.equal(await page.locator('[data-action="pull-menu"]').isEnabled(), false, 'Pull without a tracking branch should explain why it cannot run.');
 
   await openSurface(page, 'surface=changes&state=multi');
   const switchRepository = page.getByRole('button', { name: /Choose repository, current ack-k8s/ }).first();

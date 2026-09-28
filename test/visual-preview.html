@@ -93,6 +93,11 @@
         Object.assign(change, { staged: index !== 1, indexStatus: index === 1 ? '.' : 'M', workingTreeStatus: index === 0 ? '.' : 'M' });
       });
       fixture.changelists[0].changes = fixture.changes;
+      if (new URLSearchParams(location.search).get('state') === 'sync-clean') {
+        fixture.ahead = 0;
+        fixture.behind = 0;
+      }
+      if (new URLSearchParams(location.search).get('state') === 'no-upstream') fixture.upstream = '';
       if (new URLSearchParams(location.search).get('state') === 'empty') {
         fixture.changes = [];
         fixture.changelists[0].changes = [];
