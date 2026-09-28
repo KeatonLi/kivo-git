@@ -61,10 +61,10 @@ Inline blame is on by default. Run **Kivo Git: Toggle Inline Blame** from the Co
 
 ## Install
 
-Install **Kivo Git** from the [VS Code Marketplace](https://marketplace.visualstudio.com/items?itemName=KeatonLi.idea-git), or run:
+Install **Kivo Git** from the [VS Code Marketplace](https://marketplace.visualstudio.com/items?itemName=KeatonLi.kivo-git), or run:
 
 ```bash
-code --install-extension KeatonLi.idea-git
+code --install-extension KeatonLi.kivo-git
 ```
 
 Alternatively, download the `.vsix` asset from the [latest GitHub Release](https://github.com/KeatonLi/kivo-git/releases), then install it from VS Code’s Extensions view (`⋯` → **Install from VSIX…**) or with:
