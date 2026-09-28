@@ -444,7 +444,7 @@ export class IdeaGitViewProvider implements vscode.WebviewViewProvider, vscode.T
       return;
     }
     if (message.type === 'openSettings') {
-      await vscode.commands.executeCommand('workbench.action.openSettings', '@ext:keatonli.idea-git');
+      await vscode.commands.executeCommand('workbench.action.openSettings', '@ext:KeatonLi.kivo-git');
       return;
     }
     try {

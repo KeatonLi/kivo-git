@@ -2,7 +2,7 @@ const assert = require('node:assert/strict');
 const vscode = require('vscode');
 
 exports.run = async function run() {
-  const extension = vscode.extensions.getExtension('keatonli.idea-git');
+  const extension = vscode.extensions.getExtension('KeatonLi.kivo-git');
   assert.ok(extension, 'Kivo Git must be discoverable by the Extension Development Host.');
   await extension.activate();
 
