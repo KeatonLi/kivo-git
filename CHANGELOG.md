@@ -4,6 +4,7 @@
 
 ## 0.3.0 - 2026-09-28
 
+- Corrected the Marketplace category to `SCM Providers` so the release can be uploaded.
 - Renamed the Marketplace extension ID to `KeatonLi.kivo-git` because `idea-git` was already taken.
 - Added optional current-line inline blame with delayed, bounded Git lookups, short-lived caching, unsaved-edit safety, hover details, and a Command Palette toggle.
 - Preserved ID-keyed controls when opening file search so the file tree cannot inherit splitter drag handlers during DOM reuse.

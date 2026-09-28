@@ -23,6 +23,14 @@ for (const entry of requiredEntries) {
 const manifest = JSON.parse(execFileSync('unzip', ['-p', vsixPath, 'extension/package.json'], { encoding: 'utf8' }));
 if (`${manifest.publisher}.${manifest.name}` !== 'KeatonLi.kivo-git') throw new Error('VSIX has the wrong Marketplace extension ID.');
 if (manifest.version !== JSON.parse(readFileSync('package.json', 'utf8')).version) throw new Error('VSIX has the wrong release version.');
+const marketplaceCategories = new Set([
+  'Programming Languages', 'Snippets', 'Linters', 'Themes', 'Debuggers', 'Formatters',
+  'Keymaps', 'SCM Providers', 'Other', 'Extension Packs', 'Language Packs',
+  'Data Science', 'Machine Learning', 'Visualization', 'Notebooks', 'Education', 'Testing'
+]);
+for (const category of manifest.categories ?? []) {
+  if (!marketplaceCategories.has(category)) throw new Error(`VSIX has an unsupported Marketplace category: ${category}`);
+}
 const changes = manifest?.contributes?.views?.ideaGitChanges ?? [];
 const history = manifest?.contributes?.views?.ideaGitHistory ?? [];
 if (!changes.some((view) => view.id === 'ideaGit.changes')) throw new Error('VSIX is missing the left Changes view.');
