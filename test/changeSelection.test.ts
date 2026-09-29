@@ -40,4 +40,13 @@ describe('filtered change selection', () => {
     expect(collapsed.visiblePaths).toEqual([]);
     expect(collapsed.hiddenCount).toBe(0);
   });
+
+  it('keeps range selection in the same tracked-first order shown in the file list', async () => {
+    const api = await selection();
+    const mixed = { changes, changelists: [{ id: 'default', changes: [changes[0], changes[3], changes[1], changes[2]] }] };
+    const result = api.model(mixed);
+    expect(result.visiblePaths).toEqual(['a.txt', 'b.txt', 'c.txt', 'd.txt']);
+    expect(api.range(result.visiblePaths, 'b.txt', 'd.txt')).toEqual(['b.txt', 'c.txt', 'd.txt']);
+    expect(mixed.changelists[0]!.changes[1]!.path).toBe('d.txt');
+  });
 });

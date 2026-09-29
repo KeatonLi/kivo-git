@@ -73,15 +73,13 @@ try {
   await page.getByRole('checkbox', { name: 'Select matching files in Default Changelist', exact: true }).uncheck();
   assert.equal(await page.locator('[data-select]:checked').count(), 0);
   assert.equal(await page.locator('.workspace-brief').count(), 0, 'The Commit view should leave repository status to History.');
-  const repositoryContext = page.locator('.commit-repository-context');
-  assert.equal(await repositoryContext.count(), 1, 'The Commit view should use its lower area for branch and remote context.');
-  assert.match(await page.locator('.commit-repo-meta [data-action="branches"]').getAttribute('aria-label'), /feature\/keaton\/ACKk8s/);
-  assert.match(await page.locator('.commit-repo-meta').textContent(), /Tracking origin\/feature\/keaton\/ACKk8s/);
+  assert.equal(await page.locator('.commit-repository-context').count(), 0, 'The lower area should show recent commits without redundant status cards.');
+  assert.match(await page.locator('.commit-recent').textContent(), /Recent commits/);
   assert.equal(await page.locator('.commit-panel').evaluate((element) => getComputedStyle(element).flexBasis), '188px', 'The Commit form should reserve room for selection feedback.');
   assert.equal(await page.locator('.commit-toolbar [data-action="show-log"]').count(), 1, 'History should have a visible bottom-Panel shortcut.');
   await page.locator('.commit-toolbar [data-action="show-log"]').click();
   assert.ok(await page.evaluate(() => window.__vscodeMessages.some((message) => message.type === 'showLog')), 'The shortcut should focus History through VS Code.');
-  await page.locator('.commit-repo-meta [data-action="branches"]').click();
+  await page.locator('.commit-toolbar [data-action="branches"]').click();
   assert.equal(await page.locator('.branch-popup').count(), 1, 'The branch shortcut should open the existing branch picker.');
   const popupFont = await page.locator('.branch-popup').evaluate((element) => getComputedStyle(element).fontFamily);
   const picker = await page.locator('.branch-popup').boundingBox();
@@ -99,7 +97,7 @@ try {
   await page.locator('[data-toolbar-action="fetch"]').click();
   assert.ok(await page.evaluate(() => window.__vscodeMessages.some((message) => message.type === 'fetch')), 'Fetch should reach the VS Code message bridge.');
   await page.evaluate(() => window.dispatchEvent(new MessageEvent('message', { data: { type: 'syncStatus', phase: 'error', error: 'Remote unavailable' } })));
-  assert.match(await page.locator('.commit-repo-meta .has-error').textContent(), /Remote check failed/, 'The compact Commit status should expose remote errors.');
+  assert.match(await page.locator('.commit-toolbar-more .has-error').getAttribute('aria-label'), /Remote check failed/, 'Remote failures should remain visible on the toolbar.');
   await page.evaluate(() => window.dispatchEvent(new MessageEvent('message', { data: { type: 'syncStatus', phase: 'idle' } })));
 
   await openSurface(page, 'surface=changes&state=sync-clean');
@@ -110,7 +108,8 @@ try {
   assert.ok(await page.evaluate(() => window.__vscodeMessages.some((message) => message.type === 'pull')), 'Pull should reach Git even when no incoming commits were cached.');
   await openSurface(page, 'surface=changes&state=no-upstream');
   assert.equal(await page.locator('[data-action="pull-menu"]').isEnabled(), false, 'Pull without a tracking branch should explain why it cannot run.');
-  await page.locator('[data-action="configure-upstream"]').click();
+  await page.locator('[data-action="toolbar-more"]').click();
+  await page.locator('[data-toolbar-action="configure-upstream"]').click();
   assert.ok(await page.evaluate(() => window.__vscodeMessages.some((message) => message.type === 'configureUpstream')), 'An untracked branch should offer a direct setup action.');
 
   await openSurface(page, 'surface=changes&state=multi');
@@ -119,8 +118,25 @@ try {
   await switchRepository.click();
   assert.ok(await page.evaluate(() => window.__vscodeMessages.some((message) => message.type === 'chooseRepository')), 'Repository switching should reach VS Code.');
 
+  await openSurface(page, 'surface=changes&state=grouped');
+  assert.deepEqual(await page.locator('.file-group-heading').allTextContents(), ['Tracked4', 'Untracked1'], 'Tracked files should appear above the Untracked group.');
+  assert.deepEqual(await page.locator('[data-file-row]').evaluateAll((rows) => rows.map((row) => row.dataset.path)), [
+    'src/main/java/com/anker/mvp/provider/EksClusterProvider.java',
+    'src/deleted-file.txt',
+    'src/main/java/com/anker/mvp/config/AwsWebClientInitializer.java',
+    'README.md',
+    'src/new-file.txt'
+  ]);
+  const statusColors = await page.locator('[data-file-row]').evaluateAll((rows) => Object.fromEntries(rows.map((row) => [
+    [...row.classList].find((kind) => ['modified', 'added', 'deleted', 'untracked'].includes(kind)),
+    getComputedStyle(row.querySelector('.file-name')).color
+  ])));
+  assert.equal(new Set([statusColors.modified, statusColors.added, statusColors.deleted]).size, 3, 'Modified, added, and deleted files should use distinct theme colors.');
+  assert.match(await page.locator('.file-row.deleted .file-state').textContent(), /Deleted/);
+  assert.match(await page.locator('.file-row.untracked .file-state').textContent(), /New file/);
+
   await openSurface(page, 'surface=changes');
-  assert.match(await page.locator('.file-row .file-state').first().textContent(), /Staged|Working|Untracked|Conflict/, 'File rows should explain Git state without symbolic XY codes.');
+  assert.match(await page.locator('.file-row .file-state').first().textContent(), /Staged|Modified|New file|Conflict/, 'File rows should explain Git state without symbolic XY codes.');
   await page.locator('[data-action="toolbar-more"]').click();
   await page.keyboard.press('Escape');
   assert.equal(await page.locator('.commit-toolbar-menu.open').count(), 0, 'Escape should dismiss the Commit action menu.');

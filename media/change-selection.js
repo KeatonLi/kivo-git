@@ -7,7 +7,13 @@
   }
 
   function model(snapshot, { filter = 'all', query = '', collapsed = new Set(), selected = new Set() } = {}) {
-    const lists = (snapshot?.changelists || []).map((list) => ({ ...list, changes: list.changes.filter((change) => matches(change, filter, query)) }));
+    const lists = (snapshot?.changelists || []).map((list) => {
+      const changes = list.changes.filter((change) => matches(change, filter, query));
+      return { ...list, changes: [
+        ...changes.filter((change) => change.kind !== 'untracked'),
+        ...changes.filter((change) => change.kind === 'untracked')
+      ] };
+    });
     const filteredPaths = new Set(lists.flatMap((list) => list.changes.map((change) => change.path)));
     const visiblePaths = lists.filter((list) => !collapsed.has(list.id)).flatMap((list) => list.changes.map((change) => change.path));
     const selectedChanges = (snapshot?.changes || []).filter((change) => selected.has(change.path));

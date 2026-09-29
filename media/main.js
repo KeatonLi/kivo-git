@@ -809,9 +809,12 @@ function renderCommitToolbar(s) {
     <span class="toolbar-spacer"></span>
     <button class="idea-toolbar-button" data-action="search-changes" aria-label="${ui.changeSearchOpen ? 'Close changed-file search' : 'Search changed files'}" title="${ui.changeSearchOpen ? 'Close changed-file search' : 'Search changed files'}" aria-expanded="${ui.changeSearchOpen}">${icon(ui.changeSearchOpen ? 'close' : 'search')}</button>
     <div class="commit-toolbar-more">
-      <button class="idea-toolbar-button" data-action="toolbar-more" aria-label="More Commit actions" title="More Commit actions" aria-haspopup="menu" aria-expanded="${ui.toolbarMenuOpen}">${icon('ellipsis')}</button>
+      <button class="idea-toolbar-button ${ui.syncPhase === 'error' ? 'has-error' : ''}" data-action="toolbar-more" aria-label="${escapeHtml(ui.syncPhase === 'error' ? 'Remote check failed; more Commit actions' : 'More Commit actions')}" title="${escapeHtml(ui.syncPhase === 'error' ? ui.syncError || 'Remote check failed' : 'More Commit actions')}" aria-haspopup="menu" aria-expanded="${ui.toolbarMenuOpen}">${icon('ellipsis')}</button>
       <div class="commit-toolbar-menu ${ui.toolbarMenuOpen ? 'open' : ''}" role="menu" aria-label="More Commit actions" ${ui.toolbarMenuOpen ? '' : 'inert'}>
-        <button role="menuitem" data-toolbar-action="fetch" ${ui.busy || syncing ? 'disabled' : ''}>${icon(fetchIcon, syncing || ui.operationKind === 'fetch' ? 'codicon-modifier-spin' : '')}<span>${syncing ? 'Checking remote…' : 'Fetch remote updates'}</span></button>
+        <button role="menuitem" data-toolbar-action="fetch" ${ui.busy || syncing ? 'disabled' : ''}>${icon(fetchIcon, syncing || ui.operationKind === 'fetch' ? 'codicon-modifier-spin' : '')}<span>${syncing ? 'Checking remote…' : ui.syncPhase === 'error' ? 'Remote check failed · Retry' : 'Fetch remote updates'}</span></button>
+        ${!s.upstream && s.branch !== '(detached)' ? `<button role="menuitem" data-toolbar-action="configure-upstream" ${ui.busy ? 'disabled' : ''}>${icon('git-branch')}<span>Set tracking branch…</span></button>` : ''}
+        <button role="menuitem" data-toolbar-action="configure-git-identity" ${ui.busy ? 'disabled' : ''}>${icon('account')}<span>${s.identity?.ready ? 'Edit Git identity…' : 'Set Git identity…'}</span></button>
+        ${s.branch === '(detached)' ? `<button role="menuitem" data-toolbar-action="save-detached-head" ${ui.busy ? 'disabled' : ''}>${icon('git-branch')}<span>Create branch from HEAD…</span></button>` : ''}
         <span class="commit-toolbar-menu-divider" role="separator"></span>
         <button role="menuitem" data-toolbar-action="new-list" ${ui.busy ? 'disabled' : ''}>${icon('add')}<span>Create changelist</span></button>
         <button role="menuitem" data-toolbar-action="collapse-all">${icon('chevron-up')}<span>Collapse all changelists</span></button>
@@ -837,6 +840,8 @@ function renderChanges(s) {
   const lists = s.changelists.filter((list) => !filtersActive || changesByList.get(list.id)?.length).map((list) => {
     const collapsed = ui.collapsed.has(list.id);
     const changes = changesByList.get(list.id) || [];
+    const tracked = changes.filter((change) => change.kind !== 'untracked');
+    const untracked = changes.filter((change) => change.kind === 'untracked');
     const selected = changes.filter((change) => ui.selected.has(change.path)).length;
     const allSelected = changes.length > 0 && selected === changes.length;
     return `<section class="changelist ${collapsed ? 'collapsed' : ''} ${list.active ? 'active-list' : ''}" data-list-id="${escapeHtml(list.id)}">
@@ -844,7 +849,8 @@ function renderChanges(s) {
         ${icon('chevron-down', 'disclosure')}<span class="active-dot" title="${list.active ? 'Active changelist' : ''}"></span><span class="list-name">${escapeHtml(list.name)}</span><span class="count">${filtersActive ? `${changes.length}/${list.changes.length}` : list.changes.length}</span>
       </button><button class="list-more" data-list-menu="${escapeHtml(list.id)}" aria-label="Actions for ${escapeHtml(list.name)}" aria-expanded="${ui.listMenuId === list.id}">${icon('more')}</button></div>
       <div class="file-list-shell"><div class="file-list ${list.changes.length ? '' : 'empty'}" data-drop-list="${escapeHtml(list.id)}">
-        ${changes.map((change) => renderFile(change, list.id)).join('')}
+        ${tracked.length ? `<div class="file-group-heading" role="heading" aria-level="3"><span>Tracked</span><span>${tracked.length}</span></div>${tracked.map((change) => renderFile(change, list.id)).join('')}` : ''}
+        ${untracked.length ? `<div class="file-group-heading untracked-group" role="heading" aria-level="3"><span>Untracked</span><span>${untracked.length}</span></div>${untracked.map((change) => renderFile(change, list.id)).join('')}` : ''}
       </div></div><div class="list-menu ${ui.listMenuId === list.id ? 'open' : ''}" role="menu" ${ui.listMenuId === list.id ? '' : 'inert'}>
         ${list.active ? '' : `<button role="menuitem" data-list-action="active" data-list-id="${escapeHtml(list.id)}">Set Active</button>`}
         <button role="menuitem" data-list-action="rename" data-list-id="${escapeHtml(list.id)}" data-list-name="${escapeHtml(list.name)}">Rename</button>
@@ -872,10 +878,9 @@ function renderChanges(s) {
       </div>
       </footer>
     </div>
-    <div class="commit-zone-splitter" data-commit-zone-splitter role="separator" aria-label="Resize commit and insights sections" aria-controls="kivo-commit-upper kivo-commit-lower" aria-orientation="horizontal" aria-valuenow="${ui.commitZonePercent}" aria-valuemin="35" aria-valuemax="75" tabindex="0" title="Drag to resize. Double-click to reset."></div>
+    <div class="commit-zone-splitter" data-commit-zone-splitter role="separator" aria-label="Resize changes and recent commits" aria-controls="kivo-commit-upper kivo-commit-lower" aria-orientation="horizontal" aria-valuenow="${ui.commitZonePercent}" aria-valuemin="35" aria-valuemax="75" tabindex="0" title="Drag to resize. Double-click to reset."></div>
     <div class="commit-lower" id="kivo-commit-lower">
       ${renderRecentCommits(s)}
-      ${renderCommitRepositoryContext(s)}
     </div>
     ${renderFileContextMenu()}`;
 }
@@ -900,28 +905,10 @@ function renderCommitReview(s) {
 function renderRecentCommits(s) {
   const commits = (s.commits || []).slice(0, 5);
   return `<section class="commit-recent" aria-label="Recent commits">
-    <div class="commit-lower-heading">${icon('history')}<span>Git history</span><button data-action="show-log" aria-label="Show all commit history">View all</button></div>
+    <div class="commit-lower-heading">${icon('history')}<span>Recent commits</span><button data-action="show-log" aria-label="Show all commit history">View all</button></div>
     <div class="commit-recent-list">${commits.length ? commits.map((commit) => `<button class="commit-recent-row" data-recent-commit="${escapeHtml(commit.hash)}" title="Open ${escapeHtml(commit.subject)} in History">
       <span class="commit-recent-node" aria-hidden="true"></span><span class="commit-recent-copy"><strong>${escapeHtml(commit.subject)}</strong><code>${escapeHtml(commit.shortHash)} · ${escapeHtml(commit.author)}</code></span><time datetime="${escapeHtml(commit.date)}" title="${absoluteTime(commit.date)}">${absoluteTime(commit.date)}</time>
     </button>`).join('') : '<div class="commit-recent-empty">No commits yet</div>'}</div>
-  </section>`;
-}
-
-function renderCommitRepositoryContext(s) {
-  const detached = s.branch === '(detached)';
-  const currentBranch = detached ? `Detached HEAD${s.headOid ? ` · ${s.headOid.slice(0, 8)}` : ''}` : s.branch || 'Unknown branch';
-  const branchActionLabel = detached ? `Choose branch; ${currentBranch}` : `Choose branch, current branch ${currentBranch}`;
-  const syncState = ui.syncPhase === 'error'
-    ? 'Remote check failed'
-    : ui.syncPhase === 'fetching'
-      ? 'Checking remote'
-      : s.upstream ? `Tracking ${s.upstream}${ui.lastFetchedAt ? ` · checked ${absoluteTime(ui.lastFetchedAt)}` : ' · not checked yet'}` : 'No upstream';
-  return `<section class="commit-repository-context" aria-label="Repository status">
-    <div class="commit-insight-title">${icon('repo')}<span>${escapeHtml(s.repositoryName || 'Repository')} status</span>${s.repositoryCount > 1 ? `<button class="commit-repository-switch" data-action="choose-repository" aria-label="Choose repository, current ${escapeHtml(s.repositoryName)}" ${ui.busy ? 'disabled' : ''}>Switch…</button>` : ''}</div>
-    <div class="commit-repo-state">${icon(s.changes.length ? 'circle-filled' : 'check')}<span>${s.changes.length ? `${s.changes.length} changed ${s.changes.length === 1 ? 'file' : 'files'}` : 'Working tree clean'}${s.repositoryCount > 1 ? ` here · ${s.allRepositoryChanges ?? s.changes.length} across ${s.repositoryCount} repositories` : ''}</span>${s.upstream ? `<span class="commit-repo-sync" title="${s.behind} incoming and ${s.ahead} outgoing commits">${s.behind ? `${icon('arrow-down')} ${s.behind}` : ''}${s.ahead ? `${icon('arrow-up')} ${s.ahead}` : ''}${!s.behind && !s.ahead ? 'In sync' : ''}</span>` : ''}</div>
-    <div class="commit-repo-meta"><button data-action="branches" aria-label="${escapeHtml(branchActionLabel)}" title="Choose branch" aria-haspopup="dialog" aria-expanded="${ui.branchOpen}" ${ui.busy ? 'disabled' : ''}>${icon('git-branch')} ${escapeHtml(currentBranch)}</button><span>·</span><span class="${ui.syncPhase === 'error' ? 'has-error' : ''}" title="${escapeHtml(ui.syncError || syncState)}">${escapeHtml(syncState)}</span>${!s.upstream && !detached ? `<button class="text-button" data-action="configure-upstream" ${ui.busy ? 'disabled' : ''}>Set tracking branch…</button>` : ''}</div>
-    <div class="commit-repo-identity ${s.identity?.ready ? '' : 'missing'}">${icon('account')}<span title="${escapeHtml(s.identity?.ready ? `${s.identity.name} <${s.identity.email}>` : 'Git author or committer identity is incomplete')}">${s.identity?.ready ? `${escapeHtml(s.identity.name)} &lt;${escapeHtml(s.identity.email)}&gt;` : 'Git identity missing'}</span><button data-action="configure-git-identity" ${ui.busy ? 'disabled' : ''}>${s.identity?.ready ? 'Edit' : 'Set identity…'}</button></div>
-    ${detached ? `<div class="commit-repo-warning" role="note">${icon('warning')}<span>New commits here have no branch name. Create a branch to keep them easy to find.</span><button data-action="save-detached-head" ${ui.busy ? 'disabled' : ''}>Create branch…</button></div>` : ''}
   </section>`;
 }
 
@@ -929,7 +916,7 @@ function renderFile(change, listId) {
   const checked = ui.selected.has(change.path);
   const filename = change.path.split('/').pop();
   const parent = change.path.includes('/') ? change.path.slice(0, change.path.lastIndexOf('/')) : '';
-  return `<div class="file-row ${checked ? 'selected' : ''} ${ui.focusedPath === change.path ? 'focused' : ''}" draggable="${!ui.busy}" data-file-row data-path="${escapeHtml(change.path)}" data-list-id="${escapeHtml(listId)}" title="${escapeHtml(change.path)}">
+  return `<div class="file-row ${change.kind} ${checked ? 'selected' : ''} ${ui.focusedPath === change.path ? 'focused' : ''}" draggable="${!ui.busy}" data-file-row data-path="${escapeHtml(change.path)}" data-list-id="${escapeHtml(listId)}" title="${escapeHtml(change.path)}">
     <label class="check"><input type="checkbox" aria-label="Select ${escapeHtml(change.path)}" data-select="${escapeHtml(change.path)}" ${checked ? 'checked' : ''} ${ui.busy ? 'disabled' : ''}><span></span></label>
     <button class="file-main" data-diff="${escapeHtml(change.path)}" data-original-path="${escapeHtml(change.originalPath || '')}" data-kind="${escapeHtml(change.kind)}" tabindex="${ui.focusedPath === change.path ? '0' : '-1'}" aria-keyshortcuts="M" aria-label="Preview diff for ${escapeHtml(change.path)}; press M to move to another changelist" title="${escapeHtml(change.path)} · Press M to move to another changelist">
       ${renderFileTypeIcon(change)}<span class="file-name">${escapeHtml(filename)}</span>${parent ? `<span class="file-parent">${escapeHtml(parent)}</span>` : ''}

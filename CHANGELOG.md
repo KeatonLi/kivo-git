@@ -2,6 +2,11 @@
 
 ## Unreleased
 
+## 0.3.7 - 2026-09-29
+
+- Group tracked changes above untracked files within each changelist, and color file names and status by added, modified, deleted, renamed, or untracked state using VS Code theme colors.
+- Keep only Recent commits in the lower Commit area; move Git identity, upstream setup, and detached-HEAD branch creation into the toolbar menu.
+
 ## 0.3.6 - 2026-09-29
 
 - Replace unclear Working and Untracked file badges with Modified, New file, or the specific change type; explain Git tracking and staging in the tooltip.

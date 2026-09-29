@@ -93,6 +93,12 @@
         Object.assign(change, { staged: index !== 1, indexStatus: index === 1 ? '.' : 'M', workingTreeStatus: index === 0 ? '.' : 'M' });
       });
       fixture.changelists[0].changes = fixture.changes;
+      if (new URLSearchParams(location.search).get('state') === 'grouped') {
+        fixture.changes.splice(1, 0,
+          { path: 'src/new-file.txt', kind: 'untracked', staged: false, indexStatus: '?', workingTreeStatus: '?' },
+          { path: 'src/deleted-file.txt', kind: 'deleted', staged: false, indexStatus: '.', workingTreeStatus: 'D' });
+        Object.assign(fixture.changes.find((change) => change.kind === 'added'), { staged: true, indexStatus: 'A', workingTreeStatus: '.' });
+      }
       if (new URLSearchParams(location.search).get('state') === 'sync-clean') {
         fixture.ahead = 0;
         fixture.behind = 0;
