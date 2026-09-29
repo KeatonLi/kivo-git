@@ -88,6 +88,8 @@ Use **Kivo Git: Show Changes** or **Kivo Git: Show History** from the Command Pa
 
 Kivo Git checks remote refs in the background every minute while its view is visible. Manual Refresh also checks the remote, and changes from VS Code Git refresh the branch display promptly. Configure `ideaGit.autoFetch` or `ideaGit.autoFetchInterval` when a repository needs a different network policy.
 
+The extension prepares the selected repository's local status and history after activation, and keeps this snapshot current when its views are hidden. Opening Commit or History shows the prepared snapshot immediately; remote checks continue in the background.
+
 Run the complete local verification suite with:
 
 ```bash

@@ -96,6 +96,7 @@ export class IdeaGitViewProvider implements vscode.WebviewViewProvider, vscode.T
       this.updateViewTitles(snapshot);
       await this.postSnapshotToReadyViews(snapshot);
       await this.deliverPendingNavigation('history');
+      if (this.hasVisibleView() && vscode.workspace.getConfiguration('ideaGit').get<boolean>('autoFetch', true)) void this.autoFetchIfDue();
     },
     (error) => { void this.showEmpty(error); }
   );
@@ -120,22 +121,24 @@ export class IdeaGitViewProvider implements vscode.WebviewViewProvider, vscode.T
         this.resetRepository();
         void this.postToReadyViews({ type: 'empty', message: 'Loading selected repository…' });
         this.configurePolling();
+        void this.preloadSnapshot();
         this.scheduleBadgeRefresh();
       })
     );
     this.badgePollTimer = setInterval(() => void this.refreshBadge(), 30000);
     void this.refreshBadge();
+    void this.preloadSnapshot();
+    void this.refreshFileIconTheme();
   }
 
   async resolveWebviewView(view: vscode.WebviewView): Promise<void> {
-    await this.discoverRepositories();
+    await Promise.all([this.discoverRepositories(), this.refreshFileIconTheme()]);
     const surface = surfaceForViewType(view.viewType);
     if (!surface) throw new Error(`Unsupported Kivo Git view type: ${view.viewType}`);
     this.views.set(surface, view);
     view.title = surface === 'changes' ? 'Commit' : 'History';
     if (surface === 'changes') this.updateBadge();
     this.readyViews.delete(surface);
-    await this.refreshFileIconTheme();
     this.configureWebviewResources(view);
     view.webview.html = this.html(view.webview, surface);
     view.webview.onDidReceiveMessage((message: WebviewMessage) => void this.handle(surface, message));
@@ -170,10 +173,14 @@ export class IdeaGitViewProvider implements vscode.WebviewViewProvider, vscode.T
   }
 
   async refresh(silent = false): Promise<void> {
-    if (!this.hasVisibleView()) return;
     if (!silent) await this.autoFetchIfDue(true);
     this.coordinator.request();
     if (!silent && !this.availableRepositories().length) void vscode.window.showInformationMessage(`${IdeaGitViewProvider.productName}: Open a Git repository to start.`);
+  }
+
+  private async preloadSnapshot(): Promise<void> {
+    await this.discoverRepositories();
+    if (this.availableRepositories().length) this.coordinator.request();
   }
 
   async showChanges(): Promise<void> {
@@ -467,6 +474,7 @@ export class IdeaGitViewProvider implements vscode.WebviewViewProvider, vscode.T
     this.resetRepository();
     void this.postToReadyViews({ type: 'empty', message: 'Loading selected repository…' });
     this.configurePolling();
+    if (!this.hasVisibleView()) void this.refresh(true);
   }
 
   private resetRepository(): void {
@@ -525,7 +533,6 @@ export class IdeaGitViewProvider implements vscode.WebviewViewProvider, vscode.T
   private refreshDueAt?: number;
 
   private scheduleRefresh(delay = 140): void {
-    if (!this.hasVisibleView()) return;
     const dueAt = Date.now() + delay;
     if (this.debounceTimer && this.refreshDueAt !== undefined && this.refreshDueAt <= dueAt) return;
     if (this.debounceTimer) clearTimeout(this.debounceTimer);
@@ -1140,12 +1147,12 @@ export class IdeaGitViewProvider implements vscode.WebviewViewProvider, vscode.T
     const configuration = vscode.workspace.getConfiguration('ideaGit');
     const interval = configuration.get<number>('autoRefreshInterval', 30000);
     this.refreshTimer = setInterval(() => void this.refresh(true), interval);
+    void this.refresh(true);
     if (configuration.get<boolean>('autoFetch', true)) {
       const autoFetchInterval = configuration.get<number>('autoFetchInterval', 60000);
       this.autoFetchTimer = setInterval(() => void this.autoFetchIfDue(), autoFetchInterval);
-      void this.autoFetchIfDue();
+      if (this.lastSnapshot) void this.autoFetchIfDue();
     }
-    void this.refresh(true);
   }
 
   private async autoFetchIfDue(force = false): Promise<void> {

@@ -2,6 +2,11 @@
 
 ## Unreleased
 
+## 0.3.8 - 2026-09-29
+
+- Preload the selected repository's local Git snapshot and file icon theme after extension activation, keeping the snapshot current while views are hidden.
+- Show the cached snapshot as soon as a view opens, then check the remote asynchronously so Fetch does not hold up the first render.
+
 ## 0.3.7 - 2026-09-29
 
 - Group tracked changes above untracked files within each changelist, and color file names and status by added, modified, deleted, renamed, or untracked state using VS Code theme colors.
