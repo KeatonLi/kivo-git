@@ -134,7 +134,7 @@ try {
   ])));
   assert.equal(new Set([statusColors.modified, statusColors.added, statusColors.deleted]).size, 3, 'Modified, added, and deleted files should use distinct theme colors.');
   assert.match(await page.locator('.file-row.deleted .file-state').textContent(), /Deleted/);
-  assert.match(await page.locator('.file-row.untracked .file-state').textContent(), /New file/);
+  assert.match(await page.locator('.file-row.untracked .file-state').first().textContent(), /New file/);
   await page.locator('.file-row.untracked [data-select]').first().check({ force: true });
   await page.locator('.file-row.untracked [data-select]').last().check({ force: true });
   await page.locator('[data-action="rollback-selected"]').click();
