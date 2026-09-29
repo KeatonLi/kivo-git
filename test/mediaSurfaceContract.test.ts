@@ -186,7 +186,7 @@ describe('webview surface composition', () => {
     const provider = await readFile(path.join(root, 'src', 'IdeaGitViewProvider.ts'), 'utf8');
     expect(provider).toContain('data-surface="${surface}"');
     expect(provider).toContain('this.html(view.webview, surface)');
-    expect(provider).toContain('changes.title = \'Commit\'');
+    expect(provider).toContain('changes.title = `${snapshot.repositoryName} · Commit`');
     expect(provider).toContain("history.title = 'History'");
     expect(provider).toContain('history.description = snapshot.branch');
     expect(provider).toContain('private async commitAndPush');

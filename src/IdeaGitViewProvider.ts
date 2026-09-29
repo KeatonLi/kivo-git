@@ -1168,7 +1168,7 @@ export class IdeaGitViewProvider implements vscode.WebviewViewProvider, vscode.T
   private updateViewTitles(snapshot: RepositorySnapshot): void {
     const changes = this.views.get('changes');
     if (changes) {
-      changes.title = 'Commit';
+      changes.title = `${snapshot.repositoryName} · Commit`;
       changes.description = undefined;
     }
     const history = this.views.get('history');

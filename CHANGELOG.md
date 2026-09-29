@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- Show the active repository name before Commit in the left view title, updating when the selected repository changes.
+
 ## 0.3.4 - 2026-09-29
 
 - Search the full repository history by commit text or hash, author, date, path, and ref while retaining automatic pagination.
