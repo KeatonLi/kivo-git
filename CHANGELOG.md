@@ -2,7 +2,11 @@
 
 ## Unreleased
 
+## 0.3.5 - 2026-09-29
+
 - Show the active repository name before Commit in the left view title, updating when the selected repository changes.
+- Refresh branch status when VS Code Git updates repository state, and check the selected repository immediately after switching.
+- Check remote refs on manual Refresh and every minute by default while Kivo Git is visible.
 
 ## 0.3.4 - 2026-09-29
 

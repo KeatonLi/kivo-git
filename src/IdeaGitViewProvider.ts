@@ -61,6 +61,7 @@ export class IdeaGitViewProvider implements vscode.WebviewViewProvider, vscode.T
   private selectedWorkspaceRoot?: string;
   private repositories: vscode.WorkspaceFolder[] = [];
   private repositoriesLoading?: Promise<void>;
+  private readonly gitStateListeners = new Map<string, vscode.Disposable>();
   private badgeCount = 0;
   private badgeCounts = new Map<string, number>();
   private badgeRefreshPromise?: Promise<void>;
@@ -170,6 +171,7 @@ export class IdeaGitViewProvider implements vscode.WebviewViewProvider, vscode.T
 
   async refresh(silent = false): Promise<void> {
     if (!this.hasVisibleView()) return;
+    if (!silent) await this.autoFetchIfDue(true);
     this.coordinator.request();
     if (!silent && !this.availableRepositories().length) void vscode.window.showInformationMessage(`${IdeaGitViewProvider.productName}: Open a Git repository to start.`);
   }
@@ -416,7 +418,7 @@ export class IdeaGitViewProvider implements vscode.WebviewViewProvider, vscode.T
   private async discoverRepositories(): Promise<void> {
     if (this.repositoriesLoading) return this.repositoriesLoading;
     this.repositoriesLoading = (async () => {
-      type GitRepository = { rootUri: vscode.Uri };
+      type GitRepository = { rootUri: vscode.Uri; state?: { onDidChange: vscode.Event<void> } };
       type GitApi = {
         repositories: GitRepository[];
         onDidOpenRepository: vscode.Event<GitRepository>;
@@ -427,7 +429,22 @@ export class IdeaGitViewProvider implements vscode.WebviewViewProvider, vscode.T
       const api = (await extension.activate()).getAPI(1);
       const update = () => {
         const previous = this.repositories.map((repository) => repository.uri.fsPath).join('\0');
-        this.repositories = api.repositories.filter((repository) => repository.rootUri.scheme === 'file')
+        const gitRepositories = api.repositories.filter((repository) => repository.rootUri.scheme === 'file');
+        const roots = new Set(gitRepositories.map((repository) => repository.rootUri.fsPath));
+        for (const [root, listener] of this.gitStateListeners) {
+          if (!roots.has(root)) {
+            listener.dispose();
+            this.gitStateListeners.delete(root);
+          }
+        }
+        for (const repository of gitRepositories) {
+          const root = repository.rootUri.fsPath;
+          if (this.gitStateListeners.has(root) || !repository.state?.onDidChange) continue;
+          this.gitStateListeners.set(root, repository.state.onDidChange(() => {
+            if (this.selectedWorkspace()?.uri.fsPath === root) this.scheduleRefresh(80);
+          }));
+        }
+        this.repositories = gitRepositories
           .map((repository, index) => ({ uri: repository.rootUri, name: path.basename(repository.rootUri.fsPath), index }));
         if (previous === this.repositories.map((repository) => repository.uri.fsPath).join('\0')) return;
         if (this.selectedWorkspaceRoot && !this.availableRepositories().some((repository) => repository.uri.fsPath === this.selectedWorkspaceRoot)) {
@@ -449,7 +466,7 @@ export class IdeaGitViewProvider implements vscode.WebviewViewProvider, vscode.T
     this.selectedWorkspaceRoot = workspace.uri.fsPath;
     this.resetRepository();
     void this.postToReadyViews({ type: 'empty', message: 'Loading selected repository…' });
-    void this.refresh(true);
+    this.configurePolling();
   }
 
   private resetRepository(): void {
@@ -1124,17 +1141,17 @@ export class IdeaGitViewProvider implements vscode.WebviewViewProvider, vscode.T
     const interval = configuration.get<number>('autoRefreshInterval', 30000);
     this.refreshTimer = setInterval(() => void this.refresh(true), interval);
     if (configuration.get<boolean>('autoFetch', true)) {
-      const autoFetchInterval = configuration.get<number>('autoFetchInterval', 300000);
+      const autoFetchInterval = configuration.get<number>('autoFetchInterval', 60000);
       this.autoFetchTimer = setInterval(() => void this.autoFetchIfDue(), autoFetchInterval);
       void this.autoFetchIfDue();
     }
     void this.refresh(true);
   }
 
-  private async autoFetchIfDue(): Promise<void> {
+  private async autoFetchIfDue(force = false): Promise<void> {
     if (this.autoFetchPromise || this.operationRunning || !this.hasVisibleView()) return this.autoFetchPromise;
-    const interval = vscode.workspace.getConfiguration('ideaGit').get<number>('autoFetchInterval', 300000);
-    if (Date.now() - this.lastFetchAttemptAt < interval) return;
+    const interval = vscode.workspace.getConfiguration('ideaGit').get<number>('autoFetchInterval', 60000);
+    if (!force && Date.now() - this.lastFetchAttemptAt < interval) return;
     this.lastFetchAttemptAt = Date.now();
     const generation = this.syncGeneration;
     const task = (async () => {
@@ -1247,6 +1264,8 @@ export class IdeaGitViewProvider implements vscode.WebviewViewProvider, vscode.T
   }
 
   dispose(): void {
+    for (const listener of this.gitStateListeners.values()) listener.dispose();
+    this.gitStateListeners.clear();
     clearInterval(this.badgePollTimer);
     if (this.badgeRefreshTimer) clearTimeout(this.badgeRefreshTimer);
     if (this.refreshTimer) clearInterval(this.refreshTimer);

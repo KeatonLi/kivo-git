@@ -86,7 +86,7 @@ Open this folder in VS Code and press `F5` to launch the Extension Development H
 
 Use **Kivo Git: Show Changes** or **Kivo Git: Show History** from the Command Palette to focus the respective surface. Graph is a column inside bottom History, never a sidebar or separate page.
 
-Kivo Git checks remote refs in the background every five minutes while its view is visible. Configure `ideaGit.autoFetch` or `ideaGit.autoFetchInterval` when a repository needs a different network policy.
+Kivo Git checks remote refs in the background every minute while its view is visible. Manual Refresh also checks the remote, and changes from VS Code Git refresh the branch display promptly. Configure `ideaGit.autoFetch` or `ideaGit.autoFetchInterval` when a repository needs a different network policy.
 
 Run the complete local verification suite with:
 
