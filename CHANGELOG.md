@@ -2,6 +2,11 @@
 
 ## Unreleased
 
+## 0.3.9 - 2026-09-29
+
+- Add Rollback for selected files in the Commit view and file context menu, with a native confirmation listing affected paths.
+- Restore selected tracked changes to HEAD, move new files to Trash, and recheck file state before changing anything; keep unrelated staged work intact.
+
 ## 0.3.8 - 2026-09-29
 
 - Preload the selected repository's local Git snapshot and file icon theme after extension activation, keeping the snapshot current while views are hidden.

@@ -947,7 +947,7 @@ function renderFileContextMenu() {
   const list = ui.snapshot?.changelists.find((candidate) => candidate.id === menu.listId);
   const partialDiff = change.staged && change.kind !== 'conflict' && change.workingTreeStatus !== '.' && change.workingTreeStatus !== 'R';
   const width = 278;
-  const height = (list?.changes.length && list.changes.length > 1 ? 278 : 248) + (partialDiff ? 52 : 0);
+  const height = (list?.changes.length && list.changes.length > 1 ? 310 : 280) + (partialDiff ? 52 : 0);
   const left = clamp(menu.x, 8, Math.max(8, window.innerWidth - width - 8));
   const top = clamp(menu.y, 8, Math.max(8, window.innerHeight - height - 8));
   const openFileDisabled = change.kind === 'deleted' || ui.busy;
@@ -967,6 +967,8 @@ function renderFileContextMenu() {
     <button role="menuitem" data-file-context-action="move" ${ui.busy ? 'disabled' : ''}>${icon('arrow-swap')}<span>Move to Changelist…</span></button>
     ${list?.changes.length && list.changes.length > 1 ? `<button role="menuitem" data-file-context-action="select-list" ${ui.busy ? 'disabled' : ''}>${icon('list-selection')}<span>Select Matching Files in Changelist</span></button>` : ''}
     <button role="menuitem" data-file-context-action="copy-path">${icon('copy')}<span>Copy Relative Path</span></button>
+    <div class="context-menu-separator" role="separator"></div>
+    <button role="menuitem" class="danger-action" data-file-context-action="rollback" ${ui.busy ? 'disabled' : ''}>${icon('discard')}<span>${ui.selected.has(change.path) && changeSelection().selectedChanges.length > 1 && !changeSelection().hiddenCount ? `Rollback ${changeSelection().selectedChanges.length} selected files…` : 'Rollback file…'}</span></button>
   </div>`;
 }
 
@@ -1395,6 +1397,12 @@ function runFileContextAction(event) {
     }
   }
   if (action === 'copy-path') post('copyPath', { path: change.path });
+  if (action === 'rollback' && !ui.busy) {
+    const selection = changeSelection();
+    const paths = ui.selected.has(change.path) && selection.selectedChanges.length > 1 && !selection.hiddenCount
+      ? selection.selectedChanges.map((item) => item.path) : [change.path];
+    post('rollbackFiles', { paths });
+  }
   render();
 }
 
@@ -2422,6 +2430,12 @@ function handleAction(action) {
     persist();
     render();
   }
+  if (action === 'rollback-selected' && !ui.busy) {
+    const selection = changeSelection();
+    if (selection.selectedChanges.length && !selection.hiddenCount) {
+      post('rollbackFiles', { paths: selection.selectedChanges.map((change) => change.path) });
+    }
+  }
   if (action === 'refresh') post('refresh');
   if (action === 'show-log') post('showLog');
   if (action === 'show-changes') post('showChanges');
@@ -2524,7 +2538,7 @@ function commitBlocker() {
 function renderSelectionStatus() {
   const { selectedChanges, hiddenCount } = changeSelection();
   const wholeFiles = ui.changeFilter === 'staged' || selectedChanges.some((change) => change.staged && change.workingTreeStatus !== '.');
-  return `<div class="commit-selection-status" role="status"><span>${selectedChanges.length} ${selectedChanges.length === 1 ? 'file' : 'files'} selected${hiddenCount ? ` · ${hiddenCount} hidden by filters` : ''}</span>${selectedChanges.length ? `<button class="text-button" data-action="${hiddenCount ? 'clear-hidden-selection' : 'clear-selection'}" ${ui.busy ? 'disabled' : ''}>${hiddenCount ? 'Remove hidden' : 'Clear'}</button>` : ''}</div>${hiddenCount ? '<div class="commit-selection-note warning">Hidden selections must be reviewed or removed.</div>' : wholeFiles ? '<div class="commit-selection-note">Commits include all working-tree changes in selected files.</div>' : ''}`;
+  return `<div class="commit-selection-status" role="status"><span>${selectedChanges.length} ${selectedChanges.length === 1 ? 'file' : 'files'} selected${hiddenCount ? ` · ${hiddenCount} hidden by filters` : ''}</span>${selectedChanges.length ? `<div class="commit-selection-actions"><button class="text-button rollback-selection" data-action="rollback-selected" title="Restore tracked changes to HEAD; move new files to Trash" ${ui.busy || hiddenCount ? 'disabled' : ''}>Rollback…</button><button class="text-button" data-action="${hiddenCount ? 'clear-hidden-selection' : 'clear-selection'}" ${ui.busy ? 'disabled' : ''}>${hiddenCount ? 'Remove hidden' : 'Clear'}</button></div>` : ''}</div>${hiddenCount ? '<div class="commit-selection-note warning">Hidden selections must be reviewed or removed.</div>' : wholeFiles ? '<div class="commit-selection-note">Commits include all working-tree changes in selected files.</div>' : ''}`;
 }
 
 function syncCommitActionState() {

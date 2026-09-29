@@ -96,6 +96,7 @@
       if (new URLSearchParams(location.search).get('state') === 'grouped') {
         fixture.changes.splice(1, 0,
           { path: 'src/new-file.txt', kind: 'untracked', staged: false, indexStatus: '?', workingTreeStatus: '?' },
+          { path: 'src/another-new-file.txt', kind: 'untracked', staged: false, indexStatus: '?', workingTreeStatus: '?' },
           { path: 'src/deleted-file.txt', kind: 'deleted', staged: false, indexStatus: '.', workingTreeStatus: 'D' });
         Object.assign(fixture.changes.find((change) => change.kind === 'added'), { staged: true, indexStatus: 'A', workingTreeStatus: '.' });
       }

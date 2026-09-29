@@ -90,6 +90,8 @@ Kivo Git checks remote refs in the background every minute while its view is vis
 
 The extension prepares the selected repository's local status and history after activation, and keeps this snapshot current when its views are hidden. Opening Commit or History shows the prepared snapshot immediately; remote checks continue in the background.
 
+In Commit, select files and use **Rollback…** to review exactly what will be discarded. Tracked edits return to `HEAD` (including staged edits); new files move to the system Trash. Unselected files and the commit message are left alone.
+
 Run the complete local verification suite with:
 
 ```bash

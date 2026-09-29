@@ -383,6 +383,20 @@ export class GitClient {
     }
   }
 
+  async restoreFilesToHead(paths: string[]): Promise<void> {
+    if (!paths.length || paths.some((file) => typeof file !== 'string' || !file || file.includes('\0'))) {
+      throw new Error('Select changed files to roll back.');
+    }
+    await this.run(['--literal-pathspecs', 'restore', '--source=HEAD', '--staged', '--worktree', '--', ...new Set(paths)]);
+  }
+
+  async unstageNewFiles(paths: string[]): Promise<void> {
+    if (!paths.length || paths.some((file) => typeof file !== 'string' || !file || file.includes('\0'))) {
+      throw new Error('Select new files to roll back.');
+    }
+    await this.run(['--literal-pathspecs', 'update-index', '--force-remove', '--', ...new Set(paths)]);
+  }
+
   async checkout(branchName: string, remote: boolean): Promise<void> {
     if (!remote) {
       await this.run(['switch', branchName]);

@@ -670,6 +670,9 @@ body[data-surface="changes"] .content { background: var(--vscode-sideBar-backgro
 .parity-mode .commit-selection-status { display: flex; align-items: center; justify-content: space-between; gap: 6px; flex: 0 0 auto; color: var(--vscode-descriptionForeground); font-size: 11px; }
 .parity-mode .commit-selection-status > span { min-width: 0; overflow-wrap: anywhere; }
 .parity-mode .commit-selection-status button { flex-shrink: 0; font-size: 11px; padding: 0 3px; }
+.parity-mode .commit-selection-actions { display: inline-flex; align-items: center; gap: 7px; flex: 0 0 auto; }
+.parity-mode .commit-selection-actions .rollback-selection { color: var(--vscode-errorForeground, var(--danger)); }
+.parity-mode .commit-selection-actions .rollback-selection:disabled { opacity: .45; }
 .parity-mode .commit-selection-note { flex: 0 0 auto; font-size: 10px; line-height: 1.35; color: var(--vscode-descriptionForeground); }
 .parity-mode .commit-selection-note.warning { color: var(--vscode-editorWarning-foreground, #cca700); }
 .parity-mode .commit-actions { flex-wrap: wrap; flex-shrink: 0; }

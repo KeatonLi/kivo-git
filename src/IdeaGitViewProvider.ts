@@ -20,6 +20,7 @@ type WebviewMessage =
   | { type: 'copyPath'; path: string }
   | { type: 'moveFileToChangelist'; path: string }
   | { type: 'moveSelectedFilesToChangelist'; paths: string[] }
+  | { type: 'rollbackFiles'; paths: string[] }
   | { type: 'showFileHistory'; path: string }
   | { type: 'showBranchHistory'; branch: string }
   | { type: 'revealInExplorer'; path: string }
@@ -46,7 +47,7 @@ type WebviewMessage =
   | { type: 'deleteChangelist'; id: string; name: string }
   | { type: 'setActiveChangelist'; id: string }
   | { type: 'moveFiles'; paths: string[]; listId: string };
-type OperationKind = 'commit' | 'checkout' | 'branch' | 'tag' | 'changelist' | 'move' | 'fetch' | 'pull' | 'push' | 'identity';
+type OperationKind = 'commit' | 'checkout' | 'branch' | 'tag' | 'changelist' | 'move' | 'rollback' | 'fetch' | 'pull' | 'push' | 'identity';
 type WebviewRepositorySnapshot = RepositorySnapshot & { fileIcons: Record<string, WebviewFileIcon>; repositoryCount: number; allRepositoryChanges: number };
 const HISTORY_PAGE_SIZE = 80;
 
@@ -654,6 +655,9 @@ export class IdeaGitViewProvider implements vscode.WebviewViewProvider, vscode.T
         case 'moveSelectedFilesToChangelist':
           await this.chooseChangelistForFiles(client, message.paths);
           return;
+        case 'rollbackFiles':
+          await this.rollbackFiles(client, message.paths);
+          return;
         case 'showFileHistory':
           this.workspaceFileUri(message.path);
           this.historyRef = undefined;
@@ -957,6 +961,73 @@ export class IdeaGitViewProvider implements vscode.WebviewViewProvider, vscode.T
     }
     const details = await client.commitDetails(selected.hash);
     await this.postToView('changes', { type: 'reuseCommitMessage', body: details.body, expectedDraft: draft });
+  }
+
+  private async rollbackFiles(client: GitClient, paths: string[]): Promise<void> {
+    const uniquePaths = Array.isArray(paths) ? [...new Set(paths)] : [];
+    if (!uniquePaths.length || uniquePaths.some((filePath) => typeof filePath !== 'string' || !filePath || filePath.includes('\0'))) {
+      throw new Error('Select changed files to roll back.');
+    }
+    const root = path.resolve(client.workspaceRoot);
+    const snapshot = await client.snapshot(this.commitLimit);
+    const changesByPath = new Map(snapshot.changes.map((change) => [change.path, change]));
+    const selected = uniquePaths.map((filePath) => {
+      const change = changesByPath.get(filePath);
+      if (!change) throw new Error(`The selected file is no longer changed: ${filePath}. Refresh and try again.`);
+      return change;
+    });
+    const fileUris = selected.map((change) => {
+      const resolved = path.resolve(root, change.path);
+      if (!resolved.startsWith(`${root}${path.sep}`)) throw new Error('The selected file is outside the repository.');
+      return vscode.Uri.file(resolved);
+    });
+    const fileState = async (uri: vscode.Uri): Promise<string> => {
+      try {
+        const stat = await vscode.workspace.fs.stat(uri);
+        return `${stat.type}:${stat.size}:${stat.mtime}`;
+      } catch (error) {
+        if (error instanceof vscode.FileSystemError && error.code === 'FileNotFound') return 'missing';
+        throw error;
+      }
+    };
+    const expectedFileStates = await Promise.all(fileUris.map(fileState));
+    const newFiles = selected.filter((change) => change.kind === 'untracked' || change.indexStatus === 'A' && change.kind !== 'conflict');
+    const existing = selected.filter((change) => !newFiles.includes(change));
+    const detail = [
+      ...(existing.length ? [`Restore ${existing.length} tracked ${existing.length === 1 ? 'file' : 'files'} to HEAD, including staged changes:`, ...existing.map((change) => `  ${change.path}`)] : []),
+      ...(newFiles.length ? [`Move ${newFiles.length} new ${newFiles.length === 1 ? 'file' : 'files'} to Trash:`, ...newFiles.map((change) => `  ${change.path}`)] : []),
+      '', 'This will discard the selected working changes. Other files stay untouched.'
+    ].join('\n');
+    const choice = await vscode.window.showWarningMessage(
+      `Rollback ${selected.length} selected ${selected.length === 1 ? 'file' : 'files'}?`,
+      { modal: true, detail }, 'Rollback Files'
+    );
+    if (choice !== 'Rollback Files') return;
+    await this.operation('rollback', `Rolling back ${selected.length} ${selected.length === 1 ? 'file' : 'files'}…`, async () => {
+      if (this.selectedWorkspace()?.uri.fsPath !== client.workspaceRoot) throw new Error('The selected repository changed. Select the files again.');
+      const current = await client.snapshot(this.commitLimit);
+      const currentByPath = new Map(current.changes.map((change) => [change.path, change]));
+      for (const change of selected) {
+        const latest = currentByPath.get(change.path);
+        if (!latest || latest.kind !== change.kind || latest.indexStatus !== change.indexStatus ||
+            latest.workingTreeStatus !== change.workingTreeStatus || latest.originalPath !== change.originalPath) {
+          throw new Error(`The state of ${change.path} changed. Review the files before rolling back.`);
+        }
+      }
+      const currentFileStates = await Promise.all(fileUris.map(fileState));
+      if (currentFileStates.some((state, index) => state !== expectedFileStates[index])) {
+        throw new Error('A selected file changed during confirmation. Review the files before rolling back.');
+      }
+      const restorePaths = [...new Set(existing.flatMap((change) => change.originalPath
+        ? [change.originalPath, change.path] : [change.path]))];
+      if (restorePaths.length) await client.restoreFilesToHead(restorePaths);
+      const stagedNew = newFiles.filter((change) => change.indexStatus === 'A').map((change) => change.path);
+      if (stagedNew.length) await client.unstageNewFiles(stagedNew);
+      for (const change of newFiles) {
+        const index = selected.indexOf(change);
+        if (expectedFileStates[index] !== 'missing') await vscode.workspace.fs.delete(fileUris[index]!, { useTrash: true });
+      }
+    }, `Rolled back ${selected.length} ${selected.length === 1 ? 'file' : 'files'}`);
   }
 
   private async configureGitIdentity(client: GitClient): Promise<void> {

@@ -119,13 +119,14 @@ try {
   assert.ok(await page.evaluate(() => window.__vscodeMessages.some((message) => message.type === 'chooseRepository')), 'Repository switching should reach VS Code.');
 
   await openSurface(page, 'surface=changes&state=grouped');
-  assert.deepEqual(await page.locator('.file-group-heading').allTextContents(), ['Tracked4', 'Untracked1'], 'Tracked files should appear above the Untracked group.');
+  assert.deepEqual(await page.locator('.file-group-heading').allTextContents(), ['Tracked4', 'Untracked2'], 'Tracked files should appear above the Untracked group.');
   assert.deepEqual(await page.locator('[data-file-row]').evaluateAll((rows) => rows.map((row) => row.dataset.path)), [
     'src/main/java/com/anker/mvp/provider/EksClusterProvider.java',
     'src/deleted-file.txt',
     'src/main/java/com/anker/mvp/config/AwsWebClientInitializer.java',
     'README.md',
-    'src/new-file.txt'
+    'src/new-file.txt',
+    'src/another-new-file.txt'
   ]);
   const statusColors = await page.locator('[data-file-row]').evaluateAll((rows) => Object.fromEntries(rows.map((row) => [
     [...row.classList].find((kind) => ['modified', 'added', 'deleted', 'untracked'].includes(kind)),
@@ -134,6 +135,13 @@ try {
   assert.equal(new Set([statusColors.modified, statusColors.added, statusColors.deleted]).size, 3, 'Modified, added, and deleted files should use distinct theme colors.');
   assert.match(await page.locator('.file-row.deleted .file-state').textContent(), /Deleted/);
   assert.match(await page.locator('.file-row.untracked .file-state').textContent(), /New file/);
+  await page.locator('.file-row.untracked [data-select]').first().check({ force: true });
+  await page.locator('.file-row.untracked [data-select]').last().check({ force: true });
+  await page.locator('[data-action="rollback-selected"]').click();
+  const rollback = await page.evaluate(() => window.__vscodeMessages.find((message) => message.type === 'rollbackFiles'));
+  assert.deepEqual(rollback?.paths, ['src/new-file.txt', 'src/another-new-file.txt'], 'Rollback should send only the two selected new files for confirmation.');
+  await page.locator('.file-row.untracked [data-file-menu]').first().click({ force: true });
+  assert.match(await page.locator('[data-file-context-action="rollback"]').textContent(), /Rollback 2 selected files/);
 
   await openSurface(page, 'surface=changes');
   assert.match(await page.locator('.file-row .file-state').first().textContent(), /Staged|Modified|New file|Conflict/, 'File rows should explain Git state without symbolic XY codes.');

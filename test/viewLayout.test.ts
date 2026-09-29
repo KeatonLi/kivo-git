@@ -13,9 +13,11 @@ describe('Kivo Git two-surface routing', () => {
     expect(isMessageAllowedOnSurface('changes', 'commitAndPush')).toBe(true);
     expect(isMessageAllowedOnSurface('changes', 'showLog')).toBe(true);
     expect(isMessageAllowedOnSurface('changes', 'openDiff')).toBe(true);
+    expect(isMessageAllowedOnSurface('changes', 'rollbackFiles')).toBe(true);
     expect(isMessageAllowedOnSurface('history', 'commit')).toBe(false);
     expect(isMessageAllowedOnSurface('history', 'commitAndPush')).toBe(false);
     expect(isMessageAllowedOnSurface('history', 'openDiff')).toBe(false);
+    expect(isMessageAllowedOnSurface('history', 'rollbackFiles')).toBe(false);
   });
 
   it('keeps graph/history operations out of the Changes sidebar', () => {

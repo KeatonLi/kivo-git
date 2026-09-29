@@ -74,6 +74,36 @@ describe('GitClient integration', () => {
     await expect(client.commit('stale', ['beta.txt'])).rejects.toThrow('no longer changed');
   });
 
+  it('rolls back only selected tracked files including a staged rename and keeps unrelated staged work', async () => {
+    const root = await createRepository();
+    await fs.writeFile(path.join(root, 'rename-me.txt'), 'original\n');
+    await git(root, ['add', 'rename-me.txt']);
+    await git(root, ['commit', '-m', 'add rename source']);
+    await fs.appendFile(path.join(root, 'alpha.txt'), 'staged\n');
+    await git(root, ['add', 'alpha.txt']);
+    await fs.appendFile(path.join(root, 'alpha.txt'), 'unstaged\n');
+    await fs.appendFile(path.join(root, 'beta.txt'), 'keep staged\n');
+    await git(root, ['add', 'beta.txt']);
+    await git(root, ['mv', 'rename-me.txt', 'renamed.txt']);
+    const client = new GitClient(root);
+    await client.restoreFilesToHead(['alpha.txt', 'rename-me.txt', 'renamed.txt']);
+    expect(await fs.readFile(path.join(root, 'alpha.txt'), 'utf8')).toBe('alpha\n');
+    expect(await fs.readFile(path.join(root, 'rename-me.txt'), 'utf8')).toBe('original\n');
+    await expect(fs.stat(path.join(root, 'renamed.txt'))).rejects.toMatchObject({ code: 'ENOENT' });
+    expect(await git(root, ['status', '--short'])).toBe('M  beta.txt');
+  });
+
+  it('unstages a selected new file without touching unrelated staged work', async () => {
+    const root = await createRepository();
+    await fs.writeFile(path.join(root, 'new.txt'), 'new content\n');
+    await git(root, ['add', 'new.txt']);
+    await fs.appendFile(path.join(root, 'beta.txt'), 'keep staged\n');
+    await git(root, ['add', 'beta.txt']);
+    await new GitClient(root).unstageNewFiles(['new.txt']);
+    expect(await fs.readFile(path.join(root, 'new.txt'), 'utf8')).toBe('new content\n');
+    expect((await git(root, ['status', '--short'])).split('\n')).toEqual(['M  beta.txt', '?? new.txt']);
+  });
+
   it('round-trips repository identity and recent commit messages', async () => {
     const root = await createRepository();
     const client = new GitClient(root);
