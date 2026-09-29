@@ -11,10 +11,13 @@ export interface GitChange {
 
 export interface BranchSummary {
   name: string;
+  oid?: string;
   current: boolean;
   remote: boolean;
   upstream?: string;
   tracking?: string;
+  ahead?: number;
+  behind?: number;
 }
 
 export interface CommitSummary {

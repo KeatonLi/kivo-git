@@ -91,18 +91,23 @@ export class GitClient {
   private async getBranches(): Promise<BranchSummary[]> {
     const output = await this.run([
       'for-each-ref',
-      '--format=%(refname)\t%(refname:short)\t%(HEAD)\t%(upstream:short)\t%(upstream:trackshort)',
+      '--format=%(refname)\t%(refname:short)\t%(HEAD)\t%(upstream:short)\t%(upstream:trackshort)\t%(objectname)\t%(upstream:track)',
       'refs/heads',
       'refs/remotes'
     ]);
     return output.split('\n').filter(Boolean).map((line) => {
-      const [refname = '', name = '', head = '', upstream = '', tracking = ''] = line.split('\t');
+      const [refname = '', name = '', head = '', upstream = '', tracking = '', oid = '', trackCounts = ''] = line.split('\t');
+      const ahead = /\bahead (\d+)/.exec(trackCounts);
+      const behind = /\bbehind (\d+)/.exec(trackCounts);
       return {
         name,
+        oid,
         current: head === '*',
         remote: refname.startsWith('refs/remotes/'),
         upstream: upstream || undefined,
-        tracking: tracking || undefined
+        tracking: tracking || undefined,
+        ahead: upstream && trackCounts !== '[gone]' ? Number(ahead?.[1] || 0) : undefined,
+        behind: upstream && trackCounts !== '[gone]' ? Number(behind?.[1] || 0) : undefined
       };
     }).filter((branch) => !branch.name.endsWith('/HEAD'));
   }
@@ -131,9 +136,60 @@ export class GitClient {
     }
     const refs = await this.getRefs(currentBranch);
     const output = await this.run(['log', ...(exactRef ? [exactRef] : head.trim() ? ['--all', 'HEAD'] : ['--all']), '--topo-order', '-n', String(safeLimit + 1), '--date=iso-strict', '--name-only', '-z', '--pretty=format:%H%x1f%h%x1f%P%x1f%an%x1f%aI%x1f%s%x1e']);
+    const commits = this.parseCommitLog(output, refs);
+    const result = { key, commits: this.layoutCommits(commits.slice(0, safeLimit)), hasMore: commits.length > safeLimit };
+    this.historyCache = result;
+    return result;
+  }
+
+  /** Search the complete ref history in Git, then page the matching results. */
+  async searchCommits(filters: { query?: string; author?: string; age?: string; path?: string; ref?: string }, limit = 80): Promise<{ commits: CommitSummary[]; hasMore: boolean }> {
+    const safeLimit = Math.max(1, Math.floor(limit));
+    const branches = await this.getBranches();
+    const tags = await this.getTags();
+    const selectedBranch = branches.find((branch) => branch.name === filters.ref);
+    const selectedTag = tags.find((tag) => tag.name === filters.ref);
+    const exactRef = selectedBranch
+      ? `refs/${selectedBranch.remote ? 'remotes' : 'heads'}/${selectedBranch.name}`
+      : selectedTag ? `refs/tags/${selectedTag.name}` : undefined;
+    if (filters.ref && !exactRef) return { commits: [], hasMore: false };
+    const query = (filters.query || '').trim();
+    const author = (filters.author || '').trim();
+    const pathFilter = (filters.path || '').trim();
+    const ageDays = ({ '7d': 7, '30d': 30, '90d': 90 } as Record<string, number>)[filters.age || ''] || 0;
+    const head = (await this.run(['rev-parse', '--verify', 'HEAD']).catch(() => '')).trim();
+    if (!head && !branches.length && !tags.length) return { commits: [], hasMore: false };
+    const args = ['log', ...(exactRef ? [exactRef] : head ? ['--all', 'HEAD'] : ['--all']), '--topo-order', '-n', String(safeLimit + 1), '--date=iso-strict', '--name-only', '-z', '--pretty=format:%H%x1f%h%x1f%P%x1f%an%x1f%aI%x1f%s%x1e'];
+    if (author) args.push(`--author=${author}`);
+    if (ageDays) args.push(`--since=${new Date(Date.now() - ageDays * 86400000).toISOString()}`);
+    let hashSearch = false;
+    if (/^[0-9a-f]{7,40}$/i.test(query)) {
+      const resolved = (await this.run(['rev-parse', '--verify', '--quiet', `${query}^{commit}`]).catch(() => '')).trim();
+      if (resolved) {
+        if (exactRef && !(await this.run(['merge-base', '--is-ancestor', resolved, exactRef]).then(() => true).catch(() => false))) {
+          return { commits: [], hasMore: false };
+        }
+        args.splice(1, exactRef ? 1 : head ? 2 : 1, resolved);
+        args.push('-1');
+        hashSearch = true;
+      }
+    }
+    if (query && !hashSearch) args.push('--regexp-ignore-case', '--fixed-strings', `--grep=${query}`);
+    if (pathFilter) {
+      // In the default pathspec mode, * also matches directory separators.
+      const escaped = pathFilter.replace(/[\\*?\[\]]/g, (character) => `\\${character}`);
+      args.push('--', `:(icase)*${escaped}*`);
+    }
+    const output = await this.run(args);
+    const refs = await this.getRefs(branches.find((branch) => branch.current && !branch.remote)?.name);
+    const matches = this.parseCommitLog(output, refs);
+    return { commits: this.layoutCommits(matches.slice(0, safeLimit)), hasMore: matches.length > safeLimit };
+  }
+
+  private parseCommitLog(output: string, refs: Map<string, GitRef[]>): CommitSummary[] {
     const recordPattern = /([0-9a-f]{40})\x1f([0-9a-f]{7,40})\x1f([^\x1f]*)\x1f([^\x1f]*)\x1f([^\x1f]*)\x1f([^\x1e]*)\x1e/g;
     const matches = [...output.matchAll(recordPattern)];
-    const commits = matches.map((match, index) => {
+    return matches.map((match, index) => {
       const hash = match[1] ?? '';
       const shortHash = match[2] ?? '';
       const parentText = match[3] ?? '';
@@ -144,8 +200,8 @@ export class GitClient {
       const end = matches[index + 1]?.index ?? output.length;
       const paths = output.slice(start, end)
         .replace(/^\n+/, '')
+        .replace(/\n+$/, '')
         .split('\0')
-        .map((filePath) => filePath.trim())
         .filter(Boolean);
       return {
         hash,
@@ -161,9 +217,6 @@ export class GitClient {
         parentLanes: []
       };
     });
-    const result = { key, commits: this.layoutCommits(commits.slice(0, safeLimit)), hasMore: commits.length > safeLimit };
-    this.historyCache = result;
-    return result;
   }
 
   private async getRefs(currentBranch?: string): Promise<Map<string, GitRef[]>> {
@@ -406,6 +459,16 @@ export class GitClient {
       : {});
   }
   async pull(strategy: PullStrategy = 'ff-only'): Promise<void> { await this.run(pullArgs(strategy)); }
+
+  async setUpstream(remoteBranch: string): Promise<void> {
+    const branch = (await this.run(['symbolic-ref', '--quiet', '--short', 'HEAD']).catch(() => '')).trim();
+    if (!branch) throw new Error('Switch to a local branch before setting an upstream.');
+    const known = await this.getBranches();
+    if (!known.some((candidate) => candidate.remote && candidate.name === remoteBranch)) {
+      throw new Error('The selected remote branch is no longer available. Fetch and try again.');
+    }
+    await this.run(['branch', `--set-upstream-to=refs/remotes/${remoteBranch}`, branch]);
+  }
 
   /** Update one non-current local branch without switching HEAD or touching the worktree. */
   async updateLocalBranch(branch: string): Promise<void> {

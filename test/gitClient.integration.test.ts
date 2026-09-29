@@ -107,6 +107,33 @@ describe('GitClient integration', () => {
     expect(complete.commits.length).toBeGreaterThan(first.commits.length);
   });
 
+  it('searches older commits by message, author, and path beyond the loaded history', async () => {
+    const root = await createRepository();
+    await fs.mkdir(path.join(root, 'src', 'deep'), { recursive: true });
+    await fs.writeFile(path.join(root, 'src', 'deep', 'needle-file.txt'), 'older change\n');
+    await git(root, ['add', '.']);
+    await git(root, ['commit', '--author', 'Search Author <search@example.test>', '-m', 'needle in old history']);
+    for (let index = 0; index < 8; index += 1) await git(root, ['commit', '--allow-empty', '-m', `recent ${index}`]);
+    const client = new GitClient(root);
+    expect((await client.snapshot(3)).commits.some((commit) => commit.subject.includes('needle'))).toBe(false);
+    const matches = await client.searchCommits({ query: 'needle', author: 'Search Author', path: 'deep/needle-file', age: 'all' }, 2);
+    expect(matches.commits.map((commit) => commit.subject)).toEqual(['needle in old history']);
+    expect(matches.hasMore).toBe(false);
+    expect((await client.searchCommits({ query: 'recent' }, 2)).hasMore).toBe(true);
+    expect((await client.searchCommits({ query: 'recent' }, 12)).commits).toHaveLength(8);
+  });
+
+  it('preserves leading and trailing whitespace in committed file paths', async () => {
+    const root = await createRepository();
+    const filename = ' leading and trailing .txt ';
+    await fs.writeFile(path.join(root, filename), 'literal filename\n');
+    await git(root, ['add', '--', filename]);
+    await git(root, ['commit', '-m', 'unusual path']);
+    const client = new GitClient(root);
+    expect((await client.snapshot()).commits[0]?.paths).toContain(filename);
+    expect((await client.searchCommits({ path: 'leading and trailing' })).commits[0]?.paths).toContain(filename);
+  });
+
   it('attributes a line to its commit and identifies worktree-only edits', async () => {
     const root = await createRepository();
     const client = new GitClient(root);
@@ -236,6 +263,7 @@ describe('GitClient integration', () => {
     await git(remote, ['init', '--bare']);
     await git(root, ['remote', 'add', 'origin', remote]);
     await git(root, ['push', '-u', 'origin', 'main']);
+    await git(root, ['branch', '--track', 'review', 'origin/main']);
 
     await fs.appendFile(path.join(root, 'alpha.txt'), 'local commit\n');
     await git(root, ['add', 'alpha.txt']);
@@ -253,10 +281,29 @@ describe('GitClient integration', () => {
     await client.initialize();
     const stale = await client.snapshot();
     expect(stale).toMatchObject({ upstream: 'origin/main', ahead: 1, behind: 0 });
+    const remoteBefore = stale.branches.find((branch) => branch.name === 'origin/main')?.oid;
 
     await client.fetch(true);
     const current = await client.snapshot();
     expect(current).toMatchObject({ upstream: 'origin/main', ahead: 1, behind: 1 });
+    expect(current.branches.find((branch) => branch.name === 'origin/main')?.oid).not.toBe(remoteBefore);
+    expect(current.branches.find((branch) => branch.name === 'main')).toMatchObject({ ahead: 1, behind: 1 });
+    expect(current.branches.find((branch) => branch.name === 'review')).toMatchObject({ ahead: 0, behind: 1 });
+  });
+
+  it('sets a selected remote branch as the current local branch upstream', async () => {
+    const root = await createRepository();
+    const remote = await fs.mkdtemp(path.join(os.tmpdir(), 'ideagit-remote-'));
+    temporaryRepositories.push(remote);
+    await git(remote, ['init', '--bare']);
+    await git(root, ['remote', 'add', 'origin', remote]);
+    await git(root, ['push', '-u', 'origin', 'main']);
+    await git(root, ['branch', '--unset-upstream']);
+    const client = new GitClient(root);
+    expect((await client.snapshot()).upstream).toBeUndefined();
+    await client.setUpstream('origin/main');
+    expect((await client.snapshot()).upstream).toBe('origin/main');
+    await expect(client.setUpstream('origin/missing')).rejects.toThrow('no longer available');
   });
 
   it('updates only a selected non-current branch from its remote without touching HEAD or the working tree', async () => {

@@ -44,6 +44,7 @@ const messagesBySurface: Record<KivoSurface, ReadonlySet<string>> = {
     'commitAndPush',
     'reuseCommitMessage',
     'configureGitIdentity',
+    'configureUpstream',
     'showLog',
     'showRecentCommit',
     'openSettings',
@@ -54,6 +55,7 @@ const messagesBySurface: Record<KivoSurface, ReadonlySet<string>> = {
     'moveFiles'
   ]),
   history: new Set([
+    'searchHistory',
     'loadMoreCommits',
     'setHistoryRef',
     'commitDetails',

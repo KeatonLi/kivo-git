@@ -10,6 +10,7 @@ type WebviewMessage =
   | { type: 'ready'; historyRef?: string }
   | { type: 'refresh' | 'fetch' | 'push' | 'loadMoreCommits' | 'showLog' | 'showChanges' | 'openSettings' }
   | { type: 'setHistoryRef'; branch: string }
+  | { type: 'searchHistory'; requestId: number; filters: { query?: string; author?: string; age?: string; path?: string; ref?: string }; limit: number }
   | { type: 'pull'; strategy: PullStrategy }
   | { type: 'commitDetails'; hash: string }
   | { type: 'showRecentCommit'; hash: string }
@@ -26,7 +27,7 @@ type WebviewMessage =
   | { type: 'commit'; message: string; paths: string[] }
   | { type: 'commitAndPush'; message: string; paths: string[] }
   | { type: 'reuseCommitMessage'; draft: string }
-  | { type: 'configureGitIdentity' }
+  | { type: 'configureGitIdentity' | 'configureUpstream' }
   | { type: 'chooseRepository' }
   | { type: 'checkout'; branch: string; remote: boolean }
   | { type: 'createBranch'; startPoint: string }
@@ -46,7 +47,7 @@ type WebviewMessage =
   | { type: 'setActiveChangelist'; id: string }
   | { type: 'moveFiles'; paths: string[]; listId: string };
 type OperationKind = 'commit' | 'checkout' | 'branch' | 'tag' | 'changelist' | 'move' | 'fetch' | 'pull' | 'push' | 'identity';
-type WebviewRepositorySnapshot = RepositorySnapshot & { fileIcons: Record<string, WebviewFileIcon>; repositoryCount: number };
+type WebviewRepositorySnapshot = RepositorySnapshot & { fileIcons: Record<string, WebviewFileIcon>; repositoryCount: number; allRepositoryChanges: number };
 const HISTORY_PAGE_SIZE = 80;
 
 export class IdeaGitViewProvider implements vscode.WebviewViewProvider, vscode.TextDocumentContentProvider, vscode.Disposable {
@@ -61,6 +62,7 @@ export class IdeaGitViewProvider implements vscode.WebviewViewProvider, vscode.T
   private repositories: vscode.WorkspaceFolder[] = [];
   private repositoriesLoading?: Promise<void>;
   private badgeCount = 0;
+  private badgeCounts = new Map<string, number>();
   private badgeRefreshPromise?: Promise<void>;
   private badgeRefreshQueued = false;
   private badgeRefreshTimer?: NodeJS.Timeout;
@@ -120,7 +122,7 @@ export class IdeaGitViewProvider implements vscode.WebviewViewProvider, vscode.T
         this.scheduleBadgeRefresh();
       })
     );
-    this.badgePollTimer = setInterval(() => void this.refreshBadge(), 10000);
+    this.badgePollTimer = setInterval(() => void this.refreshBadge(), 30000);
     void this.refreshBadge();
   }
 
@@ -316,7 +318,9 @@ export class IdeaGitViewProvider implements vscode.WebviewViewProvider, vscode.T
   }
 
   private async postSnapshotToReadyViews(snapshot: RepositorySnapshot): Promise<void> {
-    this.scheduleBadgeRefresh();
+    this.badgeCounts.set(snapshot.root, snapshot.changes.length);
+    this.badgeCount = [...this.badgeCounts.values()].reduce((total, count) => total + count, 0);
+    this.updateBadge();
     await Promise.all([...this.readyViews].map((surface) => this.postSnapshotToView(surface, snapshot)));
   }
 
@@ -324,7 +328,7 @@ export class IdeaGitViewProvider implements vscode.WebviewViewProvider, vscode.T
     const view = this.views.get('changes');
     if (view) view.badge = this.badgeCount ? {
       value: this.badgeCount,
-      tooltip: `${this.badgeCount} uncommitted ${this.badgeCount === 1 ? 'file' : 'files'} across Git repositories`
+      tooltip: `${this.badgeCount} uncommitted ${this.badgeCount === 1 ? 'file' : 'files'} across all Git repositories. The Commit view shows the selected repository.`
     } : undefined;
   }
 
@@ -346,14 +350,20 @@ export class IdeaGitViewProvider implements vscode.WebviewViewProvider, vscode.T
       const roots = [...new Set(this.availableRepositories().map((repository) => repository.uri.fsPath))];
       if (!roots.length) {
         this.badgeCount = 0;
+        this.badgeCounts.clear();
         this.updateBadge();
         return;
       }
       const counts = await Promise.allSettled(roots.map((root) => new GitClient(root).changedFilesCount()));
       // Keep the last complete count if a repository is temporarily unavailable.
       if (counts.some((result) => result.status === 'rejected')) return;
+      const previousCount = this.badgeCount;
+      this.badgeCounts = new Map(roots.map((root, index) => [root, counts[index]?.status === 'fulfilled' ? counts[index].value : 0]));
       this.badgeCount = counts.reduce((total, result) => total + (result.status === 'fulfilled' ? result.value : 0), 0);
       this.updateBadge();
+      if (this.lastSnapshot && this.badgeCount !== previousCount) {
+        await Promise.all([...this.readyViews].map((surface) => this.postSnapshotToView(surface, this.lastSnapshot!)));
+      }
     })();
     this.badgeRefreshPromise = task;
     try {
@@ -374,6 +384,7 @@ export class IdeaGitViewProvider implements vscode.WebviewViewProvider, vscode.T
     const payload: WebviewRepositorySnapshot = {
       ...snapshot,
       repositoryCount: this.availableRepositories().length,
+      allRepositoryChanges: this.badgeCount,
       fileIcons: surface === 'changes'
         ? this.fileIconTheme.iconsFor(view.webview, snapshot.changes.map((change) => change.path))
         : {}
@@ -465,7 +476,8 @@ export class IdeaGitViewProvider implements vscode.WebviewViewProvider, vscode.T
     if (folders.length < 2) return;
     const selected = await vscode.window.showQuickPick(folders.map((folder) => ({
       label: folder.name,
-      description: folder.uri.fsPath,
+      description: `${this.badgeCounts.get(folder.uri.fsPath) ?? '—'} changed files`,
+      detail: folder.uri.fsPath,
       folder
     })), { title: 'Choose Kivo Git Repository', placeHolder: 'Select a detected Git repository' });
     if (!selected) return;
@@ -554,6 +566,22 @@ export class IdeaGitViewProvider implements vscode.WebviewViewProvider, vscode.T
     try {
       const client = await this.getClient();
       switch (message.type) {
+        case 'searchHistory': {
+          const requestId = Number(message.requestId);
+          if (!Number.isSafeInteger(requestId) || requestId < 0) return;
+          const root = client.workspaceRoot;
+          const filters = message.filters || {};
+          try {
+            const result = await client.searchCommits({
+              query: String(filters.query || '').slice(0, 300), author: String(filters.author || '').slice(0, 200),
+              age: String(filters.age || ''), path: String(filters.path || '').slice(0, 300), ref: String(filters.ref || '')
+            }, Math.max(1, Number(message.limit) || HISTORY_PAGE_SIZE));
+            if (this.selectedWorkspace()?.uri.fsPath === root) await this.postToView(surface, { type: 'historySearchResults', requestId, root, ...result });
+          } catch (error) {
+            await this.postToView(surface, { type: 'historySearchError', requestId, root, message: this.errorText(error) });
+          }
+          return;
+        }
         case 'loadMoreCommits':
           this.commitLimit += HISTORY_PAGE_SIZE;
           await this.refresh(true);
@@ -640,6 +668,20 @@ export class IdeaGitViewProvider implements vscode.WebviewViewProvider, vscode.T
         case 'configureGitIdentity':
           await this.configureGitIdentity(client);
           return;
+        case 'configureUpstream': {
+          const remoteBranches = (this.lastSnapshot?.branches || []).filter((branch) => branch.remote);
+          if (!remoteBranches.length) {
+            void vscode.window.showInformationMessage('No remote branches found. Add a remote or Fetch, then try again.');
+            return;
+          }
+          const current = this.lastSnapshot?.branch || '';
+          const choice = await vscode.window.showQuickPick(remoteBranches.map((branch) => ({
+            label: branch.name,
+            description: branch.name.endsWith(`/${current}`) ? 'Same branch name' : undefined
+          })), { title: `Track a remote branch from ${current}`, placeHolder: 'Choose the remote branch to pull from and push to' });
+          if (choice) await this.operation('branch', 'Setting tracking branch…', () => client.setUpstream(choice.label), `Tracking ${choice.label}`);
+          return;
+        }
         case 'checkout':
           await this.operation('checkout', `Switching to ${message.branch}…`, async () => client.checkout(message.branch, message.remote), `Switched to ${message.branch}`);
           return;
@@ -996,7 +1038,7 @@ export class IdeaGitViewProvider implements vscode.WebviewViewProvider, vscode.T
       await vscode.window.withProgress({ location: vscode.ProgressLocation.SourceControl, title: `${IdeaGitViewProvider.productName}: ${label}` }, action);
       if (kind === 'commit' || kind === 'checkout' || kind === 'pull' || kind === 'branch') this.repositoryEmitter.fire();
       if (kind === 'fetch') await this.setSyncState('idle', Date.now());
-      else if (kind === 'pull' || kind === 'push') await this.setSyncState('idle');
+      else if (kind === 'pull' || kind === 'push') await this.setSyncState('idle', Date.now());
       await this.postToReadyViews({ type: 'operation', id, kind, phase: 'success', message: success, clearsCommit });
       return true;
     } catch (error) {

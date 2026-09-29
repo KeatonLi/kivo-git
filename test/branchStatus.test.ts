@@ -39,9 +39,9 @@ describe('History branch status', () => {
     expect(html.indexOf('data-log-branch="main"')).toBeLessThan(html.indexOf('data-log-branch="other"'));
     expect(html).toContain('2 incoming, 3 outgoing · origin/main');
     expect(html).toContain('class="branch-sync-indicator"');
-    expect(html).toContain('<icon name="arrow-down" class="branch-sync-incoming">');
-    expect(html).toContain('<icon name="arrow-up" class="branch-sync-outgoing">');
-    expect(html).toContain('Incoming commits · origin/other');
+    expect(html).toContain('class="branch-sync-count branch-sync-incoming"><icon name="arrow-down"><b>2</b>');
+    expect(html).toContain('class="branch-sync-count branch-sync-outgoing"><icon name="arrow-up"><b>3</b>');
+    expect(html).toContain('Incoming commits, 0 outgoing · origin/other');
     expect(html).toContain('data-update-branch="other"');
     expect(html).not.toContain('data-update-branch="main"');
   });
@@ -65,6 +65,15 @@ describe('History branch status', () => {
     expect(row('both')).toContain('branch-sync-outgoing');
     expect(row('clean')).not.toContain('branch-sync-indicator');
     expect(row('origin/ahead')).not.toContain('branch-sync-indicator');
+  });
+
+  it('renders numeric incoming counts for another local branch', async () => {
+    const html = await renderBranches({ ...snapshot, branches: [
+      { name: 'main', current: true, remote: false, upstream: 'origin/main' },
+      { name: 'review', current: false, remote: false, upstream: 'origin/review', ahead: 0, behind: 122 }
+    ] });
+    expect(html).toContain('122 incoming, 0 outgoing · origin/review');
+    expect(html).toContain('class="branch-sync-count branch-sync-incoming"><icon name="arrow-down"><b>122</b>');
   });
 
   it('shows a compact failure state on the current branch', async () => {

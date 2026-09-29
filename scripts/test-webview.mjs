@@ -99,7 +99,7 @@ try {
   await page.locator('[data-toolbar-action="fetch"]').click();
   assert.ok(await page.evaluate(() => window.__vscodeMessages.some((message) => message.type === 'fetch')), 'Fetch should reach the VS Code message bridge.');
   await page.evaluate(() => window.dispatchEvent(new MessageEvent('message', { data: { type: 'syncStatus', phase: 'error', error: 'Remote unavailable' } })));
-  assert.match(await page.locator('.commit-repo-meta .has-error').textContent(), /Fetch failed/, 'The compact Commit status should expose remote errors.');
+  assert.match(await page.locator('.commit-repo-meta .has-error').textContent(), /Remote check failed/, 'The compact Commit status should expose remote errors.');
   await page.evaluate(() => window.dispatchEvent(new MessageEvent('message', { data: { type: 'syncStatus', phase: 'idle' } })));
 
   await openSurface(page, 'surface=changes&state=sync-clean');
@@ -110,6 +110,8 @@ try {
   assert.ok(await page.evaluate(() => window.__vscodeMessages.some((message) => message.type === 'pull')), 'Pull should reach Git even when no incoming commits were cached.');
   await openSurface(page, 'surface=changes&state=no-upstream');
   assert.equal(await page.locator('[data-action="pull-menu"]').isEnabled(), false, 'Pull without a tracking branch should explain why it cannot run.');
+  await page.locator('[data-action="configure-upstream"]').click();
+  assert.ok(await page.evaluate(() => window.__vscodeMessages.some((message) => message.type === 'configureUpstream')), 'An untracked branch should offer a direct setup action.');
 
   await openSurface(page, 'surface=changes&state=multi');
   const switchRepository = page.getByRole('button', { name: /Choose repository, current ack-k8s/ }).first();
@@ -171,13 +173,16 @@ try {
   const firstSubject = page.locator('.graph-row strong').first();
   assert.equal(await firstSubject.getAttribute('title'), await firstSubject.textContent(), 'Truncated commit subjects should expose their full text on hover.');
   await page.locator('#graph-search').fill('2d4411f');
+  await page.locator('.graph-row').first().waitFor();
   assert.equal(await page.locator('.graph-row').count(), 1, 'Commit search should match by short hash.');
   await page.locator('[data-action="clear-graph-filters"]').first().click();
   assert.equal(await page.locator('.graph-row').count(), loadedCommitCount, 'Clearing filters should restore all loaded commits.');
   await page.locator('#graph-path').fill('config');
+  await page.locator('.graph-row').first().waitFor();
   assert.equal(await page.locator('.graph-row').count(), 1, 'Path filtering should return commits that touched the path.');
   await page.locator('[data-action="clear-graph-filters"]').first().click();
-  await page.locator('[data-graph-filter="author"]').selectOption('jarvan.jiang');
+  await page.locator('#graph-author').fill('jarvan.jiang');
+  await page.locator('.graph-row').first().waitFor();
   assert.ok(await page.locator('.graph-row').count() > 0 && await page.locator('.graph-row').count() < loadedCommitCount, 'Author filtering should narrow the commit list.');
   await page.locator('[data-action="clear-graph-filters"]').first().click();
   await page.locator('[data-graph-filter="branch"]').selectOption('origin/master');
@@ -189,6 +194,7 @@ try {
     data: { type: 'revealCommit', hash: '2d4411f0a1b2c3d4e5f678901234567890abcd12' }
   })));
   assert.equal(await page.locator('.log-workspace.history-focus').count(), 0, 'Blame navigation should reveal the commit detail pane.');
+  await page.locator('.graph-row.selected').waitFor();
   assert.equal(await page.locator('.graph-row').count(), 1, 'Blame navigation should narrow History to the exact commit.');
   assert.equal(await page.locator('.graph-row.selected').count(), 1, 'Blame navigation should select the matching commit.');
   assert.ok(await page.evaluate(() => window.__vscodeMessages.some((message) => message.type === 'commitDetails' && message.hash === '2d4411f0a1b2c3d4e5f678901234567890abcd12')), 'Blame navigation should load commit details.');
@@ -246,6 +252,12 @@ try {
   await page.locator('.commit-file').first().click();
   assert.ok(await page.evaluate(() => window.__vscodeMessages.some((message) => message.type === 'openCommitDiff' && message.hash === '2d4411f0a1b2c3d4e5f678901234567890abcd12')), 'Opening a changed file should request its diff in VS Code.');
   assert.equal(await page.locator('[data-action="load-more-commits"]').count(), 0, 'History should not require a Load more button.');
+  await page.addStyleTag({ content: '.graph-list[data-graph-list] { max-height: 120px !important; }' });
+  await page.locator('[data-graph-list]').evaluate((list) => {
+    list.scrollTop = Math.max(0, list.scrollHeight - list.clientHeight - 40);
+    list.dispatchEvent(new Event('scroll'));
+  });
+  assert.equal(await page.evaluate(() => window.__vscodeMessages.filter((message) => message.type === 'loadMoreCommits').length), 0, 'Approaching the bottom should not load more history early.');
   await page.locator('[data-graph-list]').evaluate((list) => { list.scrollTop = list.scrollHeight; list.dispatchEvent(new Event('scroll')); });
   assert.ok(await page.evaluate(() => window.__vscodeMessages.some((message) => message.type === 'loadMoreCommits')), 'Scrolling to older history should load the next page.');
 

@@ -109,6 +109,18 @@
         setState: () => {},
         postMessage: (message) => {
           window.__vscodeMessages.push(message);
+          if (message.type === 'searchHistory') {
+            const { query = '', author = '', path = '', age = 'all' } = message.filters || {};
+            const needle = query.trim().toLowerCase();
+            const matches = fixture.commits.filter((commit) => {
+              const text = [commit.subject, commit.author, commit.hash, commit.shortHash].join(' ').toLowerCase();
+              return (!needle || text.includes(needle)) && (!author || commit.author.includes(author)) &&
+                (!path || commit.paths.some((file) => file.toLowerCase().includes(path.toLowerCase()))) &&
+                (age === 'all' || Date.now() - new Date(commit.date).getTime() < Number.parseInt(age, 10) * 86400000);
+            });
+            setTimeout(() => emit({ type: 'historySearchResults', requestId: message.requestId, root: fixture.root,
+              commits: matches.slice(0, message.limit), hasMore: matches.length > message.limit }), 20);
+          }
           if (message.type === 'commitDetails') {
             const commit = fixture.commits.find((item) => item.hash === message.hash);
             if (!commit) return;

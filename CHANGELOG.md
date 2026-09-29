@@ -2,6 +2,15 @@
 
 ## Unreleased
 
+## 0.3.4 - 2026-09-29
+
+- Search the full repository history by commit text or hash, author, date, path, and ref while retaining automatic pagination.
+- Show per-repository and aggregate working-tree counts clearly in multi-repository workspaces, and avoid redundant status scans.
+- Explain remote checks and failures in the Commit view and offer a direct action to configure a branch's upstream.
+- Show absolute timestamps in History, commit details, and recent commits; preserve whitespace in committed file paths.
+- Load the next History page only at the bottom of the scrollable list, with a compact pagination hint.
+- Display numeric incoming and outgoing commit counts beside local branches, including non-current branches.
+
 ## 0.3.3 - 2026-09-28
 
 - Show the total number of uncommitted files on the Kivo Git Activity Bar icon, updating on file changes and while the view is hidden; clear the badge for a clean workspace.
