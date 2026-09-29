@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+## 0.3.6 - 2026-09-29
+
+- Replace unclear Working and Untracked file badges with Modified, New file, or the specific change type; explain Git tracking and staging in the tooltip.
+
 ## 0.3.5 - 2026-09-29
 
 - Show the active repository name before Commit in the left view title, updating when the selected repository changes.

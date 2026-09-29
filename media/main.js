@@ -171,14 +171,15 @@ const escapeHtml = (value = '') => String(value)
 const iconFor = (kind) => ({ modified: 'M', added: 'A', deleted: 'D', renamed: 'R', untracked: '?', conflict: '!' })[kind] || 'M';
 const describeFileState = (status) => ({ '.': 'unchanged', M: 'modified', A: 'added', D: 'deleted', R: 'renamed', C: 'copied', U: 'conflicted', '?': 'untracked' })[status] || 'changed';
 function fileStateTitle(change) {
-  if (change.kind === 'untracked') return 'Untracked; not staged in the index';
-  return `Index: ${describeFileState(change.indexStatus)} · Working tree: ${describeFileState(change.workingTreeStatus)}`;
+  if (change.kind === 'untracked') return 'New file · Git is not tracking it yet';
+  return `Staged: ${describeFileState(change.indexStatus)} · Unstaged: ${describeFileState(change.workingTreeStatus)}`;
 }
 function fileStateSummary(change) {
   if (change.kind === 'conflict') return 'Conflict';
-  if (change.kind === 'untracked') return 'Untracked';
-  if (change.indexStatus !== '.' && change.workingTreeStatus !== '.') return 'Staged + working';
-  return change.indexStatus !== '.' ? 'Staged' : 'Working';
+  if (change.kind === 'untracked') return 'New file';
+  if (change.indexStatus !== '.' && change.workingTreeStatus !== '.') return 'Staged + edits';
+  if (change.indexStatus !== '.') return 'Staged';
+  return ({ deleted: 'Deleted', renamed: 'Renamed', added: 'Added' })[change.kind] || 'Modified';
 }
 const icon = (name, classes = '') => `<span class="codicon codicon-${name} ${classes}" aria-hidden="true"></span>`;
 const kivoIcon = (name, classes = '') => `<svg class="kivo-icon ${classes}" aria-hidden="true" focusable="false"><use href="#kivo-${name}"></use></svg>`;
