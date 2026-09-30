@@ -3,6 +3,7 @@ import { spawn } from 'node:child_process';
 import { createRequire } from 'node:module';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { mkdir } from 'node:fs/promises';
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const require = createRequire(import.meta.url);
@@ -646,6 +647,54 @@ try {
   await page.mouse.move(0, 0);
   await page.evaluate(() => emit({ type: 'notice', phase: 'success', message: 'Push complete' }));
   await page.waitForSelector('.toast', { state: 'detached', timeout: 5000 });
+
+  if (process.env.KIVO_CAPTURE_DIR) {
+    const directory = path.resolve(process.env.KIVO_CAPTURE_DIR);
+    await mkdir(directory, { recursive: true });
+    const capture = async (name) => {
+      await page.mouse.move(0, 0);
+      await page.screenshot({ path: path.join(directory, `${name}.png`), animations: 'disabled' });
+    };
+    await page.setViewportSize({ width: 360, height: 820 });
+    await openSurface(page, 'surface=changes&state=grouped');
+    await capture('01-commit');
+    await page.locator('[data-select]').first().check({ force: true });
+    await page.locator('[data-recent-commit]').first().click();
+    await page.waitForSelector('[data-recent-file]');
+    await capture('02-commit-review');
+
+    for (const viewport of [{ width: 1440, height: 460 }, { width: 960, height: 380 }]) {
+      await page.setViewportSize(viewport);
+      await openSurface(page, 'surface=history');
+      await page.locator('.graph-row').first().click();
+      await page.waitForSelector('.commit-file');
+      await capture(viewport.width === 1440 ? '03-history' : '04-history-narrow');
+    }
+
+    await page.setViewportSize({ width: 360, height: 760 });
+    await openSurface(page, 'surface=changes&state=push-ready');
+    await page.locator('[data-action="push"]').click();
+    await page.waitForSelector('.push-review-dialog');
+    await page.locator('[data-push-commit]').first().click();
+    await page.waitForSelector('[data-push-file]');
+    await capture('05-push');
+
+    await page.setViewportSize({ width: 1200, height: 500 });
+    await openSurface(page, 'surface=history');
+    await page.locator('.log-branch-row[data-branch-remote="false"]').first().click({ button: 'right' });
+    await page.locator('[data-branch-context-action="compare"]').click();
+    await page.waitForSelector('[data-workflow-file]');
+    await capture('06-branch-comparison');
+    await page.keyboard.press('Escape');
+    await page.locator('[data-action="stashes"]').click();
+    await page.waitForSelector('.workflow-stash');
+    await capture('07-stashes');
+
+    await page.setViewportSize({ width: 360, height: 600 });
+    await openSurface(page, 'surface=changes');
+    await page.evaluate(() => emit({ type: 'snapshot', payload: { ...fixture, operation: { kind: 'merge', token: 'capture-operation', files: ['src/conflicted.ts'] } } }));
+    await capture('08-conflicts');
+  }
 
   assert.deepEqual(pageErrors, [], 'The webview should not throw browser runtime errors.');
   console.log('Webview E2E passed: reviewed commit, toolbar menu, file states, History focus and Blame reveal, search and filters, branch menus, commit details/diffs, and pagination.');

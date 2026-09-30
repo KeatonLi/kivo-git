@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+## 0.4.2 - 2026-09-30
+
+- Capture Commit, History, Push, branch comparison, Stashes and conflict layouts alongside passing browser interaction tests for visual review before release.
+
 ## 0.4.1 - 2026-09-30
 
 - Initialize the Webview event binder before registering workflow and conflict actions, preserving file selection, drag-and-drop and toolbar interactions on first render.
