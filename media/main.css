@@ -582,6 +582,8 @@ body[data-surface="changes"] .content { background: var(--vscode-sideBar-backgro
   width: min(238px, calc(100vw - 16px));
   max-height: calc(100vh - 16px);
   overflow-y: auto;
+  background: var(--vscode-menu-background, var(--vscode-editorWidget-background, var(--surface-base)));
+  color: var(--vscode-menu-foreground, var(--vscode-foreground));
   transform-origin: top left;
   z-index: 20;
 }

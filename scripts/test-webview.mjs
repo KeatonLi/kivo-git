@@ -836,6 +836,7 @@ try {
       document.body.classList.add('vscode-light');
       document.documentElement.style.cssText = '--vscode-sideBar-background:#f3f3f3;--vscode-panel-background:#fff;--vscode-editor-background:#fff;--vscode-foreground:#333;--vscode-descriptionForeground:#616161;--vscode-input-background:#fff;--vscode-input-foreground:#333;--vscode-input-border:#cecece;--vscode-panel-border:#ddd;--vscode-list-hoverBackground:#e8e8e8;--vscode-list-activeSelectionBackground:#cce8ff;--vscode-list-activeSelectionForeground:#111;--vscode-textLink-foreground:#005fb8;--vscode-charts-blue:#1a85ff;--vscode-charts-green:#388a34;';
     });
+    await page.waitForSelector('.commit-file');
     await capture('11-history-light');
   }
 
