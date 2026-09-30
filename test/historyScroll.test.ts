@@ -12,7 +12,8 @@ describe('History pagination gesture', () => {
     let frame: (() => void) | undefined;
     const render = vi.fn();
     const restoreGraphScroll = vi.fn();
-    const list = { scrollTop: 12, clientHeight: 180, scrollHeight: 2000, isConnected: true, dataset: { windowStart: '0', windowEnd: '20' } };
+    const list = { scrollTop: 12, clientHeight: 180, scrollHeight: 2000, isConnected: true,
+      querySelector: () => ({ dataset: { windowStart: '0', windowEnd: '20' } }) };
     const scroll = runInNewContext(`${source.slice(start, end)}\nonGraphScroll`, {
       ui, GRAPH_BOTTOM_EPSILON: 2, graphScrollFrame: undefined,
       requestAnimationFrame: (callback: () => void) => { frame = callback; return 1; },
