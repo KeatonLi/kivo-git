@@ -5,7 +5,7 @@ import type { PushPreview } from '../src/git/types';
 const preview: PushPreview = {
   branch: 'feature/one', upstream: 'origin/feature/one', remote: 'origin', targetBranch: 'feature/one',
   head: 'a'.repeat(40), upstreamOid: 'b'.repeat(40), ahead: 3, behind: 0,
-  commits: [{ hash: 'aaaaaaa', subject: 'Local changes' }], fileCount: 2
+  commits: [{ hash: 'a'.repeat(40), subject: 'Local changes' }], fileCount: 2
 };
 const review = { surface: 'changes' as const, root: '/repo/one', preview, afterCommit: false };
 
@@ -40,5 +40,18 @@ describe('host-owned Push review', () => {
     session.clear();
     expect(session.take(old.id, 'changes', '/repo/one')).toBeUndefined();
     expect(session.open(review).id).toBeGreaterThan(old.id);
+  });
+
+  it('allows inspection only for exact commit hashes in the active review and stops after cancellation', () => {
+    const session = new PushReviewSession();
+    const opened = session.open(review);
+    expect(session.allowsCommit(opened.id, 'changes', '/repo/one', preview.head)).toBe(true);
+    expect(session.allowsCommit(opened.id, 'changes', '/repo/one', preview.head.slice(0, 7))).toBe(false);
+    expect(session.allowsCommit(opened.id, 'changes', '/repo/one', 'c'.repeat(40))).toBe(false);
+    expect(session.allowsCommit(opened.id, 'history', '/repo/one', preview.head)).toBe(false);
+    expect(session.allowsCommit(opened.id, 'changes', '/repo/two', preview.head)).toBe(false);
+    expect(session.allowsCommit(opened.id + 1, 'changes', '/repo/one', preview.head)).toBe(false);
+    expect(session.take(opened.id, 'changes', '/repo/one')).toEqual(opened);
+    expect(session.allowsCommit(opened.id, 'changes', '/repo/one', preview.head)).toBe(false);
   });
 });

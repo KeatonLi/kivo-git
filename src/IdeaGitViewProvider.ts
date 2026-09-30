@@ -2,7 +2,7 @@ import * as vscode from 'vscode';
 import path from 'node:path';
 import { FileIconThemeResolver, type WebviewFileIcon } from './FileIconThemeResolver';
 import { GitClient } from './git/GitClient';
-import type { PullStrategy, RepositorySnapshot } from './git/types';
+import type { CommitDetails, PullStrategy, RepositorySnapshot } from './git/types';
 import { SnapshotCoordinator } from './SnapshotCoordinator';
 import { PushReviewSession } from './PushReviewSession';
 import { isMessageAllowedOnSurface, KivoViewTypes, type KivoSurface, surfaceForViewType } from './viewLayout';
@@ -14,6 +14,8 @@ type WebviewMessage =
   | { type: 'searchHistory'; requestId: number; filters: { query?: string; author?: string; age?: string; path?: string; ref?: string }; limit: number }
   | { type: 'pull'; strategy: PullStrategy }
   | { type: 'respondPushReview'; id: number; root: string; choice: 'push' | 'cancel' | 'fetch' }
+  | { type: 'pushCommitDetails'; id: number; root: string; hash: string; requestId: number }
+  | { type: 'openPushCommitDiff'; id: number; root: string; hash: string; path: string }
   | { type: 'commitDetails'; hash: string }
   | { type: 'recentCommitDetails'; hash: string; root: string; requestId: number }
   | { type: 'openRecentCommitDiff'; hash: string; root: string; path: string; originalPath?: string; kind?: string }
@@ -627,6 +629,31 @@ export class IdeaGitViewProvider implements vscode.WebviewViewProvider, vscode.T
           this.coordinator.reset();
           await this.refresh(true);
           return;
+        case 'pushCommitDetails': {
+          if (message.root !== client.workspaceRoot || this.selectedWorkspace()?.uri.fsPath !== client.workspaceRoot ||
+              !this.pushReview.allowsCommit(message.id, surface, message.root, message.hash) ||
+              !Number.isSafeInteger(message.requestId) || message.requestId < 0) return;
+          try {
+            const details = await client.commitDetails(message.hash);
+            if (this.selectedWorkspace()?.uri.fsPath !== client.workspaceRoot ||
+                !this.pushReview.allowsCommit(message.id, surface, message.root, message.hash)) return;
+            const view = this.views.get(surface);
+            await this.postToView(surface, { type: 'pushCommitDetails', id: message.id, root: message.root, requestId: message.requestId,
+              payload: { ...details, fileIcons: view ? this.fileIconTheme.iconsFor(view.webview, details.files.map((file) => file.path)) : {} } });
+          } catch (error) {
+            await this.postToView(surface, { type: 'pushCommitDetailsError', id: message.id, root: message.root, requestId: message.requestId, hash: message.hash, message: this.errorText(error) });
+          }
+          return;
+        }
+        case 'openPushCommitDiff': {
+          if (message.root !== client.workspaceRoot || this.selectedWorkspace()?.uri.fsPath !== client.workspaceRoot ||
+              !this.pushReview.allowsCommit(message.id, surface, message.root, message.hash)) return;
+          const details = await client.commitDetails(message.hash);
+          const file = details.files.find((candidate) => candidate.path === message.path);
+          if (!file || !this.pushReview.allowsCommit(message.id, surface, message.root, message.hash)) return;
+          await this.openCommitDiff(client, message.hash, file.path, file.originalPath, file.status, details, true);
+          return;
+        }
         case 'recentCommitDetails': {
           if (message.root !== this.lastSnapshot?.root || this.selectedWorkspace()?.uri.fsPath !== client.workspaceRoot ||
               !this.lastSnapshot?.recentCommits?.some((commit) => commit.hash === message.hash) ||
@@ -1237,8 +1264,8 @@ export class IdeaGitViewProvider implements vscode.WebviewViewProvider, vscode.T
     return vscode.Uri.from({ scheme: IdeaGitViewProvider.revisionScheme, path: `/${filePath}`, query: parameters.toString() });
   }
 
-  private async openCommitDiff(client: GitClient, hash: string, filePath: string, originalPath?: string, kind?: string): Promise<void> {
-    const details = await client.commitDetails(hash);
+  private async openCommitDiff(client: GitClient, hash: string, filePath: string, originalPath?: string, kind?: string, loadedDetails?: CommitDetails, preserveFocus = false): Promise<void> {
+    const details = loadedDetails || await client.commitDetails(hash);
     if (this.selectedWorkspace()?.uri.fsPath !== client.workspaceRoot) return;
     const parent = details.parents[0];
     const oldUri = kind === 'A' || !parent
@@ -1247,7 +1274,7 @@ export class IdeaGitViewProvider implements vscode.WebviewViewProvider, vscode.T
     const currentUri = kind === 'D'
       ? this.revisionUri(filePath, 'empty=1')
       : this.revisionUri(filePath, `commit=${encodeURIComponent(hash)}`);
-    await vscode.commands.executeCommand('vscode.diff', oldUri, currentUri, `${filePath} (${hash.slice(0, 8)} · ${details.subject})`, { preview: false });
+    await vscode.commands.executeCommand('vscode.diff', oldUri, currentUri, `${filePath} (${hash.slice(0, 8)} · ${details.subject})`, { preview: false, preserveFocus });
   }
 
   private configurePolling(): void {

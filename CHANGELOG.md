@@ -2,6 +2,12 @@
 
 ## Unreleased
 
+## 0.3.14 - 2026-09-30
+
+- Prioritize filenames in recent-commit previews, with muted short directory labels and complete paths on hover; retain Git change colors and rename information.
+- Expand outgoing commits inside Push review to load their changed files, reuse cached details, retry failed reads, and open exact committed diffs without closing the review.
+- Scope file inspection to the active review and full commit hashes; ignore late responses after changing commits, repositories, or reviews.
+
 ## 0.3.13 - 2026-09-30
 
 - Highlight commits not yet pushed to their tracking branch with a subtle green row, green node, and Unpushed badge in History and Recent commits; refresh the exact commit membership after tracking refs move.

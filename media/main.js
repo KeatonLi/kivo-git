@@ -103,6 +103,12 @@ const ui = {
   commitMessage: initialRepositoryState.commitMessage || '',
   commitReviewOpen: false,
   pushReview: undefined,
+  pushSelectedHash: undefined,
+  pushDetails: undefined,
+  pushDetailsLoading: false,
+  pushDetailsError: undefined,
+  pushDetailsRequestId: 0,
+  pushDetailsCache: new Map(),
   commitReviewAndPush: false,
   graphQuery: initialRepositoryState.graphQuery || '',
   pendingRevealHash: undefined,
@@ -276,6 +282,7 @@ function restoreRepositoryState(root, state = {}) {
   ui.commitMessage = state.commitMessage || '';
   ui.commitReviewOpen = false;
   ui.pushReview = undefined;
+  clearPushCommitPreview(true);
   ui.commitReviewAndPush = false;
   ui.graphQuery = state.graphQuery || '';
   ui.graphPathFilter = state.graphPathFilter || '';
@@ -941,7 +948,10 @@ function renderPushReview(s) {
         <div class="push-review-route"><div><span class="push-route-label">Local</span>${icon('git-branch')}<strong>${escapeHtml(p.branch)}</strong></div><div class="push-route-target"><span class="push-route-label">Remote</span>${icon('cloud')}<strong>${escapeHtml(`${p.remote}/${p.targetBranch}`)}</strong></div></div>
         ${warning ? `<p class="push-review-warning" role="alert">${icon('warning')}<span>${escapeHtml(warning)}</span></p>` : ''}
         <div class="push-review-summary"><span><b>${p.ahead}</b> ${p.ahead === 1 ? 'commit' : 'commits'} to push</span><span><b>${p.fileCount}</b> ${p.fileCount === 1 ? 'changed file' : 'changed files'}</span></div>
-        <div class="push-review-commits" aria-label="Outgoing commits">${p.commits.map((commit) => `<div class="push-review-commit"><span class="push-commit-dot" aria-hidden="true"></span><code>${escapeHtml(commit.hash)}</code><span title="${escapeHtml(commit.subject)}">${escapeHtml(commit.subject)}</span></div>`).join('')}${p.ahead > p.commits.length ? `<p class="push-review-more">+ ${p.ahead - p.commits.length} more commits</p>` : ''}</div>
+        <div class="push-review-commits" aria-label="Outgoing commits">${p.commits.map((commit) => {
+          const expanded = ui.pushSelectedHash === commit.hash;
+          return `<div class="push-review-entry" data-hash="${escapeHtml(commit.hash)}"><button class="push-review-commit" data-push-commit="${escapeHtml(commit.hash)}" aria-expanded="${expanded}" ${expanded ? `aria-controls="push-files-${review.id}-${escapeHtml(commit.hash)}"` : ''} title="${expanded ? 'Hide' : 'Show'} changed files · ${escapeHtml(commit.subject)}">${icon(expanded ? 'chevron-down' : 'chevron-right', 'push-commit-disclosure')}<span class="push-commit-dot" aria-hidden="true"></span><code title="${escapeHtml(commit.hash)}">${escapeHtml(commit.hash.slice(0, 7))}</code><span class="push-commit-subject">${escapeHtml(commit.subject)}</span></button>${expanded ? renderPushCommitPreview(commit) : ''}</div>`;
+        }).join('')}${p.ahead > p.commits.length ? `<p class="push-review-more">+ ${p.ahead - p.commits.length} more commits</p>` : ''}</div>
       </div>
       <footer><button class="push-review-cancel" data-action="cancel-push-review">Cancel</button><button class="primary-button" data-action="${blocked ? 'fetch-push-review' : 'confirm-push-review'}">${icon(blocked ? 'sync' : 'arrow-up')} ${blocked ? 'Fetch and Review' : `Push ${p.ahead} ${p.ahead === 1 ? 'commit' : 'commits'}`}</button></footer>
     </section>
@@ -952,9 +962,60 @@ function respondPushReview(choice) {
   if (!ui.pushReview) return;
   const { id, root } = ui.pushReview;
   ui.pushReview = undefined;
+  clearPushCommitPreview(true);
   render();
   post('respondPushReview', { id, root, choice });
   app.querySelector('[data-action="push"]')?.focus();
+}
+
+function clearPushCommitPreview(clearCache = false) {
+  ui.pushDetailsRequestId++;
+  ui.pushSelectedHash = undefined;
+  ui.pushDetails = undefined;
+  ui.pushDetailsLoading = false;
+  ui.pushDetailsError = undefined;
+  if (clearCache) ui.pushDetailsCache.clear();
+}
+
+function selectPushCommit(hash, retry = false) {
+  if (!ui.pushReview?.preview.commits.some((commit) => commit.hash === hash)) return;
+  if (ui.pushSelectedHash === hash && !retry) clearPushCommitPreview();
+  else {
+    clearPushCommitPreview();
+    ui.pushSelectedHash = hash;
+    ui.pushDetails = ui.pushDetailsCache.get(hash);
+    ui.pushDetailsLoading = !ui.pushDetails;
+    if (ui.pushDetailsLoading) post('pushCommitDetails', { id: ui.pushReview.id, root: ui.pushReview.root, hash, requestId: ui.pushDetailsRequestId });
+  }
+  render();
+}
+
+function renderPushCommitPreview(commit) {
+  let content = '';
+  if (ui.pushDetailsLoading) content = '<div class="commit-recent-status" role="status">Loading changed files…</div>';
+  else if (ui.pushDetailsError) content = `<div class="commit-recent-status" role="alert">${escapeHtml(ui.pushDetailsError)} <button data-push-retry="${escapeHtml(commit.hash)}">Retry</button></div>`;
+  else if (ui.pushDetails) {
+    const files = ui.pushDetails.files || [];
+    content = `<div class="commit-recent-file-count">${files.length ? `${files.length} ${files.length === 1 ? 'changed file' : 'changed files'}` : 'No file changes in this commit'}</div>${files.map((file) => {
+      const { kind, label } = commitFileState(file);
+      return `<button class="commit-recent-file push-preview-file ${kind}" data-push-file="${escapeHtml(file.path)}" data-push-hash="${escapeHtml(commit.hash)}" title="${label}: ${escapeHtml(file.originalPath ? `${file.originalPath} → ${file.path}` : file.path)}" aria-label="${label}: ${escapeHtml(file.path)}; view committed diff">${renderFileTypeIcon(file, ui.pushDetails.fileIcons)}${renderCompactCommitFile(file)}</button>`;
+    }).join('')}`;
+  }
+  return `<div class="push-commit-files" id="push-files-${ui.pushReview.id}-${escapeHtml(commit.hash)}" aria-busy="${ui.pushDetailsLoading}">${content}</div>`;
+}
+
+function commitFileState(file) {
+  const kind = ({ A: 'added', D: 'deleted', R: 'renamed', C: 'added' })[file.status?.[0]] || 'modified';
+  return { kind, label: ({ added: 'Added', deleted: 'Deleted', renamed: 'Renamed', modified: 'Modified' })[kind] };
+}
+
+function renderCompactCommitFile(file) {
+  const split = file.path.lastIndexOf('/');
+  const filename = file.path.slice(split + 1);
+  const directory = split < 0 ? '' : file.path.slice(0, split);
+  const parts = directory.split('/');
+  const shortDirectory = parts.length > 2 ? `…/${parts.slice(-2).join('/')}` : directory;
+  return `<span class="preview-file-copy ${directory ? 'has-directory' : ''}"><span class="preview-file-name">${escapeHtml(filename)}</span>${directory ? `<span class="preview-file-directory">${escapeHtml(shortDirectory)}</span>` : ''}</span>`;
 }
 
 function clearRecentCommitPreview(clearCache = false) {
@@ -989,9 +1050,8 @@ function renderRecentCommitPreview(commit) {
   else if (ui.recentDetails) {
     const files = ui.recentDetails.files || [];
     content = `<div class="commit-recent-file-count">${files.length} ${files.length === 1 ? 'changed file' : 'changed files'}</div>${files.slice(0, 8).map((file) => {
-      const kind = ({ A: 'added', D: 'deleted', R: 'renamed', C: 'added' })[file.status?.[0]] || 'modified';
-      const label = ({ added: 'Added', deleted: 'Deleted', renamed: 'Renamed', modified: 'Modified' })[kind];
-      return `<button class="commit-recent-file ${kind}" data-recent-file="${escapeHtml(file.path)}" data-original-path="${escapeHtml(file.originalPath || '')}" data-kind="${escapeHtml(file.status || '')}" title="${label}: ${escapeHtml(file.originalPath ? `${file.originalPath} → ${file.path}` : file.path)}" aria-label="${label}: ${escapeHtml(file.path)}; view committed diff">${renderFileTypeIcon(file, ui.recentDetails.fileIcons)}<span>${escapeHtml(file.path)}</span></button>`;
+      const { kind, label } = commitFileState(file);
+      return `<button class="commit-recent-file ${kind}" data-recent-file="${escapeHtml(file.path)}" data-original-path="${escapeHtml(file.originalPath || '')}" data-kind="${escapeHtml(file.status || '')}" title="${label}: ${escapeHtml(file.originalPath ? `${file.originalPath} → ${file.path}` : file.path)}" aria-label="${label}: ${escapeHtml(file.path)}; view committed diff">${renderFileTypeIcon(file, ui.recentDetails.fileIcons)}${renderCompactCommitFile(file)}</button>`;
     }).join('')}${files.length > 8 ? `<div class="commit-recent-status">${files.length - 8} more in History</div>` : ''}`;
   }
   return `<div class="commit-recent-preview" id="recent-${escapeHtml(commit.hash)}" aria-busy="${ui.recentDetailsLoading}">${content}<button class="commit-recent-history" data-recent-history="${escapeHtml(commit.hash)}">Open in History ${icon('arrow-right')}</button></div>`;
@@ -2067,6 +2127,12 @@ function bind() {
     const file = event.currentTarget.dataset;
     post('openRecentCommitDiff', { root: ui.snapshot.root, hash: ui.recentSelectedHash, path: file.recentFile, originalPath: file.originalPath, kind: file.kind });
   });
+  once('[data-push-commit]', 'click', (event) => selectPushCommit(event.currentTarget.dataset.pushCommit));
+  once('[data-push-retry]', 'click', (event) => selectPushCommit(event.currentTarget.dataset.pushRetry, true));
+  once('[data-push-file]', 'click', (event) => {
+    if (!ui.pushReview) return;
+    post('openPushCommitDiff', { id: ui.pushReview.id, root: ui.pushReview.root, hash: event.currentTarget.dataset.pushHash, path: event.currentTarget.dataset.pushFile });
+  });
   once('[data-commit]', 'keydown', (event) => {
     if (event.key === 'ContextMenu' || (event.shiftKey && event.key === 'F10')) {
       const bounds = event.currentTarget.getBoundingClientRect();
@@ -2751,6 +2817,7 @@ window.addEventListener('message', (event) => {
   const message = event.data;
   if (message.type === 'pushReview') {
     if (message.root !== ui.snapshot?.root || ui.pushReview?.id > message.id) return;
+    if (ui.pushReview?.id !== message.id) clearPushCommitPreview(true);
     ui.pushReview = message;
     ui.commitReviewOpen = false;
     ui.branchOpen = false;
@@ -2765,6 +2832,18 @@ window.addEventListener('message', (event) => {
   if (message.type === 'pushReviewClosed') {
     if (message.id !== ui.pushReview?.id) return;
     ui.pushReview = undefined;
+    clearPushCommitPreview(true);
+    render();
+    return;
+  }
+  if (message.type === 'pushCommitDetails' || message.type === 'pushCommitDetailsError') {
+    const hash = message.payload?.hash || message.hash;
+    if (!ui.pushReview || message.id !== ui.pushReview.id || message.root !== ui.snapshot?.root ||
+        message.requestId !== ui.pushDetailsRequestId || hash !== ui.pushSelectedHash) return;
+    ui.pushDetailsLoading = false;
+    ui.pushDetailsError = message.type === 'pushCommitDetailsError' ? message.message || 'Unable to load changed files.' : undefined;
+    ui.pushDetails = message.type === 'pushCommitDetails' ? message.payload : undefined;
+    if (ui.pushDetails) ui.pushDetailsCache.set(hash, ui.pushDetails);
     render();
     return;
   }
@@ -2931,6 +3010,7 @@ window.addEventListener('message', (event) => {
   if (message.type === 'empty') {
     persist();
     ui.pushReview = undefined;
+    clearPushCommitPreview(true);
     clearRecentCommitPreview(true);
     ui.snapshot = undefined;
     ui.emptyMessage = message.message;

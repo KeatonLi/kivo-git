@@ -28,5 +28,11 @@ export class PushReviewSession {
     return review;
   }
 
+  allowsCommit(id: number, surface: KivoSurface, root: string, hash: string): boolean {
+    const review = this.current;
+    return Boolean(review && review.id === id && review.surface === surface && review.root === root &&
+      review.preview.commits.some((commit) => commit.hash === hash));
+  }
+
   clear(): void { this.current = undefined; }
 }

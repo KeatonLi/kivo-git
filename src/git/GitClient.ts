@@ -580,7 +580,7 @@ export class GitClient {
     const [upstreamOid, counts, commitsOutput, filesOutput] = await Promise.all([
       this.run(['rev-parse', upstreamExpression]),
       this.run(['rev-list', '--left-right', '--count', `${ref}...${upstreamExpression}`]),
-      this.run(['log', `${upstreamExpression}..${ref}`, '-n', '12', '--format=%h%x1f%s']),
+      this.run(['log', `${upstreamExpression}..${ref}`, '-n', '12', '--format=%H%x1f%s']),
       this.run(['diff', '--name-only', '-z', `${upstreamExpression}..${ref}`])
     ]);
     const [ahead = 0, behind = 0] = counts.trim().split(/\s+/).map(Number);

@@ -126,7 +126,7 @@
             setTimeout(() => emit({ type: 'pushReview', id: ++window.__pushReviewId, root: fixture.root,
               afterCommit: false, preview: { branch, upstream, remote: 'origin', targetBranch: upstream.replace(/^origin\//, ''),
                 head: fixture.commits[0].hash, upstreamOid: fixture.commits[3].hash, ahead: fixture.ahead, behind: fixture.behind,
-                commits: fixture.commits.slice(0, fixture.ahead).map((commit) => ({ hash: commit.shortHash, subject: commit.subject })), fileCount: 8 } }), 20);
+                commits: fixture.commits.slice(0, fixture.ahead).map((commit) => ({ hash: commit.hash, subject: commit.subject })), fileCount: 8 } }), 20);
           }
           if (message.type === 'respondPushReview') {
             emit({ type: 'pushReviewClosed', id: message.id });
@@ -148,11 +148,12 @@
             setTimeout(() => emit({ type: 'historySearchResults', requestId: message.requestId, root: fixture.root,
               commits: matches.slice(0, message.limit), hasMore: matches.length > message.limit }), 20);
           }
-          if (message.type === 'commitDetails' || message.type === 'recentCommitDetails') {
+          if (message.type === 'commitDetails' || message.type === 'recentCommitDetails' || message.type === 'pushCommitDetails') {
             if (message.type === 'recentCommitDetails' && window.__holdRecentDetails) return;
+            if (message.type === 'pushCommitDetails' && window.__holdPushDetails) return;
             const commit = fixture.commits.find((item) => item.hash === message.hash);
             if (!commit) return;
-            setTimeout(() => emit({ type: message.type, root: message.root, requestId: message.requestId, payload: {
+            setTimeout(() => emit({ type: message.type, id: message.id, root: message.root, requestId: message.requestId, payload: {
               hash: commit.hash,
               subject: commit.subject,
               body: commit.hash === fixture.commits[0].hash

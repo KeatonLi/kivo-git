@@ -604,6 +604,7 @@ describe('GitClient integration', () => {
     const preview = await client.pushPreview();
     expect(preview).toMatchObject({ branch: 'main', upstream: 'origin/main', upstreamOid: await git(remote, ['rev-parse', 'main']), remote: 'origin', targetBranch: 'main', head: localHead, ahead: 1, behind: 0, fileCount: 1 });
     expect(preview.commits[0]?.subject).toBe('feat: commit and push');
+    expect(preview.commits[0]?.hash).toBe(localHead);
     await client.push(preview);
 
     expect(await git(remote, ['rev-parse', 'main'])).toBe(localHead);

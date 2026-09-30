@@ -106,6 +106,12 @@ try {
   await page.waitForSelector('[data-recent-file]');
   assert.equal(await page.locator('.commit-recent-preview').count(), 1, 'A recent commit should expand changed files in place.');
   assert.equal(await page.locator('[data-recent-file]').count(), await page.evaluate(() => fixture.commits[0].paths.length));
+  assert.equal(await page.locator('[data-recent-file] .preview-file-name').first().textContent(), 'EksClusterProvider.java', 'Recent files should emphasize the filename rather than starting with a long directory.');
+  assert.equal(await page.locator('[data-recent-file] .preview-file-directory').first().textContent(), '…/mvp/provider');
+  assert.match(await page.locator('[data-recent-file]').first().getAttribute('title'), /src\/main\/java\/com\/anker\/mvp\/provider\/EksClusterProvider.java/);
+  await page.setViewportSize({ width: 240, height: 820 });
+  assert.equal(await page.locator('[data-recent-file] .preview-file-name').first().evaluate((name) => name.scrollWidth <= name.clientWidth), true, 'Directory text should yield space so the filename remains readable in a narrow sidebar.');
+  await page.setViewportSize({ width: 360, height: 820 });
   const firstRecentRequest = await page.evaluate(() => window.__vscodeMessages.find((message) => message.type === 'recentCommitDetails'));
   await page.locator('[data-recent-file]').first().click();
   assert.ok(await page.evaluate(() => window.__vscodeMessages.some((message) => message.type === 'openRecentCommitDiff' && message.hash === fixture.commits[0].hash && message.root === fixture.root)), 'Clicking a recent file should open its committed diff in the correct repository.');
@@ -205,6 +211,32 @@ try {
   assert.match(await pushDialog.locator('.push-review-summary').textContent(), /3 commits to push.*8 changed files/);
   assert.equal(await pushDialog.locator('.push-review-commit').count(), 3);
   assert.equal(await pushDialog.locator('.push-review-warning').count(), 0, 'A normal push review should not look like a warning.');
+  assert.equal(await page.evaluate(() => window.__vscodeMessages.some((message) => message.type === 'pushCommitDetails')), false, 'Push files should load only when a commit is expanded.');
+  await page.locator('[data-push-commit]').first().click();
+  await page.waitForSelector('[data-push-file]');
+  const firstPushDetailsRequest = await page.evaluate(() => window.__vscodeMessages.find((message) => message.type === 'pushCommitDetails'));
+  assert.equal(await page.locator('[data-push-file] .preview-file-name').first().textContent(), 'EksClusterProvider.java');
+  assert.equal(await page.locator('[data-push-file] .preview-file-directory').first().textContent(), '…/mvp/provider');
+  await page.locator('[data-push-file]').first().click();
+  assert.ok(await page.evaluate(() => window.__vscodeMessages.some((message) => message.type === 'openPushCommitDiff' && message.hash === fixture.commits[0].hash && message.root === fixture.root && message.id === window.__pushReviewId)), 'A reviewed file should open the exact committed diff without confirming a push.');
+  assert.equal(await pushDialog.count(), 1, 'Inspecting a file should leave the push review open.');
+  await page.locator('[data-push-commit]').first().click();
+  assert.equal(await page.locator('.push-commit-files').count(), 0);
+  await page.locator('[data-push-commit]').first().click();
+  assert.equal(await page.evaluate(() => window.__vscodeMessages.filter((message) => message.type === 'pushCommitDetails').length), 1, 'Reopening a commit should reuse its files within this review.');
+  await page.evaluate(() => { window.__holdPushDetails = true; });
+  await page.locator('[data-push-commit]').nth(1).click();
+  const secondPushDetailsRequest = await page.evaluate(() => window.__vscodeMessages.filter((message) => message.type === 'pushCommitDetails').at(-1));
+  await page.evaluate(({ old, current }) => {
+    emit({ type: 'pushCommitDetails', id: old.id, root: old.root, requestId: old.requestId, payload: { hash: old.hash, files: [{ path: 'stale.txt', status: 'M' }] } });
+    emit({ type: 'pushCommitDetailsError', id: current.id, root: current.root, requestId: current.requestId, hash: current.hash, message: 'Temporary file lookup failure' });
+  }, { old: firstPushDetailsRequest, current: secondPushDetailsRequest });
+  assert.equal(await page.locator('[data-push-file="stale.txt"]').count(), 0);
+  assert.match(await page.locator('.push-commit-files').textContent(), /Temporary file lookup failure/);
+  await page.evaluate(() => { window.__holdPushDetails = false; });
+  await page.locator('[data-push-retry]').click();
+  await page.waitForSelector('[data-push-file]');
+  await page.locator('[data-push-commit]').nth(1).click();
   assert.equal(await page.locator('.changes-content').getAttribute('inert'), '', 'The background must not take input while reviewing a push.');
   await page.locator('.push-review-dialog footer .primary-button').focus();
   await page.keyboard.press('Tab');
@@ -217,7 +249,27 @@ try {
   assert.equal(await page.evaluate(() => window.__vscodeMessages.some((message) => message.type === 'respondPushReview' && message.choice === 'push')), false, 'Cancel must not send a push confirmation.');
   await page.locator('.commit-toolbar [data-action="push"]').click();
   await page.waitForSelector('.push-review-dialog');
+  await page.evaluate(() => { window.__holdPushDetails = true; });
+  await page.locator('[data-push-commit]').first().click();
+  const reopenedPushRequest = await page.evaluate(() => window.__vscodeMessages.filter((message) => message.type === 'pushCommitDetails').at(-1));
+  await page.evaluate(({ old, current }) => {
+    emit({ type: 'pushCommitDetails', id: old.id, root: current.root, requestId: current.requestId, payload: { hash: current.hash, files: [{ path: 'old-review.txt', status: 'M' }] } });
+    emit({ type: 'pushCommitDetails', id: current.id, root: '/another/repo', requestId: current.requestId, payload: { hash: current.hash, files: [{ path: 'wrong-repo.txt', status: 'M' }] } });
+  }, { old: firstPushDetailsRequest, current: reopenedPushRequest });
+  assert.equal(await page.locator('[data-push-file]').count(), 0, 'Replies from another review or repository must not replace the current files.');
+  await page.evaluate((current) => emit({ type: 'pushCommitDetails', id: current.id, root: current.root, requestId: current.requestId, payload: { hash: current.hash, files: [
+    { path: 'README.md', status: 'M' }, { path: 'src/alpha/Panel.tsx', status: 'A' }, { path: 'src/beta/Panel.tsx', status: 'D' },
+    { path: 'src/new-name.ts', originalPath: 'src/old-name.ts', status: 'R100' }
+  ] } }), reopenedPushRequest);
+  assert.equal(await page.locator('[data-push-file="README.md"] .preview-file-directory').count(), 0, 'Root files should not reserve a directory label.');
+  assert.deepEqual(await page.locator('[data-push-file] .preview-file-name').allTextContents(), ['README.md', 'Panel.tsx', 'Panel.tsx', 'new-name.ts']);
+  assert.equal(await page.locator('[data-push-file="src/alpha/Panel.tsx"] .preview-file-directory').textContent(), 'src/alpha');
+  assert.equal(await page.locator('[data-push-file="src/beta/Panel.tsx"] .preview-file-directory').textContent(), 'src/beta');
+  assert.match(await page.locator('[data-push-file="src/new-name.ts"]').getAttribute('title'), /src\/old-name.ts → src\/new-name.ts/);
+  assert.equal(await page.locator('.push-preview-file.added, .push-preview-file.deleted, .push-preview-file.renamed').count(), 3, 'Git filename colors should still distinguish file changes.');
   await page.locator('[data-action="confirm-push-review"]').click();
+  await page.evaluate((request) => emit({ type: 'pushCommitDetails', id: request.id, root: request.root, requestId: request.requestId, payload: { hash: request.hash, files: [{ path: 'after-close.txt', status: 'M' }] } }), reopenedPushRequest);
+  assert.equal(await page.locator('.push-commit-files').count(), 0, 'Late file responses must not reopen a confirmed review.');
   assert.ok(await page.evaluate(() => window.__vscodeMessages.some((message) => message.type === 'respondPushReview' && message.choice === 'push' && message.root === fixture.root && Number.isSafeInteger(message.id))));
   assert.equal(await page.locator('.commit-recent-row.unpushed').count(), 0, 'A refreshed pushed snapshot should clear recent markers.');
 
@@ -246,8 +298,11 @@ try {
       remote: 'origin', targetBranch: 'feature/a-very-long-branch-name/with-several-segments/to-check-narrow-layout',
       upstream: 'origin/feature/a-very-long-branch-name', head: fixture.commits[0].hash, upstreamOid: fixture.commits[3].hash,
       ahead: 20, behind: 0, fileCount: 8,
-      commits: Array.from({ length: 12 }, (_, i) => ({ hash: 'abc1234', subject: `Change ${i}: ${fixture.commits[0].subject}` }))
+      commits: Array.from({ length: 12 }, (_, i) => ({ hash: i ? i.toString(16).padStart(40, '0') : fixture.commits[0].hash, subject: `Change ${i}: ${fixture.commits[0].subject}` }))
     } }));
+    await page.locator('[data-push-commit]').first().click();
+    await page.waitForSelector('[data-push-file]');
+    assert.equal(await page.locator('[data-push-file] .preview-file-name').first().textContent(), 'EksClusterProvider.java');
     const layout = await page.locator('.push-review-dialog').evaluate((dialog) => {
       const d = dialog.getBoundingClientRect(), f = dialog.querySelector('footer').getBoundingClientRect();
       return { horizontalOverflow: document.documentElement.scrollWidth > innerWidth,

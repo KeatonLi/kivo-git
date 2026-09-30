@@ -24,6 +24,8 @@ const sharedMessages = new Set([
   'pull',
   'push',
   'respondPushReview',
+  'pushCommitDetails',
+  'openPushCommitDiff',
   'checkout',
   'createBranch',
   'chooseRepository'

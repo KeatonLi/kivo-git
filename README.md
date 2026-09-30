@@ -24,6 +24,7 @@ Kivo Git keeps a familiar two-surface workflow in VS Code: **Commit** stays in t
 - Selective commits without forcing a staged/unstaged workflow
 - File change colors with detailed state on hover, plus the current branch's five recent commits with inline changed-file previews and date groups
 - Consistent Unpushed highlights in Recent commits and History, with a themed push review for destination and outgoing commits
+- Expand Push review commits to inspect colored filenames and short directories, then open committed diffs while keeping the review available
 - Local and remote branch popup with checkout
 - Branch context actions to create and checkout a new branch from any local branch, remote ref, or tag
 - Native VS Code diff preview on single-click and a pinned editor on double-click
