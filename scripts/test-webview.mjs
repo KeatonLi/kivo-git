@@ -454,7 +454,11 @@ try {
   await openSurface(page, 'surface=history');
   assert.equal(await page.locator('.log-workspace').evaluate((element) => getComputedStyle(element).fontFamily), popupFont, 'Branch picker and History should use the same font family.');
   assert.equal(await page.locator('.log-branch-row.current .branch-sync-indicator').count(), 1, 'Incoming and outgoing icons should sit beside the current branch.');
-  assert.match(await page.locator('.log-date').first().textContent(), /^\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}$/, 'History dates should include local date and time to the second.');
+  assert.match(await page.locator('.log-date').first().getAttribute('title'), /^\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}$/, 'History dates should retain complete local timestamps on hover.');
+  await page.setViewportSize({ width: 960, height: 380 });
+  assert.ok(await page.locator('.graph-row .log-subject strong').first().evaluate(element => element.clientWidth >= 88), 'Narrow History must reserve readable space for the commit title.');
+  assert.equal(await page.locator('.log-time-compact').first().isVisible(), true, 'Narrow History should show compact dates instead of consuming title space.');
+  await page.setViewportSize({ width: 1200, height: 500 });
   assert.equal(await page.locator('.log-head-group, .branch-pane-footer').count(), 0, 'History should not duplicate the current branch or reserve a status footer.');
   assert.match(await page.locator('.log-branch-row.current .branch-sync-indicator').getAttribute('title'), /2 incoming, 3 outgoing/);
   assert.equal(await page.locator('.log-branch-row.current .branch-sync-incoming, .log-branch-row.current .branch-sync-outgoing').count(), 2, 'A diverged branch should show both directions.');
@@ -693,6 +697,7 @@ try {
     await page.setViewportSize({ width: 360, height: 600 });
     await openSurface(page, 'surface=changes');
     await page.evaluate(() => emit({ type: 'snapshot', payload: { ...fixture, operation: { kind: 'merge', token: 'capture-operation', files: ['src/conflicted.ts'] } } }));
+    assert.ok(await page.locator('.commit-changes-tree').evaluate(element => element.clientHeight >= 72), 'Conflict controls should leave room to review changed files.');
     await capture('08-conflicts');
   }
 
