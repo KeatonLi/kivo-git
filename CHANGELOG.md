@@ -2,6 +2,11 @@
 
 ## Unreleased
 
+## 0.4.1 - 2026-09-30
+
+- Initialize the Webview event binder before registering workflow and conflict actions, preserving file selection, drag-and-drop and toolbar interactions on first render.
+- Check for startup runtime errors before exercising Webview interactions.
+
 ## 0.4.0 - 2026-09-30
 
 - Give History commit titles priority over branch labels: show one readable primary ref and summarize the rest, with full names on hover and in commit details.

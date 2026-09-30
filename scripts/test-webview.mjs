@@ -49,6 +49,7 @@ try {
   page.on('pageerror', (error) => pageErrors.push(error.message));
 
   await openSurface(page, 'surface=changes&state=empty');
+  assert.deepEqual(pageErrors, [], 'The initial Commit view must render and bind interactions without runtime errors.');
   const emptyList = page.locator('.file-list.empty');
   assert.equal(await emptyList.count(), 1, 'The empty changelist should remain a valid drop target.');
   assert.ok((await emptyList.evaluate((element) => element.getBoundingClientRect().height)) <= 4, 'An idle empty changelist should not reserve visible blank space.');

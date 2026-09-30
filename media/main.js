@@ -2142,12 +2142,6 @@ function renderBranchPopup(s) {
 }
 
 function bind() {
-  once('[data-workflow-file]', 'click', event => { const w = ui.workflow; if (w) post('openWorkflowDiff', { root: w.root, requestId: w.requestId, path: event.currentTarget.dataset.workflowFile }); });
-  once('[data-stash-details]', 'click', event => requestWorkflow('stashDetails', { hash: event.currentTarget.dataset.stashDetails }));
-  once('[data-workflow-tab]', 'click', event => { ui.workflow.tab = event.currentTarget.dataset.workflowTab; render(); });
-  once('#stash-message', 'input', event => { ui.stashMessage = event.currentTarget.value; });
-  once('[data-open-conflict]', 'click', event => post('openConflict', { root: ui.snapshot.root, path: event.currentTarget.dataset.openConflict }));
-  once('[data-resolve-conflict]', 'click', event => { if (!ui.busy) post('resolveConflict', { root: ui.snapshot.root, path: event.currentTarget.dataset.resolveConflict }); });
   const once = (selector, event, handler) => app.querySelectorAll(selector).forEach((node) => {
     const token = `${selector}:${event}`;
     if (!node.__ideaGitListeners) node.__ideaGitListeners = new Set();
@@ -2155,6 +2149,12 @@ function bind() {
     node.__ideaGitListeners.add(token);
     node.addEventListener(event, handler);
   });
+  once('[data-workflow-file]', 'click', event => { const w = ui.workflow; if (w) post('openWorkflowDiff', { root: w.root, requestId: w.requestId, path: event.currentTarget.dataset.workflowFile }); });
+  once('[data-stash-details]', 'click', event => requestWorkflow('stashDetails', { hash: event.currentTarget.dataset.stashDetails }));
+  once('[data-workflow-tab]', 'click', event => { ui.workflow.tab = event.currentTarget.dataset.workflowTab; render(); });
+  once('#stash-message', 'input', event => { ui.stashMessage = event.currentTarget.value; });
+  once('[data-open-conflict]', 'click', event => post('openConflict', { root: ui.snapshot.root, path: event.currentTarget.dataset.openConflict }));
+  once('[data-resolve-conflict]', 'click', event => { if (!ui.busy) post('resolveConflict', { root: ui.snapshot.root, path: event.currentTarget.dataset.resolveConflict }); });
   bindContextMenuDelegation();
   once('[data-action]', 'click', (event) => handleAction(event.currentTarget.dataset.action));
   once('[data-toolbar-action]', 'click', (event) => {
