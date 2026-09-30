@@ -4,6 +4,7 @@ import { FileIconThemeResolver, type WebviewFileIcon } from './FileIconThemeReso
 import { GitClient } from './git/GitClient';
 import type { PullStrategy, RepositorySnapshot } from './git/types';
 import { SnapshotCoordinator } from './SnapshotCoordinator';
+import { PushReviewSession } from './PushReviewSession';
 import { isMessageAllowedOnSurface, KivoViewTypes, type KivoSurface, surfaceForViewType } from './viewLayout';
 
 type WebviewMessage =
@@ -12,6 +13,7 @@ type WebviewMessage =
   | { type: 'setHistoryRef'; branch: string }
   | { type: 'searchHistory'; requestId: number; filters: { query?: string; author?: string; age?: string; path?: string; ref?: string }; limit: number }
   | { type: 'pull'; strategy: PullStrategy }
+  | { type: 'respondPushReview'; id: number; root: string; choice: 'push' | 'cancel' | 'fetch' }
   | { type: 'commitDetails'; hash: string }
   | { type: 'recentCommitDetails'; hash: string; root: string; requestId: number }
   | { type: 'openRecentCommitDiff'; hash: string; root: string; path: string; originalPath?: string; kind?: string }
@@ -79,6 +81,8 @@ export class IdeaGitViewProvider implements vscode.WebviewViewProvider, vscode.T
   private watchedRoot?: string;
   private operationId = 0;
   private operationRunning = false;
+  private readonly pushReview = new PushReviewSession();
+  private pushPreviewRequestId = 0;
   private lastFetchAttemptAt = 0;
   private lastFetchedAt?: number;
   private syncError?: string;
@@ -150,6 +154,7 @@ export class IdeaGitViewProvider implements vscode.WebviewViewProvider, vscode.T
       if (this.views.get(surface) === view) {
         this.views.delete(surface);
         this.readyViews.delete(surface);
+        if (this.pushReview.current?.surface === surface) this.pushReview.clear();
       }
       this.configurePolling();
     });
@@ -481,6 +486,8 @@ export class IdeaGitViewProvider implements vscode.WebviewViewProvider, vscode.T
   }
 
   private resetRepository(): void {
+    this.pushReview.clear();
+    this.pushPreviewRequestId++;
     this.client = undefined;
     this.watcher?.dispose();
     this.watchedRoot = undefined;
@@ -711,7 +718,7 @@ export class IdeaGitViewProvider implements vscode.WebviewViewProvider, vscode.T
           await this.operation('commit', 'Creating commit…', async () => client.commit(message.message, message.paths), 'Commit created', true);
           return;
         case 'commitAndPush':
-          await this.commitAndPush(client, message.message, message.paths);
+          await this.commitAndPush(client, message.message, message.paths, surface);
           return;
         case 'reuseCommitMessage':
           await this.reuseCommitMessage(client, message.draft);
@@ -746,7 +753,7 @@ export class IdeaGitViewProvider implements vscode.WebviewViewProvider, vscode.T
           await this.operation('branch', `Updating ${message.branch}…`, () => client.updateLocalBranch(message.branch), `${message.branch} updated from its remote`);
           return;
         case 'pushBranch':
-          await this.pushWithPreview(client, false, message.branch);
+          await this.pushWithPreview(client, surface, false, message.branch);
           return;
         case 'renameBranch':
           await this.renameBranch(client, message.branch);
@@ -797,7 +804,10 @@ export class IdeaGitViewProvider implements vscode.WebviewViewProvider, vscode.T
           await this.operation('pull', `Pulling with ${message.strategy === 'ff-only' ? 'fast-forward only' : message.strategy}…`, () => client.pull(message.strategy), 'Repository updated');
           return;
         case 'push':
-          await this.pushWithPreview(client);
+          await this.pushWithPreview(client, surface);
+          return;
+        case 'respondPushReview':
+          await this.respondPushReview(client, surface, message);
           return;
       }
     } catch (error) {
@@ -913,11 +923,11 @@ export class IdeaGitViewProvider implements vscode.WebviewViewProvider, vscode.T
     await this.operation('changelist', 'Deleting changelist…', () => client.deleteChangelist(id), 'Changelist deleted');
   }
 
-  private async commitAndPush(client: GitClient, message: string, paths: string[]): Promise<void> {
+  private async commitAndPush(client: GitClient, message: string, paths: string[], surface: KivoSurface): Promise<void> {
     const committed = await this.operation('commit', 'Creating commit…', () => client.commit(message, paths), 'Commit created', true);
     if (!committed) return;
     try {
-      if (!await this.pushWithPreview(client, true)) {
+      if (!await this.pushWithPreview(client, surface, true)) {
         void vscode.window.showInformationMessage('The commit is saved locally. You can push it later from Kivo Git.');
       }
     } catch (error) {
@@ -925,35 +935,40 @@ export class IdeaGitViewProvider implements vscode.WebviewViewProvider, vscode.T
     }
   }
 
-  private async pushWithPreview(client: GitClient, afterCommit = false, branch?: string): Promise<boolean> {
+  private async pushWithPreview(client: GitClient, surface: KivoSurface, afterCommit = false, branch?: string): Promise<boolean> {
+    if (this.operationRunning) return false;
+    const requestId = ++this.pushPreviewRequestId;
+    const generation = this.syncGeneration;
+    const previous = this.pushReview.current;
+    this.pushReview.clear();
+    if (previous) await this.postToView(previous.surface, { type: 'pushReviewClosed', id: previous.id });
     const preview = branch ? await client.pushBranchPreview(branch) : await client.pushPreview();
+    if (requestId !== this.pushPreviewRequestId || generation !== this.syncGeneration || this.selectedWorkspace()?.uri.fsPath !== client.workspaceRoot) return false;
     if (!preview.ahead) {
       void vscode.window.showInformationMessage('There are no outgoing commits to push.');
       return false;
     }
-    const commitLines = preview.commits.map((commit) => `• ${commit.hash} ${commit.subject}`);
-    const more = preview.ahead > preview.commits.length ? `\n…plus ${preview.ahead - preview.commits.length} older commits` : '';
-    const detail = [
-      `${preview.branch} → ${preview.remote}/${preview.targetBranch}`,
-      `${preview.ahead} outgoing commit${preview.ahead === 1 ? '' : 's'} · ${preview.fileCount} changed file${preview.fileCount === 1 ? '' : 's'}`,
-      preview.behind ? `${preview.behind} incoming commit${preview.behind === 1 ? '' : 's'} in the local tracking ref. Fetch and reconcile before pushing.` : '',
-      '', ...commitLines, more,
-      '', 'Counts are based on the local tracking ref; the server will verify the push.'
-    ].filter((line, index) => line || index > 0).join('\n');
-    if (preview.behind) {
-      const action = await vscode.window.showWarningMessage('Your branch is behind its upstream.', { modal: true, detail }, 'Fetch and Review');
-      if (action === 'Fetch and Review') await this.fetchAndReview(client);
-      return false;
-    }
-    const confirmation = `Push ${preview.ahead} commit${preview.ahead === 1 ? '' : 's'}`;
-    const choice = await vscode.window.showWarningMessage(afterCommit ? 'Commit created. Review its push destination.' : 'Review push destination and outgoing commits.', { modal: true, detail }, confirmation);
-    if (choice !== confirmation) return false;
+    const review = this.pushReview.open({ surface, root: client.workspaceRoot, preview, afterCommit, branch });
+    await this.postToView(surface, { type: 'pushReview', ...review });
+    return true;
+  }
+
+  private async respondPushReview(client: GitClient, surface: KivoSurface, message: Extract<WebviewMessage, { type: 'respondPushReview' }>): Promise<void> {
+    if (!['push', 'cancel', 'fetch'].includes(message.choice) || message.root !== client.workspaceRoot) return;
+    const review = this.pushReview.take(message.id, surface, client.workspaceRoot);
+    if (!review) return;
+    await this.postToView(surface, { type: 'pushReviewClosed', id: review.id });
+    if (message.choice === 'cancel') return;
+    if (this.selectedWorkspace()?.uri.fsPath !== client.workspaceRoot) return;
+    if (message.choice === 'fetch') { await this.fetchAndReview(client); return; }
+    if (review.preview.behind || review.rejection) return;
+    const { preview, branch } = review;
     const pushed = await this.operation('push', 'Pushing…', () => branch ? client.pushBranch(branch, preview) : client.push(preview), 'Push complete');
     if (!pushed && /rejected|non-fast-forward|fetch first|failed to push/i.test(this.syncError || '')) {
-      const action = await vscode.window.showWarningMessage('Push was rejected. Your local commits are safe.', { modal: true, detail: 'Fetch the latest remote commits and review them before choosing a pull strategy. Kivo Git will not force-push or retry automatically.' }, 'Fetch and Review');
-      if (action === 'Fetch and Review') await this.fetchAndReview(client);
+      if (this.selectedWorkspace()?.uri.fsPath !== client.workspaceRoot) return;
+      const rejected = this.pushReview.open({ ...review, rejection: 'The remote rejected this push. Fetch the latest commits and review the branch before pushing again.' });
+      await this.postToView(surface, { type: 'pushReview', ...rejected });
     }
-    return pushed;
   }
 
   private async fetchAndReview(client: GitClient): Promise<void> {
@@ -1366,6 +1381,7 @@ export class IdeaGitViewProvider implements vscode.WebviewViewProvider, vscode.T
   }
 
   dispose(): void {
+    this.pushReview.clear();
     for (const listener of this.gitStateListeners.values()) listener.dispose();
     this.gitStateListeners.clear();
     clearInterval(this.badgePollTimer);

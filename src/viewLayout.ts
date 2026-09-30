@@ -23,6 +23,7 @@ const sharedMessages = new Set([
   'fetch',
   'pull',
   'push',
+  'respondPushReview',
   'checkout',
   'createBranch',
   'chooseRepository'

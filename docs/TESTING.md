@@ -4,7 +4,9 @@ Kivo Git has two runtime boundaries, so its tests use two different hosts.
 
 ## Webview browser tests
 
-The browser suite runs the production `media/main.js` and `media/main.css` in a small VS Code message-bridge fixture. It does not require VS Code and never runs Git commands. It covers empty changelist drop affordance, incoming/outgoing counts, Fetch message delivery, and selected-file commit payloads.
+The browser suite runs the production `media/main.js` and `media/main.css` in a small VS Code message-bridge fixture. It does not require VS Code and never runs Git commands. It covers empty changelist drop affordance, incoming/outgoing counts, Fetch message delivery, selected-file commit payloads, recent-commit previews, and Unpushed markers.
+
+Push review checks cover destination and commit summaries, cancel/confirm/fetch replies, preserved drafts, focus containment, stale branch tips, and long destinations in narrow and short views. Host-side tests check one-use review IDs and isolation between repositories and surfaces. Git integration tests verify exact outgoing membership for diverged and selected branches, partial pushes, cleared marks after publishing, and revalidation of reviewed refs before a real push.
 
 ```sh
 npm ci

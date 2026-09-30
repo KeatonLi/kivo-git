@@ -53,7 +53,7 @@
         root: '/workspace/ack-k8s',
         branch: 'feature/keaton/ACKk8s',
         upstream: 'origin/feature/keaton/ACKk8s',
-        ahead: 6,
+        ahead: 3,
         behind: 2,
         identity: { name: 'Preview Author', email: 'preview@example.test', ready: true },
         changes: [
@@ -105,18 +105,37 @@
         fixture.behind = 0;
       }
       if (new URLSearchParams(location.search).get('state') === 'no-upstream') fixture.upstream = '';
+      if (new URLSearchParams(location.search).get('state') === 'push-ready') fixture.behind = 0;
       if (new URLSearchParams(location.search).get('state') === 'empty') {
         fixture.changes = [];
         fixture.changelists[0].changes = [];
       }
+      fixture.commits.forEach((commit, index) => { if (fixture.upstream && index < fixture.ahead) commit.unpushedTo = fixture.upstream; });
       fixture.recentCommits = fixture.commits.slice(0, 5);
       window.__vscodeMessages = [];
+      window.__pushReviewId = 0;
       function emit(data) { window.dispatchEvent(new MessageEvent('message', { data })); }
       window.acquireVsCodeApi = () => ({
         getState: () => ({}),
         setState: () => {},
         postMessage: (message) => {
           window.__vscodeMessages.push(message);
+          if (message.type === 'push' || message.type === 'pushBranch') {
+            const branch = message.branch || fixture.branch;
+            const upstream = fixture.branches.find((item) => item.name === branch)?.upstream || fixture.upstream;
+            setTimeout(() => emit({ type: 'pushReview', id: ++window.__pushReviewId, root: fixture.root,
+              afterCommit: false, preview: { branch, upstream, remote: 'origin', targetBranch: upstream.replace(/^origin\//, ''),
+                head: fixture.commits[0].hash, upstreamOid: fixture.commits[3].hash, ahead: fixture.ahead, behind: fixture.behind,
+                commits: fixture.commits.slice(0, fixture.ahead).map((commit) => ({ hash: commit.shortHash, subject: commit.subject })), fileCount: 8 } }), 20);
+          }
+          if (message.type === 'respondPushReview') {
+            emit({ type: 'pushReviewClosed', id: message.id });
+            if (message.choice === 'push') {
+              fixture.ahead = 0;
+              fixture.commits.forEach((commit) => { delete commit.unpushedTo; });
+              emit({ type: 'snapshot', payload: fixture });
+            }
+          }
           if (message.type === 'searchHistory') {
             const { query = '', author = '', path = '', age = 'all' } = message.filters || {};
             const needle = query.trim().toLowerCase();

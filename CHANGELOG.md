@@ -2,6 +2,13 @@
 
 ## Unreleased
 
+## 0.3.13 - 2026-09-30
+
+- Highlight commits not yet pushed to their tracking branch with a subtle green row, green node, and Unpushed badge in History and Recent commits; refresh the exact commit membership after tracking refs move.
+- Replace the native Push warning dialog with a themed in-extension review showing repository, source and destination branches, outgoing commits, and changed-file count.
+- Keep actions visible in narrow and short views, support Escape and keyboard focus containment, and route behind or rejected branches to Fetch and Review.
+- Keep reviewed refs on the extension host with one-use confirmation IDs, revalidate before pushing, and dismiss stale reviews after repository or branch changes.
+
 ## 0.3.12 - 2026-09-30
 
 - Show the current branch's latest five commits independently of History filters; click a commit to preview its changed files, then open a file diff or full History.

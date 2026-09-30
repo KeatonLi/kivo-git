@@ -329,6 +329,7 @@ describe('GitClient integration', () => {
     await client.initialize();
     const stale = await client.snapshot();
     expect(stale).toMatchObject({ upstream: 'origin/main', ahead: 1, behind: 0 });
+    expect(stale.recentCommits?.[0]).toMatchObject({ subject: 'local work', unpushedTo: 'origin/main' });
     const remoteBefore = stale.branches.find((branch) => branch.name === 'origin/main')?.oid;
 
     await client.fetch(true);
@@ -337,6 +338,40 @@ describe('GitClient integration', () => {
     expect(current.branches.find((branch) => branch.name === 'origin/main')?.oid).not.toBe(remoteBefore);
     expect(current.branches.find((branch) => branch.name === 'main')).toMatchObject({ ahead: 1, behind: 1 });
     expect(current.branches.find((branch) => branch.name === 'review')).toMatchObject({ ahead: 0, behind: 1 });
+    expect(current.commits.find((commit) => commit.subject === 'remote work')?.unpushedTo).toBeUndefined();
+    expect(current.commits.filter((commit) => commit.unpushedTo).map((commit) => commit.subject)).toEqual(['local work']);
+    expect((await client.searchCommits({ query: 'local work' })).commits[0]?.unpushedTo).toBe('origin/main');
+    expect((await client.snapshot(80, 'origin/main')).commits.some((commit) => commit.unpushedTo)).toBe(false);
+  });
+
+  it('marks exact outgoing commits for each tracked local branch and clears cached marks after pushing', async () => {
+    const root = await createRepository();
+    const remote = await fs.mkdtemp(path.join(os.tmpdir(), 'ideagit-outgoing-'));
+    temporaryRepositories.push(remote);
+    await git(remote, ['init', '--bare']);
+    await git(root, ['remote', 'add', 'origin', remote]);
+    await git(root, ['push', '-u', 'origin', 'main']);
+    await git(root, ['commit', '--allow-empty', '-m', 'local one']);
+    const first = await git(root, ['rev-parse', 'HEAD']);
+    await git(root, ['commit', '--allow-empty', '-m', 'local two']);
+    await git(root, ['switch', '-c', 'review']);
+    await git(root, ['branch', '--set-upstream-to=origin/main']);
+    await git(root, ['commit', '--allow-empty', '-m', 'review only']);
+    await git(root, ['switch', 'main']);
+    const client = new GitClient(root);
+    const initial = await client.snapshot();
+    expect(initial.commits.filter((commit) => commit.unpushedTo).map((commit) => commit.subject)).toEqual(['local two', 'local one']);
+    expect(initial.recentCommits?.filter((commit) => commit.unpushedTo)).toHaveLength(2);
+    expect((await client.snapshot(80, 'review')).commits.filter((commit) => commit.unpushedTo)).toHaveLength(3);
+    expect((await client.snapshot(80, 'review')).recentCommits?.filter((commit) => commit.unpushedTo)).toHaveLength(2);
+    await git(root, ['push', 'origin', `${first}:refs/heads/main`]);
+    expect((await client.snapshot()).recentCommits?.filter((commit) => commit.unpushedTo).map((commit) => commit.subject)).toEqual(['local two']);
+    await client.push(await client.pushPreview());
+    expect((await client.snapshot()).commits.some((commit) => commit.unpushedTo)).toBe(false);
+    expect((await client.snapshot()).recentCommits?.some((commit) => commit.unpushedTo)).toBe(false);
+    expect((await client.snapshot(80, 'review')).commits.filter((commit) => commit.unpushedTo).map((commit) => commit.subject)).toEqual(['review only']);
+    await git(root, ['branch', '--unset-upstream', 'review']);
+    expect((await client.snapshot(80, 'review')).commits.some((commit) => commit.unpushedTo)).toBe(false);
   });
 
   it('sets a selected remote branch as the current local branch upstream', async () => {

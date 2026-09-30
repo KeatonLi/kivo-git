@@ -79,6 +79,8 @@ try {
   assert.equal(await page.locator('.commit-repository-context').count(), 0, 'The lower area should show recent commits without redundant status cards.');
   assert.match(await page.locator('.commit-recent').textContent(), /Recent commits/);
   assert.equal(await page.locator('[data-recent-commit]').count(), 5, 'The sidebar must show exactly five recent commits.');
+  assert.equal(await page.locator('.commit-recent-row.unpushed .unpushed-badge').count(), 3, 'Exact outgoing commits should have a visible marker in Recent commits.');
+  assert.match(await page.locator('.commit-recent-row.unpushed .unpushed-badge').first().getAttribute('title'), /origin\/feature\/keaton\/ACKk8s/);
   assert.equal(await page.locator('.commit-recent-branch span:last-child').textContent(), 'feature/keaton/ACKk8s');
   assert.match(await page.locator('.commit-recent-date').first().textContent(), /^\d{4}-\d{2}-\d{2}$/);
   assert.match(await page.locator('.commit-recent-row time').first().textContent(), /^\d{2}:\d{2}:\d{2}$/);
@@ -187,10 +189,76 @@ try {
   await page.locator('[data-pull-strategy="ff-only"]').click();
   assert.ok(await page.evaluate(() => window.__vscodeMessages.some((message) => message.type === 'pull')), 'Pull should reach Git even when no incoming commits were cached.');
   await openSurface(page, 'surface=changes&state=no-upstream');
+  assert.equal(await page.locator('.unpushed-badge').count(), 0, 'Without a tracking branch, the UI should not guess which commits are unpushed.');
   assert.equal(await page.locator('[data-action="pull-menu"]').isEnabled(), false, 'Pull without a tracking branch should explain why it cannot run.');
   await page.locator('[data-action="toolbar-more"]').click();
   await page.locator('[data-toolbar-action="configure-upstream"]').click();
   assert.ok(await page.evaluate(() => window.__vscodeMessages.some((message) => message.type === 'configureUpstream')), 'An untracked branch should offer a direct setup action.');
+
+  await openSurface(page, 'surface=changes&state=push-ready');
+  await page.locator('#commit-message').fill('Keep my next commit draft');
+  await page.locator('[data-select]').first().check({ force: true });
+  await page.locator('.commit-toolbar [data-action="push"]').click();
+  await page.waitForSelector('.push-review-dialog');
+  const pushDialog = page.getByRole('dialog', { name: 'Push commits', exact: true });
+  assert.match(await pushDialog.locator('.push-route-target').textContent(), /origin\/feature\/keaton\/ACKk8s/);
+  assert.match(await pushDialog.locator('.push-review-summary').textContent(), /3 commits to push.*8 changed files/);
+  assert.equal(await pushDialog.locator('.push-review-commit').count(), 3);
+  assert.equal(await pushDialog.locator('.push-review-warning').count(), 0, 'A normal push review should not look like a warning.');
+  assert.equal(await page.locator('.changes-content').getAttribute('inert'), '', 'The background must not take input while reviewing a push.');
+  await page.locator('.push-review-dialog footer .primary-button').focus();
+  await page.keyboard.press('Tab');
+  assert.equal(await page.locator('.push-review-dialog header button').evaluate((button) => button === document.activeElement), true, 'Tab should stay within the dialog.');
+  await page.keyboard.press('Escape');
+  assert.equal(await page.locator('.push-review-dialog').count(), 0);
+  assert.equal(await page.locator('#commit-message').inputValue(), 'Keep my next commit draft');
+  assert.equal(await page.locator('[data-select]:checked').count(), 1);
+  assert.ok(await page.evaluate(() => window.__vscodeMessages.some((message) => message.type === 'respondPushReview' && message.choice === 'cancel')));
+  assert.equal(await page.evaluate(() => window.__vscodeMessages.some((message) => message.type === 'respondPushReview' && message.choice === 'push')), false, 'Cancel must not send a push confirmation.');
+  await page.locator('.commit-toolbar [data-action="push"]').click();
+  await page.waitForSelector('.push-review-dialog');
+  await page.locator('[data-action="confirm-push-review"]').click();
+  assert.ok(await page.evaluate(() => window.__vscodeMessages.some((message) => message.type === 'respondPushReview' && message.choice === 'push' && message.root === fixture.root && Number.isSafeInteger(message.id))));
+  assert.equal(await page.locator('.commit-recent-row.unpushed').count(), 0, 'A refreshed pushed snapshot should clear recent markers.');
+
+  await openSurface(page, 'surface=changes&state=push-ready');
+  await page.locator('.commit-toolbar [data-action="push"]').click();
+  await page.waitForSelector('.push-review-dialog');
+  await page.evaluate(() => emit({ type: 'snapshot', payload: { ...fixture,
+    branches: fixture.branches.map((branch) => branch.current ? { ...branch, oid: 'f'.repeat(40) } : branch) } }));
+  assert.equal(await page.locator('.push-review-dialog').count(), 0, 'A changed branch tip should close the old review.');
+  assert.ok(await page.evaluate(() => window.__vscodeMessages.some((message) => message.type === 'respondPushReview' && message.choice === 'cancel')));
+  assert.match(await page.locator('.toast').last().textContent(), /Branch changed/);
+
+  await openSurface(page, 'surface=changes');
+  await page.locator('.commit-toolbar [data-action="push"]').click();
+  await page.waitForSelector('.push-review-dialog');
+  assert.equal(await page.locator('[data-action="confirm-push-review"]').count(), 0, 'A behind branch must not offer confirmation to push.');
+  assert.match(await page.locator('.push-review-warning').textContent(), /2 incoming commits/);
+  await page.locator('[data-action="fetch-push-review"]').click();
+  assert.ok(await page.evaluate(() => window.__vscodeMessages.some((message) => message.type === 'respondPushReview' && message.choice === 'fetch')));
+
+  for (const viewport of [{ width: 240, height: 300 }, { width: 360, height: 820 }, { width: 1200, height: 420 }]) {
+    await page.setViewportSize(viewport);
+    await openSurface(page, viewport.width > 600 ? 'surface=history' : 'surface=changes&state=push-ready');
+    await page.evaluate(() => emit({ type: 'pushReview', id: 200, root: fixture.root, afterCommit: false, preview: {
+      branch: 'feature/a-very-long-branch-name/with-several-segments/to-check-narrow-layout',
+      remote: 'origin', targetBranch: 'feature/a-very-long-branch-name/with-several-segments/to-check-narrow-layout',
+      upstream: 'origin/feature/a-very-long-branch-name', head: fixture.commits[0].hash, upstreamOid: fixture.commits[3].hash,
+      ahead: 20, behind: 0, fileCount: 8,
+      commits: Array.from({ length: 12 }, (_, i) => ({ hash: 'abc1234', subject: `Change ${i}: ${fixture.commits[0].subject}` }))
+    } }));
+    const layout = await page.locator('.push-review-dialog').evaluate((dialog) => {
+      const d = dialog.getBoundingClientRect(), f = dialog.querySelector('footer').getBoundingClientRect();
+      return { horizontalOverflow: document.documentElement.scrollWidth > innerWidth,
+        dialogFits: d.top >= 0 && d.bottom <= innerHeight, footerVisible: f.top >= d.top && f.bottom <= d.bottom,
+        internalOverflow: dialog.scrollWidth > dialog.clientWidth };
+    });
+    assert.deepEqual(layout, { horizontalOverflow: false, dialogFits: true, footerVisible: true, internalOverflow: false }, 'Long destinations and lists should scroll inside the dialog while keeping actions visible.');
+    assert.match(await page.locator('.push-review-more').textContent(), /8 more commits/);
+    await page.keyboard.press('Escape');
+  }
+  await page.setViewportSize({ width: 360, height: 820 });
 
   await openSurface(page, 'surface=changes&state=multi');
   const switchRepository = page.getByRole('button', { name: /Choose repository, current ack-k8s/ }).first();
@@ -286,6 +354,7 @@ try {
 
   await page.setViewportSize({ width: 1450, height: 650 });
   await openSurface(page, 'surface=history');
+  assert.equal(await page.locator('.graph-row.unpushed .unpushed-badge').count(), 3, 'History should use the same outgoing marker as Recent commits.');
   await page.locator('[data-action="toggle-history-focus"]').click();
   assert.equal(await page.locator('.log-workspace.history-focus').count(), 1, 'History focus mode should enlarge the commit graph.');
   assert.equal(await page.locator('.log-branch-pane:visible').count(), 0);
@@ -330,7 +399,7 @@ try {
   assert.equal(await page.locator('.log-branch-row.current .branch-sync-indicator').count(), 1, 'Incoming and outgoing icons should sit beside the current branch.');
   assert.match(await page.locator('.log-date').first().textContent(), /^\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}$/, 'History dates should include local date and time to the second.');
   assert.equal(await page.locator('.log-head-group, .branch-pane-footer').count(), 0, 'History should not duplicate the current branch or reserve a status footer.');
-  assert.match(await page.locator('.log-branch-row.current .branch-sync-indicator').getAttribute('title'), /2 incoming, 6 outgoing/);
+  assert.match(await page.locator('.log-branch-row.current .branch-sync-indicator').getAttribute('title'), /2 incoming, 3 outgoing/);
   assert.equal(await page.locator('.log-branch-row.current .branch-sync-incoming, .log-branch-row.current .branch-sync-outgoing').count(), 2, 'A diverged branch should show both directions.');
   assert.equal(await page.locator('.log-branch-row[data-log-branch="feature/keaton/20260924-solar"] .branch-sync-incoming').count(), 1, 'Other local branches should also show their remote difference.');
   const otherBranch = 'feature/keaton/20260924-solar';

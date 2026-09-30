@@ -17,6 +17,7 @@ export class GitClient {
   private store?: ChangelistStore;
   private historyCache?: { key: string; commits: CommitSummary[]; hasMore: boolean };
   private recentCache?: { head: string; commits: CommitSummary[] };
+  private outgoingCache = new Map<string, Promise<Set<string>>>();
 
   constructor(readonly workspaceRoot: string) {}
 
@@ -79,6 +80,12 @@ export class GitClient {
       this.getCommits(currentBranch, commitLimit, exactRef),
       this.getRecentCommits(parsed.headOid)
     ]);
+    const headBranch = branches.find((branch) => branch.current && !branch.remote);
+    const historyBranch = historyRef ? selectedBranch?.remote ? undefined : selectedBranch : headBranch;
+    const [commitsWithPushState, recentWithPushState] = await Promise.all([
+      this.markOutgoingCommits(commitWindow.commits, historyBranch, branches),
+      this.markOutgoingCommits(recentCommits, headBranch, branches, parsed.headOid)
+    ]);
     return {
       repositoryName: path.basename(root),
       root,
@@ -87,10 +94,25 @@ export class GitClient {
       changelists: await this.store!.group(parsed.changes),
       branches,
       tags,
-      commits: commitWindow.commits,
-      recentCommits,
+      commits: commitsWithPushState,
+      recentCommits: recentWithPushState,
       commitsHasMore: commitWindow.hasMore
     };
+  }
+
+  private async markOutgoingCommits(commits: CommitSummary[], branch: BranchSummary | undefined, branches: BranchSummary[], head = branch?.oid): Promise<CommitSummary[]> {
+    const upstream = branches.find((candidate) => candidate.name === branch?.upstream);
+    if (!head || !branch?.upstream || !upstream?.oid || head === upstream.oid || !commits.length) return commits;
+    const key = `${head}\0${upstream.oid}`;
+    let query = this.outgoingCache.get(key);
+    if (!query) {
+      query = this.run(['rev-list', head, `^${upstream.oid}`]).then((output) => new Set(output.trim().split(/\s+/).filter(Boolean)));
+      if (this.outgoingCache.size >= 8) this.outgoingCache.delete(this.outgoingCache.keys().next().value!);
+      this.outgoingCache.set(key, query);
+    }
+    const outgoing = await query.catch((error: unknown) => { this.outgoingCache.delete(key); throw error; });
+    // Keep raw history caches unchanged so moving the tracking ref clears old marks.
+    return commits.map((commit) => outgoing.has(commit.hash) ? { ...commit, unpushedTo: branch.upstream } : commit);
   }
 
   private async getRecentCommits(head?: string): Promise<CommitSummary[]> {
@@ -197,7 +219,8 @@ export class GitClient {
     const output = await this.run(args);
     const refs = await this.getRefs(branches.find((branch) => branch.current && !branch.remote)?.name);
     const matches = this.parseCommitLog(output, refs);
-    return { commits: this.layoutCommits(matches.slice(0, safeLimit)), hasMore: matches.length > safeLimit };
+    const displayedBranch = filters.ref ? selectedBranch?.remote ? undefined : selectedBranch : branches.find((branch) => branch.current && !branch.remote);
+    return { commits: await this.markOutgoingCommits(this.layoutCommits(matches.slice(0, safeLimit)), displayedBranch, branches), hasMore: matches.length > safeLimit };
   }
 
   private parseCommitLog(output: string, refs: Map<string, GitRef[]>): CommitSummary[] {

@@ -30,6 +30,8 @@ export interface CommitSummary {
   /** Paths touched by this commit, used by the IDEA-style Log path filter. */
   paths: string[];
   refs: GitRef[];
+  /** This commit is ahead of the displayed local branch's tracking ref. */
+  unpushedTo?: string;
   lane: number;
   incomingLanes: number[];
   parentLanes: number[];
