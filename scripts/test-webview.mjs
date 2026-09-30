@@ -42,6 +42,24 @@ async function openSurface(page, query) {
   await page.waitForSelector(query.includes('surface=history') ? '.log-branch-pane' : '.commit-toolbar');
 }
 
+async function dragVertical(page, selector, delta) {
+  const rect = await page.locator(selector).boundingBox();
+  assert.ok(rect, `${selector} must have a drag target.`);
+  const x = rect.x + rect.width / 2, y = rect.y + rect.height / 2;
+  await page.mouse.move(x, y);
+  await page.mouse.down();
+  await page.mouse.move(x, y + delta, { steps: 6 });
+  await page.mouse.up();
+}
+
+async function historyReadingPosition(page) {
+  return page.locator('[data-graph-list]').evaluate((list) => {
+    const bounds = list.getBoundingClientRect();
+    const row = [...list.querySelectorAll('.graph-row')].find(row => row.getBoundingClientRect().bottom > bounds.top + 1);
+    return { scrollTop: list.scrollTop, hash: row?.dataset.hash, offset: row && row.getBoundingClientRect().top - bounds.top };
+  });
+}
+
 try {
   await waitForServer();
   browser = await chromium.launch({ headless: true, args: ['--no-sandbox'] });
@@ -165,7 +183,45 @@ try {
     assert.ok(layout.lowerHeight <= 288, 'Tall sidebars must not stretch the recent list into unused space.');
   }
   await page.setViewportSize({ width: 360, height: 820 });
-  assert.equal(await page.locator('.commit-panel').evaluate((element) => getComputedStyle(element).flexBasis), '188px', 'The Commit form should reserve room for selection feedback.');
+  assert.equal(await page.locator('.commit-panel').evaluate((element) => getComputedStyle(element).flexBasis), '148px', 'The Commit form should be compact by default.');
+  await page.locator('#commit-message').fill('Preserve draft during resize');
+  await page.locator('[data-select]').first().check({ force: true });
+  const compactHeight = (await page.locator('.commit-panel').boundingBox()).height;
+  await dragVertical(page, '[data-commit-panel-splitter]', -54);
+  const expandedHeight = (await page.locator('.commit-panel').boundingBox()).height;
+  assert.ok(Math.abs(expandedHeight - compactHeight - 54) <= 2, 'Dragging the message divider must follow pointer displacement without jumping to the sidebar bottom.');
+  await dragVertical(page, '[data-commit-panel-splitter]', 38);
+  const resizedHeight = (await page.locator('.commit-panel').boundingBox()).height;
+  assert.ok(Math.abs(expandedHeight - resizedHeight - 38) <= 2, 'The message area must shrink when its divider moves down.');
+  assert.equal(await page.locator('#commit-message').inputValue(), 'Preserve draft during resize');
+  assert.equal(await page.locator('[data-select]:checked').count(), 1);
+  await page.evaluate(() => sessionStorage.setItem('kivo-fixture-state', JSON.stringify(window.__vscodeState)));
+  await page.reload();
+  await page.waitForSelector('.commit-panel');
+  assert.ok(Math.abs((await page.locator('.commit-panel').boundingBox()).height - resizedHeight) <= 2, 'A resized message area must survive Webview reloads.');
+  assert.equal(await page.locator('#commit-message').inputValue(), 'Preserve draft during resize');
+  await page.evaluate(() => sessionStorage.setItem('kivo-fixture-state', JSON.stringify({ commitPanelHeight: 260, commitMessage: 'Legacy draft' })));
+  await page.reload();
+  await page.waitForSelector('.commit-panel');
+  assert.ok((await page.locator('.commit-panel').boundingBox()).height <= 150, 'Upgrade must recover oversized message heights from the old drag behavior.');
+  assert.equal(await page.locator('#commit-message').inputValue(), 'Legacy draft');
+  await page.evaluate(() => sessionStorage.removeItem('kivo-fixture-state'));
+  await openSurface(page, 'surface=changes');
+  await page.locator('[data-action="pull-menu"]').click();
+  for (const viewport of [{ width: 360, height: 820 }, { width: 240, height: 420 }, { width: 520, height: 900 }]) {
+    await page.setViewportSize(viewport);
+    await page.waitForFunction(() => {
+      const rect = document.querySelector('.sync-menu.open')?.getBoundingClientRect();
+      return rect && rect.left >= 7 && rect.right <= innerWidth - 7 && rect.top >= 7 && rect.bottom <= innerHeight - 7;
+    });
+    const menuFits = await page.locator('.sync-menu.open').evaluate(menu => {
+      const rect = menu.getBoundingClientRect();
+      return menu.scrollWidth <= menu.clientWidth && rect.left >= 7 && rect.right <= innerWidth - 7;
+    });
+    assert.equal(menuFits, true, 'Pull choices must remain readable inside the sidebar, including after resize.');
+  }
+  await page.keyboard.press('Escape');
+  await page.setViewportSize({ width: 360, height: 820 });
   assert.equal(await page.locator('.commit-toolbar [data-action="show-log"]').count(), 1, 'History should have a visible bottom-Panel shortcut.');
   await page.locator('.commit-toolbar [data-action="show-log"]').click();
   assert.ok(await page.evaluate(() => window.__vscodeMessages.some((message) => message.type === 'showLog')), 'The shortcut should focus History through VS Code.');
@@ -513,6 +569,72 @@ try {
   await page.locator('[data-graph-list]').evaluate((list) => { list.scrollTop = list.scrollHeight; list.dispatchEvent(new Event('scroll')); });
   assert.ok(await page.evaluate(() => window.__vscodeMessages.some((message) => message.type === 'loadMoreCommits')), 'Scrolling to older history should load the next page.');
 
+  await page.setViewportSize({ width: 1450, height: 650 });
+  await openSurface(page, 'surface=history');
+  await page.evaluate(() => {
+    const base = fixture.commits[0];
+    window.__olderCommits = Array.from({ length: 240 }, (_, index) => ({
+      ...base, hash: (index + 1).toString(16).padStart(40, '0'), shortHash: (index + 1).toString(16).padStart(7, '0'),
+      subject: `History regression commit ${index + 1}`, parents: index < 239 ? [(index + 2).toString(16).padStart(40, '0')] : [],
+      refs: index ? [] : base.refs, lane: 0, incomingLanes: index ? [0] : [], parentLanes: [0], hasIncoming: index > 0
+    }));
+    fixture.commits = window.__olderCommits.slice(0, 80);
+    emit({ type: 'snapshot', payload: fixture });
+    window.__historyList = document.querySelector('[data-graph-list]');
+  });
+  await page.waitForFunction(() => document.querySelector('[data-graph-list]').getAttribute('aria-setsize') === '80');
+  const fineScrollTop = await page.evaluate(() => new Promise(resolve => {
+    const list = document.querySelector('[data-graph-list]');
+    list.scrollTop = 703;
+    list.dispatchEvent(new Event('scroll'));
+    requestAnimationFrame(() => {
+      list.scrollTop = 720;
+      list.dispatchEvent(new Event('scroll'));
+      requestAnimationFrame(() => requestAnimationFrame(() => resolve(list.scrollTop)));
+    });
+  }));
+  assert.ok(Math.abs(fineScrollTop - 720) <= 1, 'A queued virtual-row update must not rewind newer sub-row trackpad movement.');
+  const historyBox = await page.locator('[data-graph-list]').boundingBox();
+  await page.mouse.move(historyBox.x + historyBox.width / 2, historyBox.y + historyBox.height / 2);
+  let previousScrollTop = fineScrollTop;
+  for (let index = 0; index < 3; index += 1) {
+    await page.mouse.wheel(0, 160);
+    await page.waitForFunction(before => document.querySelector('[data-graph-list]').scrollTop > before + 100, previousScrollTop);
+    await page.waitForTimeout(40);
+    const current = await historyReadingPosition(page);
+    assert.ok(current.scrollTop > previousScrollTop, 'Continuous downward scrolling should progress without pulling back.');
+    previousScrollTop = current.scrollTop;
+  }
+  const beforeLoading = await page.locator('[data-graph-list]').evaluate(list => {
+    const height = list.scrollHeight;
+    list.scrollTop = list.scrollHeight;
+    const top = list.scrollTop;
+    list.dispatchEvent(new Event('scroll'));
+    return { height, top };
+  });
+  await page.waitForFunction(() => document.querySelector('[data-graph-list]').getAttribute('aria-busy') === 'true');
+  const duringLoading = await page.locator('[data-graph-list]').evaluate(list => ({ height: list.scrollHeight, top: list.scrollTop }));
+  assert.deepEqual(duringLoading, beforeLoading, 'Loading feedback must not change scroll extent or reading position.');
+  await page.mouse.wheel(0, -95);
+  await page.waitForFunction(before => document.querySelector('[data-graph-list]').scrollTop < before - 50, duringLoading.top);
+  await page.waitForTimeout(40);
+  const reading = await historyReadingPosition(page);
+  for (const length of [160, 240]) {
+    await page.evaluate(length => {
+      fixture.commits = window.__olderCommits.slice(0, length);
+      fixture.commitsHasMore = length < 240;
+      emit({ type: 'snapshot', payload: fixture });
+    }, length);
+    await page.waitForFunction(length => document.querySelector('[data-graph-list]').getAttribute('aria-setsize') === String(length), length);
+    await page.waitForTimeout(40);
+    const appended = await historyReadingPosition(page);
+    assert.ok(Math.abs(appended.scrollTop - reading.scrollTop) <= 1, 'Appending history must preserve the latest live scroll position.');
+    assert.equal(appended.hash, reading.hash, 'The same commit must remain at the top of the viewport after pagination.');
+    assert.ok(Math.abs(appended.offset - reading.offset) <= 1, 'The visible commit offset must stay stable after pagination.');
+  }
+  assert.equal(await page.evaluate(() => window.__historyList === document.querySelector('[data-graph-list]')), true, 'Scrolling and pagination must preserve the native scroll container.');
+  assert.ok(await page.locator('.graph-row').count() < 80, 'Long history must retain bounded virtual rendering.');
+
   await page.setViewportSize({ width: 1200, height: 500 });
   await openSurface(page, 'surface=history');
   await page.evaluate(() => {
@@ -699,6 +821,23 @@ try {
     await page.evaluate(() => emit({ type: 'snapshot', payload: { ...fixture, operation: { kind: 'merge', token: 'capture-operation', files: ['src/conflicted.ts'] } } }));
     assert.ok(await page.locator('.commit-changes-tree').evaluate(element => element.clientHeight >= 72), 'Conflict controls should leave room to review changed files.');
     await capture('08-conflicts');
+
+    await page.setViewportSize({ width: 360, height: 820 });
+    await openSurface(page, 'surface=changes');
+    await page.locator('[data-action="pull-menu"]').click();
+    await capture('09-pull-menu');
+    await page.keyboard.press('Escape');
+    await dragVertical(page, '[data-commit-panel-splitter]', -70);
+    await capture('10-message-resized');
+
+    await page.setViewportSize({ width: 1200, height: 500 });
+    await openSurface(page, 'surface=history');
+    await page.evaluate(() => {
+      document.body.classList.add('vscode-light');
+      document.documentElement.style.cssText = '--vscode-sideBar-background:#f3f3f3;--vscode-panel-background:#fff;--vscode-editor-background:#fff;--vscode-foreground:#333;--vscode-descriptionForeground:#616161;--vscode-input-background:#fff;--vscode-input-foreground:#333;--vscode-input-border:#cecece;--vscode-panel-border:#ddd;--vscode-list-hoverBackground:#e8e8e8;--vscode-list-activeSelectionBackground:#cce8ff;--vscode-list-activeSelectionForeground:#111;--vscode-textLink-foreground:#005fb8;--vscode-charts-blue:#1a85ff;--vscode-charts-green:#388a34;';
+    });
+    await page.waitForSelector('.commit-file');
+    await capture('11-history-light');
   }
 
   assert.deepEqual(pageErrors, [], 'The webview should not throw browser runtime errors.');

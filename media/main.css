@@ -184,6 +184,8 @@ button:disabled { cursor: default !important; }
 .graph-canvas { position: relative; width: var(--graph-width); height: var(--graph-row-height, 30px); overflow: hidden; }
 .graph-svg { position: absolute; inset: 0; width: 100%; height: 100%; overflow: hidden; }
 .graph-virtual-spacer { flex: 0 0 auto; width: 1px; pointer-events: none; }
+.graph-rows { overflow: clip; }
+.graph-row-window { overflow: hidden; }
 .graph-edge { fill: none; stroke: color-mix(in srgb, var(--accent) 56%, var(--vscode-panel-border)); stroke-width: 1.35; vector-effect: non-scaling-stroke; stroke-linecap: round; }
 .graph-edge.incoming { stroke: color-mix(in srgb, var(--lane-color, var(--accent)) 62%, var(--muted)); }
 .graph-edge.outgoing { stroke: color-mix(in srgb, var(--lane-color, var(--accent)) 78%, var(--vscode-panel-border)); }
@@ -224,8 +226,7 @@ button:disabled { cursor: default !important; }
 .load-more:active:not(:disabled) { transform: scale(.97); }
 .load-more.working { color: var(--muted); opacity: .82; }
 .load-more small { color: var(--muted); font-size: 9px; }
-.graph-loading-row { position: sticky; bottom: 0; min-height: 26px; display: flex; align-items: center; justify-content: center; gap: 6px; border-top: 1px solid var(--vscode-panel-border, var(--border-subtle)); background: var(--vscode-panel-background, var(--surface-base)); color: var(--muted); font-size: 10px; }
-.graph-load-sentinel { flex: 0 0 auto; min-height: 24px; display: grid; place-items: center; color: var(--muted); font-size: 10px; pointer-events: none; }
+.graph-load-sentinel { flex: 0 0 24px; height: 24px; display: flex; align-items: center; justify-content: center; gap: 6px; overflow: hidden; white-space: nowrap; color: var(--muted); font-size: 10px; pointer-events: none; }
 .commit-detail { flex: 0 0 auto; max-height: 43%; overflow: auto; padding: 10px 11px 12px; border-top: 1px solid var(--vscode-panel-border); background: color-mix(in srgb, var(--surface-base) 94%, var(--accent) 6%); animation: detail-in 190ms var(--ease); }
 .commit-detail-head { display: flex; align-items: flex-start; justify-content: space-between; gap: 8px; }
 .commit-detail-head > div { min-width: 0; display: flex; flex-direction: column; gap: 3px; }
@@ -574,8 +575,16 @@ body[data-surface="changes"] .content { background: var(--vscode-sideBar-backgro
   background: var(--vscode-sideBar-background, var(--surface-base));
 }
 .parity-mode .compact-sync-action .sync-menu {
-  top: 28px;
-  right: -7px;
+  position: fixed;
+  top: 0;
+  left: 8px;
+  right: auto;
+  width: min(238px, calc(100vw - 16px));
+  max-height: calc(100vh - 16px);
+  overflow-y: auto;
+  background: var(--vscode-menu-background, var(--vscode-editorWidget-background, var(--surface-base)));
+  color: var(--vscode-menu-foreground, var(--vscode-foreground));
+  transform-origin: top left;
   z-index: 20;
 }
 .parity-mode .commit-changes-heading {
@@ -649,7 +658,7 @@ body[data-surface="changes"] .content { background: var(--vscode-sideBar-backgro
 .parity-mode .file-row .status { width: 22px; flex-basis: 22px; font-size: 8px; }
 .parity-mode .commit-empty-list { padding: 8px 13px; color: var(--muted); font-size: 11px; }
 .parity-mode .commit-panel {
-  flex: 0 1 clamp(176px, var(--commit-panel-height, 188px), 260px);
+  flex: 0 0 clamp(132px, var(--commit-panel-height, 148px), 360px);
   gap: 5px;
   padding: 6px 10px 8px;
   background: var(--vscode-sideBar-background, var(--surface-base));
@@ -702,7 +711,8 @@ body[data-surface="changes"] .content { background: var(--vscode-sideBar-backgro
 .parity-mode .commit-selection-note { flex: 0 0 auto; font-size: 10px; line-height: 1.35; color: var(--vscode-descriptionForeground); }
 .parity-mode .commit-selection-note.warning { color: var(--vscode-editorWarning-foreground, #cca700); }
 .parity-mode .commit-actions { flex-wrap: wrap; flex-shrink: 0; }
-.parity-mode .commit-panel { min-height: 176px; overflow-y: auto; }
+.parity-mode .commit-panel { min-height: 132px; overflow-y: auto; }
+@media (max-width: 280px) { .parity-mode .commit-panel { min-height: 168px; } }
 .parity-mode .primary-button,
 .parity-mode .commit-push-button {
   width: auto;
@@ -1191,6 +1201,10 @@ body.vscode-high-contrast-light .file-row.selected { outline: 1px solid var(--vs
   font-size: 12px;
   line-height: 1.5;
 }
+.parity-mode .commit-panel-splitter { flex-basis: 8px; min-height: 8px; }
+.parity-mode .commit-panel-splitter::before { content: ''; position: absolute; width: 24px; height: 2px; top: 3px; left: calc(50% - 12px); background: var(--vscode-descriptionForeground, var(--muted)); opacity: .55; }
+.parity-mode .log-branch-group[data-branch-group-section="local"] { background: color-mix(in srgb, var(--vscode-charts-blue, var(--kivo-accent)) 6%, var(--vscode-sideBar-background, var(--surface-base))); }
+.parity-mode .log-branch-group[data-branch-group-section="remote"] { background: color-mix(in srgb, var(--vscode-charts-green, var(--kivo-cyan)) 5%, var(--vscode-sideBar-background, var(--surface-base))); }
 .parity-mode .commit-upper .commit-actions { gap: 7px; }
 .parity-mode .commit-upper .primary-button,
 .parity-mode .commit-upper .commit-push-button { height: 30px; border-radius: 5px; font-size: 11px; }
@@ -1481,7 +1495,7 @@ body.commit-zone-resizing, body.commit-zone-resizing * { cursor: row-resize !imp
 .parity-mode .changes-content:has(.conflict-state):not(.recent-collapsed) .commit-lower { max-height: min(288px, 26%, max(33px, calc(100% - 440px))); }
 .parity-mode .changes-content:has(.conflict-state) .commit-changes-tree { min-height: clamp(40px, calc(100vh - 440px), 72px); }
 @media (max-height: 580px) {
-  .parity-mode .changes-content:has(.conflict-state) .commit-panel { flex-basis: 148px; min-height: 148px; }
+  .parity-mode .changes-content:has(.conflict-state) .commit-panel { flex-basis: var(--commit-panel-height, 148px); }
 }
 .conflict-state button:focus-visible, .workflow-dialog input:focus-visible { outline: 1px solid var(--vscode-focusBorder, var(--accent)); outline-offset: 1px; }
 .push-review-cancel:hover, .push-review-dialog header button:hover { background: var(--vscode-toolbar-hoverBackground, var(--surface-soft)); }

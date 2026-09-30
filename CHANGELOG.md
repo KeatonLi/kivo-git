@@ -2,6 +2,13 @@
 
 ## Unreleased
 
+## 0.4.3 - 2026-10-01
+
+- Keep the Pull strategy menu anchored to its toolbar button and inside narrow sidebars, including after resizing.
+- Make the Commit Message area compact by default, with a clearer drag handle, correct relative dragging, keyboard resizing and saved layout. Reset heights from the previous faulty resize behavior on upgrade.
+- Add subtle theme-aware backgrounds to the Local and Remote branch groups.
+- Preserve live History scroll positions while virtual rows change or older commits load; keep pagination feedback at a constant height and avoid stale next-frame scroll restoration.
+
 ## 0.4.2 - 2026-09-30
 
 - Keep History commit titles readable as its pane narrows or dividers move: compact dates and progressively hide secondary columns, retaining full timestamps and metadata in hover text and details.

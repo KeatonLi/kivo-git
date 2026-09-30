@@ -110,11 +110,11 @@ describe('webview surface composition', () => {
     expect(main).toContain('class="context-menu file-context-menu"');
     expect(main).toContain('class="context-menu branch-context-menu"');
     expect(main).toContain('class="context-menu commit-context-menu"');
-    expect(main).toContain('class="graph-loading-row"');
+    expect(main).toContain('class="graph-load-sentinel" role="status"');
     expect(css).toContain('--idea-hover:');
     expect(css).toContain('--idea-selection:');
     expect(css).toContain('.parity-mode .graph-row:hover:not(.selected)');
-    expect(css).toContain('.graph-loading-row');
+    expect(css).toContain('.graph-load-sentinel');
   });
 
   it('renders active-theme file icons for changed files and keeps a native fallback', async () => {

@@ -20,10 +20,9 @@ const LOG_DETAIL_MIN_HEIGHT = 112;
 const LOG_DETAIL_DEFAULT_HEIGHT = 190;
 const COMMIT_METADATA_MIN_HEIGHT = 96;
 const COMMIT_METADATA_DEFAULT_HEIGHT = 180;
-const COMMIT_PANEL_MIN_HEIGHT = 176;
-const COMMIT_PANEL_MAX_HEIGHT = 260;
-const COMMIT_PANEL_LEGACY_DEFAULT_HEIGHT = 188;
-const COMMIT_PANEL_DEFAULT_HEIGHT = 188;
+const COMMIT_PANEL_MIN_HEIGHT = 132;
+const COMMIT_PANEL_MAX_HEIGHT = 360;
+const COMMIT_PANEL_DEFAULT_HEIGHT = 148;
 // Recent commits fit their contents until the user explicitly resizes the split.
 const COMMIT_ZONE_DEFAULT_PERCENT = 65;
 const BRANCH_PAGE_SIZE = 36;
@@ -37,7 +36,8 @@ const restoredBranchWidth = Number(initialRepositoryState.logBranchWidth);
 const restoredDetailWidth = Number(initialRepositoryState.logDetailWidth);
 const restoredDetailHeight = Number(initialRepositoryState.logDetailHeight);
 const restoredCommitMetadataHeight = Number(initialRepositoryState.commitMetadataHeight);
-const restoredCommitPanelHeight = Number(initialRepositoryState.commitPanelHeight);
+const restoredCommitPanelHeight = initialRepositoryState.commitPanelLayoutVersion === 1
+  ? Number(initialRepositoryState.commitPanelHeight) : NaN;
 const hasCustomCommitSplit = (state) => state.commitZoneResized === true
   || (state.commitZoneResized === undefined && Number.isFinite(Number(state.commitZonePercent))
     && Number(state.commitZonePercent) !== COMMIT_ZONE_DEFAULT_PERCENT);
@@ -71,7 +71,7 @@ const ui = {
     ? Math.max(COMMIT_METADATA_MIN_HEIGHT, restoredCommitMetadataHeight)
     : COMMIT_METADATA_DEFAULT_HEIGHT,
   commitPanelHeight: Number.isFinite(restoredCommitPanelHeight)
-    ? clamp(restoredCommitPanelHeight === COMMIT_PANEL_LEGACY_DEFAULT_HEIGHT ? COMMIT_PANEL_DEFAULT_HEIGHT : restoredCommitPanelHeight, COMMIT_PANEL_MIN_HEIGHT, COMMIT_PANEL_MAX_HEIGHT)
+    ? clamp(restoredCommitPanelHeight, COMMIT_PANEL_MIN_HEIGHT, COMMIT_PANEL_MAX_HEIGHT)
     : COMMIT_PANEL_DEFAULT_HEIGHT,
   commitZonePercent: clamp(Number(initialRepositoryState.commitZonePercent) || COMMIT_ZONE_DEFAULT_PERCENT, 35, 75),
   commitZoneResized: hasCustomCommitSplit(initialRepositoryState),
@@ -243,6 +243,7 @@ function serializeRepositoryState() {
     logDetailHeight: ui.logDetailHeight,
     commitMetadataHeight: ui.commitMetadataHeight,
     commitPanelHeight: ui.commitPanelHeight,
+    commitPanelLayoutVersion: 1,
     commitZonePercent: ui.commitZonePercent,
     commitZoneResized: ui.commitZoneResized,
     recentCommitsCollapsed: ui.recentCommitsCollapsed,
@@ -271,7 +272,7 @@ function restoreRepositoryState(root, state = {}) {
   const detailWidth = Number(state.logDetailWidth);
   const detailHeight = Number(state.logDetailHeight);
   const metadataHeight = Number(state.commitMetadataHeight);
-  const panelHeight = Number(state.commitPanelHeight);
+  const panelHeight = state.commitPanelLayoutVersion === 1 ? Number(state.commitPanelHeight) : NaN;
   ui.selected = new Set(state.selected || []);
   ui.collapsed = new Set(state.collapsed || []);
   ui.focusedPath = state.focusedPath;
@@ -299,7 +300,7 @@ function restoreRepositoryState(root, state = {}) {
   ui.logDetailHeight = Number.isFinite(detailHeight) ? Math.max(LOG_DETAIL_MIN_HEIGHT, detailHeight) : LOG_DETAIL_DEFAULT_HEIGHT;
   ui.commitMetadataHeight = Number.isFinite(metadataHeight) ? Math.max(COMMIT_METADATA_MIN_HEIGHT, metadataHeight) : COMMIT_METADATA_DEFAULT_HEIGHT;
   ui.commitPanelHeight = Number.isFinite(panelHeight)
-    ? clamp(panelHeight === COMMIT_PANEL_LEGACY_DEFAULT_HEIGHT ? COMMIT_PANEL_DEFAULT_HEIGHT : panelHeight, COMMIT_PANEL_MIN_HEIGHT, COMMIT_PANEL_MAX_HEIGHT)
+    ? clamp(panelHeight, COMMIT_PANEL_MIN_HEIGHT, COMMIT_PANEL_MAX_HEIGHT)
     : COMMIT_PANEL_DEFAULT_HEIGHT;
   ui.commitZonePercent = clamp(Number(state.commitZonePercent) || COMMIT_ZONE_DEFAULT_PERCENT, 35, 75);
   ui.commitZoneResized = hasCustomCommitSplit(state);
@@ -470,10 +471,9 @@ function graphRenderWindow(commits) {
 
 function restoreGraphScroll(scrollTop) {
   if (!Number.isFinite(scrollTop)) return;
-  requestAnimationFrame(() => {
-    const list = app.querySelector('[data-graph-list]');
-    if (list) list.scrollTop = scrollTop;
-  });
+  const list = app.querySelector('[data-graph-list]');
+  if (list && Math.abs(list.scrollTop - scrollTop) > .5) list.scrollTop = scrollTop;
+  ui.graphScrollTop = list?.scrollTop ?? scrollTop;
 }
 
 function requestMoreHistory(scrollTop) {
@@ -483,11 +483,9 @@ function requestMoreHistory(scrollTop) {
   if (historySearchActive()) {
     ui.historySearchLimit += 80;
     requestHistorySearch(false, 0);
-    restoreGraphScroll(scrollTop);
     return true;
   }
   render();
-  restoreGraphScroll(scrollTop);
   post('loadMoreCommits');
   return true;
 }
@@ -514,7 +512,6 @@ function syncGraphViewport(list) {
   ui.graphViewportHeight = nextHeight;
   ui.graphScrollTop = scrollTop;
   render();
-  restoreGraphScroll(scrollTop);
 }
 
 function scheduleGraphViewportWidth(list) {
@@ -545,16 +542,17 @@ function bindGraphViewport() {
 function onGraphScroll(event) {
   const list = event.currentTarget;
   const scrollTop = list.scrollTop;
-  if (Math.abs(scrollTop - ui.graphScrollTop) >= GRAPH_ROW_HEIGHT) {
-    ui.graphScrollTop = scrollTop;
+  const changed = scrollTop !== ui.graphScrollTop;
+  ui.graphScrollTop = scrollTop;
+  if (changed) {
     if (!graphScrollFrame) {
       graphScrollFrame = requestAnimationFrame(() => {
         graphScrollFrame = undefined;
         if (!list.isConnected) return;
-        const currentScrollTop = list.scrollTop;
-        ui.graphScrollTop = currentScrollTop;
-        render();
-        restoreGraphScroll(currentScrollTop);
+        ui.graphScrollTop = list.scrollTop;
+        const range = graphRenderWindow(graphCommits());
+        const rendered = list.querySelector('[data-graph-window]');
+        if (rendered && (range.start !== Number(rendered.dataset.windowStart) || range.end !== Number(rendered.dataset.windowEnd))) render();
       });
     }
   }
@@ -746,6 +744,8 @@ function patchApp(html) {
   const target = document.createElement('main');
   target.id = 'app';
   target.innerHTML = html;
+  const graphList = app.querySelector('[data-graph-list]');
+  const graphScrollTop = graphList?.scrollTop;
   const pool = new Map([...app.querySelectorAll('[id], [data-path], [data-list-id], [data-checkout], [data-hash]')].map((node) => [keyFor(node), node]));
   const before = new Map();
   if (motionEnabled()) {
@@ -758,6 +758,8 @@ function patchApp(html) {
     }
   }
   patchNode(app, target, pool);
+  // DOM changes must not rewind a newer wheel/trackpad position on a later frame.
+  if (graphList?.isConnected && Math.abs(graphList.scrollTop - graphScrollTop) > .5) graphList.scrollTop = graphScrollTop;
   if (before.size && motionEnabled()) {
     for (const row of app.querySelectorAll('.file-row')) {
       const old = before.get(row.dataset.path);
@@ -804,6 +806,17 @@ function render() {
     input.indeterminate = selected > 0 && selected < changes.length;
   });
   bind();
+  positionPullMenu();
+}
+
+function positionPullMenu() {
+  const menu = app.querySelector('.sync-menu.open');
+  const anchor = app.querySelector('[data-action="pull-menu"]');
+  if (!menu || !anchor) return;
+  const rect = anchor.getBoundingClientRect();
+  const margin = 8;
+  menu.style.left = `${clamp(rect.left, margin, Math.max(margin, window.innerWidth - menu.offsetWidth - margin))}px`;
+  menu.style.top = `${clamp(rect.bottom + 4, margin, Math.max(margin, window.innerHeight - menu.offsetHeight - margin))}px`;
 }
 
 function renderPullMenu() {
@@ -963,7 +976,7 @@ function renderChanges(s) {
       <div class="commit-panel-splitter" data-commit-panel-splitter role="separator" aria-label="Resize changes and commit message" aria-controls="kivo-commit-changes kivo-commit-message" aria-orientation="horizontal" aria-valuemin="${COMMIT_PANEL_MIN_HEIGHT}" aria-valuenow="${Math.round(ui.commitPanelHeight)}" tabindex="0" title="Drag to resize. Double-click to reset."></div>
       <footer class="commit-panel" id="kivo-commit-message" style="--commit-panel-height:${Math.round(ui.commitPanelHeight)}px">
       ${renderSelectionStatus()}
-      <textarea id="commit-message" rows="4" placeholder="Commit Message" aria-label="Commit Message" spellcheck="true" ${ui.operationKind === 'commit' ? 'disabled' : ''}>${escapeHtml(ui.commitMessage)}</textarea>
+      <textarea id="commit-message" rows="3" placeholder="Commit Message" aria-label="Commit Message" spellcheck="true" ${ui.operationKind === 'commit' ? 'disabled' : ''}>${escapeHtml(ui.commitMessage)}</textarea>
       <div class="commit-actions">
         <button class="primary-button ${ui.operationKind === 'commit' ? 'working' : ''}" data-action="commit" title="${escapeHtml(commitHint)} (${commandKey}+Enter)" ${!canCommit ? 'disabled' : ''}>${ui.operationKind === 'commit' ? `${icon('loading', 'codicon-modifier-spin button-spinner')}<span>Committing…</span>` : '<span>Commit</span>'}</button>
         <button class="commit-push-button ${ui.operationKind === 'push' ? 'working' : ''}" data-action="commit-and-push" title="${escapeHtml(canCommit ? 'Commit selected files and push' : commitHint)}" ${!canCommit ? 'disabled' : ''}>${ui.operationKind === 'push' ? `${icon('loading', 'codicon-modifier-spin button-spinner')}<span>Pushing…</span>` : '<span>Commit and Push…</span>'}</button>
@@ -1491,9 +1504,9 @@ function renderGraph(s) {
       <section class="log-history-pane" id="kivo-log-history" aria-label="Commit history">${renderConflictState(s)}
         ${renderLogFilterBar(s, commits, filtersActive)}
         <div class="log-column-header" aria-hidden="true" style="--graph-width:${graphWidth}px"><span>AUTHOR</span><span>GRAPH</span><span>COMMIT</span><span>DATE</span></div>
-        <div class="graph-list ${graph.compressed ? 'graph-compressed' : ''} ${ui.graphLoadingMore ? 'is-loading' : ''}" data-graph-list role="listbox" aria-label="Commit history${graph.compressed ? `, compact ${laneCount}-lane topology` : ''}" aria-busy="${ui.graphLoadingMore || ui.historyRefLoading || ui.historySearchLoading}" aria-setsize="${commits.length}" style="--lane-count:${laneCount};--graph-width:${graphWidth}px;--graph-row-height:${GRAPH_ROW_HEIGHT}px">${ui.historyRefLoading || ui.historySearchLoading && !commits.length ? `<div class="inline-empty" role="status">${icon('loading', 'codicon-modifier-spin')} ${ui.historyRefLoading ? 'Loading branch history…' : 'Searching complete history…'}</div>` : commits.length ? `${windowed.topSpacer ? `<div class="graph-virtual-spacer" aria-hidden="true" style="height:${windowed.topSpacer}px"></div>` : ''}${visibleCommits.map((commit, index) => `<article class="graph-row ${commit.unpushedTo ? 'unpushed' : ''} ${commit.parents.length > 1 ? 'merge-row' : ''} ${ui.selectedCommitHash === commit.hash ? 'selected' : ''}" data-commit="${escapeHtml(commit.hash)}" data-hash="${escapeHtml(commit.hash)}" role="option" aria-selected="${ui.selectedCommitHash === commit.hash}" aria-posinset="${windowed.start + index + 1}" tabindex="${focusHash === commit.hash ? '0' : '-1'}">
+        <div class="graph-list ${graph.compressed ? 'graph-compressed' : ''} ${ui.graphLoadingMore ? 'is-loading' : ''}" id="kivo-graph-list" data-graph-list role="listbox" aria-label="Commit history${graph.compressed ? `, compact ${laneCount}-lane topology` : ''}" aria-busy="${ui.graphLoadingMore || ui.historyRefLoading || ui.historySearchLoading}" aria-setsize="${commits.length}" style="--lane-count:${laneCount};--graph-width:${graphWidth}px;--graph-row-height:${GRAPH_ROW_HEIGHT}px">${ui.historyRefLoading || ui.historySearchLoading && !commits.length ? `<div class="inline-empty" role="status">${icon('loading', 'codicon-modifier-spin')} ${ui.historyRefLoading ? 'Loading branch history…' : 'Searching complete history…'}</div>` : commits.length ? `<div class="graph-rows" id="kivo-graph-rows" style="height:${windowed.totalHeight}px"><div class="graph-virtual-spacer" id="kivo-graph-top" aria-hidden="true" style="height:${windowed.topSpacer}px"></div><div class="graph-row-window" id="kivo-graph-window" data-graph-window data-window-start="${windowed.start}" data-window-end="${windowed.end}" style="height:${visibleCommits.length * GRAPH_ROW_HEIGHT}px">${visibleCommits.map((commit, index) => `<article class="graph-row ${commit.unpushedTo ? 'unpushed' : ''} ${commit.parents.length > 1 ? 'merge-row' : ''} ${ui.selectedCommitHash === commit.hash ? 'selected' : ''}" data-commit="${escapeHtml(commit.hash)}" data-hash="${escapeHtml(commit.hash)}" role="option" aria-selected="${ui.selectedCommitHash === commit.hash}" aria-posinset="${windowed.start + index + 1}" tabindex="${focusHash === commit.hash ? '0' : '-1'}">
           <span class="log-author" title="${escapeHtml(commit.author)}">${escapeHtml(commit.author)}</span><div class="graph-canvas">${renderGraphSvg(commit, graph)}</div><div class="graph-commit"><div class="log-subject">${renderUnpushedBadge(commit)}<strong title="${escapeHtml(commit.subject)}">${escapeHtml(commit.subject)}</strong>${renderRowRefs(commit.refs)}</div><span class="log-meta"><code>${escapeHtml(commit.shortHash)}</code>${commit.parents?.length > 1 ? '<span class="merge-note">Merge</span>' : ''}</span></div>${renderLogDate(commit.date)}
-        </article>`).join('')}${windowed.bottomSpacer ? `<div class="graph-virtual-spacer" aria-hidden="true" style="height:${windowed.bottomSpacer}px"></div>` : ''}` : `<div class="inline-empty" role="status">${ui.historySearchError ? `Search failed. <button data-action="retry-history-search">Retry</button>` : historySearchActive() ? 'No matching commits in this repository' : 'No commits yet'}</div>`}${hasMore && !ui.historyRefLoading ? `<div class="graph-load-sentinel" aria-hidden="true">${ui.graphLoadingMore ? 'Loading older commits…' : 'Scroll to the bottom for older commits'}</div>` : ''}${ui.graphLoadingMore ? `<div class="graph-loading-row" role="status">${icon('loading', 'codicon-modifier-spin')}<span>Loading more history…</span></div>` : ''}</div>
+        </article>`).join('')}</div><div class="graph-virtual-spacer" id="kivo-graph-bottom" aria-hidden="true" style="height:${windowed.bottomSpacer}px"></div></div>` : `<div class="inline-empty" role="status">${ui.historySearchError ? `Search failed. <button data-action="retry-history-search">Retry</button>` : historySearchActive() ? 'No matching commits in this repository' : 'No commits yet'}</div>`}${commits.length && !ui.historyRefLoading ? `<div class="graph-load-sentinel" role="status">${ui.graphLoadingMore ? `${icon('loading', 'codicon-modifier-spin')}<span>Loading older commits…</span>` : hasMore ? 'Scroll to the bottom for older commits' : 'End of history'}</div>` : ''}</div>
       </section>
       <div class="log-detail-splitter" data-log-detail-splitter role="separator" aria-label="Resize commit history and details" aria-controls="kivo-log-history kivo-log-details" aria-orientation="${detailUsesRows ? 'horizontal' : 'vertical'}" aria-valuemin="${detailMinimum}" aria-valuemax="${detailMaximum}" aria-valuenow="${detailSize}" tabindex="0" title="Drag to resize. Double-click to reset."></div>
       ${renderCommitDetails(s)}
@@ -1972,14 +1985,18 @@ function resetCommitMetadataHeight(event) {
 
 function commitPanelBounds(splitter) {
   const content = splitter.closest('.commit-upper') || splitter.closest('.changes-content');
+  const panel = content?.querySelector('.commit-panel');
+  const minimum = Math.max(COMMIT_PANEL_MIN_HEIGHT, Number.parseFloat(panel && getComputedStyle(panel).minHeight) || 0);
   const repositoryHeight = content?.querySelector('.commit-repository-header')?.getBoundingClientRect().height || 34;
   const toolbarHeight = content?.querySelector('.commit-toolbar')?.getBoundingClientRect().height || 31;
   const headingHeight = content?.querySelector('.commit-changes-heading')?.getBoundingClientRect().height || 26;
+  const conflictHeight = content?.querySelector('.conflict-state')?.getBoundingClientRect().height || 0;
+  const searchHeight = content?.querySelector('.commit-change-search')?.getBoundingClientRect().height || 0;
   const available = content?.clientHeight || 0;
   const maximum = Math.min(COMMIT_PANEL_MAX_HEIGHT, available
-    ? Math.max(COMMIT_PANEL_MIN_HEIGHT, available - repositoryHeight - toolbarHeight - headingHeight - 82)
+    ? Math.max(minimum, available - repositoryHeight - toolbarHeight - headingHeight - conflictHeight - searchHeight - 82)
     : COMMIT_PANEL_MAX_HEIGHT);
-  return { minimum: COMMIT_PANEL_MIN_HEIGHT, maximum };
+  return { minimum, maximum };
 }
 
 function applyCommitPanelHeight(splitter, height) {
@@ -2013,11 +2030,13 @@ function startCommitPanelResize(event) {
   const content = splitter.closest('.changes-content');
   if (!content) return;
   event.preventDefault();
-  const initialHeight = applyCommitPanelHeight(splitter, ui.commitPanelHeight);
+  const panel = splitter.parentElement?.querySelector('.commit-panel');
+  const initialHeight = applyCommitPanelHeight(splitter, panel?.getBoundingClientRect().height || ui.commitPanelHeight);
+  const startY = event.clientY;
   const pointerId = event.pointerId;
   const move = (pointerEvent) => {
     if (pointerEvent.pointerId !== pointerId) return;
-    applyCommitPanelHeight(splitter, content.getBoundingClientRect().bottom - pointerEvent.clientY);
+    applyCommitPanelHeight(splitter, initialHeight + startY - pointerEvent.clientY);
   };
   const complete = (pointerEvent) => {
     if (pointerEvent.pointerId === pointerId) finishCommitPanelResize(true);
@@ -2969,7 +2988,6 @@ window.addEventListener('message', (event) => {
       }
       reconcileHistorySelection();
       render();
-      restoreGraphScroll(ui.graphScrollTop);
     }
     return;
   }
@@ -3104,7 +3122,7 @@ window.addEventListener('message', (event) => {
     if (!valid.has(ui.focusedPath)) ui.focusedPath = message.payload.changes[0]?.path;
     persist();
     render();
-    restoreGraphScroll(ui.graphScrollTop);
+    if (previousRoot !== nextRoot) restoreGraphScroll(ui.graphScrollTop);
     if (ui.pendingRevealHash && message.payload.commits.some((commit) => commit.hash === ui.pendingRevealHash)) {
       const hash = ui.pendingRevealHash;
       ui.pendingRevealHash = undefined;
@@ -3341,6 +3359,8 @@ document.addEventListener('click', (event) => {
 setInterval(() => {
   if (ui.snapshot && ui.lastFetchedAt && ui.syncPhase !== 'fetching') render();
 }, 60000);
+
+window.addEventListener('resize', positionPullMenu);
 
 post('ready', { historyRef: surface === 'history' ? ui.graphBranchFilter : undefined });
 render();
