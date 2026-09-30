@@ -540,6 +540,15 @@ body.commit-panel-resizing .commit-panel-splitter::after { top: 1px; height: 3px
 
 /* Commit sidebar --------------------------------------------------------- */
 body[data-surface="changes"] .content { background: var(--vscode-sideBar-background, var(--surface-base)); }
+.parity-mode .commit-repository-header { flex: 0 0 34px; min-width: 0; display: flex; padding: 4px 10px; }
+.parity-mode .commit-repository-label { width: 100%; min-width: 0; display: flex; align-items: center; gap: 7px; padding: 0 4px; border-radius: 3px; background: transparent; color: var(--vscode-foreground); text-align: left; font: 600 12px var(--vscode-font-family); }
+.parity-mode .commit-repository-label > .codicon-repo { flex: 0 0 14px; color: var(--vscode-textLink-foreground, var(--accent)); font-size: 14px; }
+.parity-mode .commit-repository-name { min-width: 0; flex: 1 1 auto; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.parity-mode .commit-repository-label > .codicon-chevron-down { flex: 0 0 12px; font-size: 12px; }
+.parity-mode .commit-repository-picker { cursor: pointer; }
+.parity-mode .commit-repository-picker:hover:not(:disabled) { background: var(--vscode-toolbar-hoverBackground, var(--idea-hover)); }
+.parity-mode .commit-repository-picker:focus-visible { outline: 1px solid var(--vscode-focusBorder, var(--accent)); outline-offset: 0; }
+.parity-mode .commit-repository-picker:disabled { opacity: .5; cursor: default; }
 .parity-mode .commit-toolbar {
   flex: 0 0 var(--idea-toolbar);
   min-height: var(--idea-toolbar);

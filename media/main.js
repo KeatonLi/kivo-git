@@ -794,6 +794,15 @@ function renderPullMenu() {
   </div>`;
 }
 
+function renderCommitRepository(s) {
+  const name = s.repositoryName || 'Repository';
+  const title = `${name}${s.root ? `\n${s.root}` : ''}`;
+  const label = `${icon('repo')}<span class="commit-repository-name">${escapeHtml(name)}</span>`;
+  return `<div class="commit-repository-header">${s.repositoryCount > 1
+    ? `<button class="commit-repository-label commit-repository-picker" data-action="choose-repository" aria-label="Choose repository, current ${escapeHtml(name)}" aria-haspopup="dialog" title="${escapeHtml(title)}\nChoose repository" ${ui.busy ? 'disabled' : ''}>${label}${icon('chevron-down')}</button>`
+    : `<div class="commit-repository-label" aria-label="Current repository ${escapeHtml(name)}" title="${escapeHtml(title)}">${label}</div>`}</div>`;
+}
+
 function renderCommitToolbar(s) {
   const syncing = ui.syncPhase === 'fetching';
   const branchLabel = s.branch === '(detached)' ? 'Detached HEAD' : s.branch;
@@ -806,7 +815,6 @@ function renderCommitToolbar(s) {
   const pushTitle = s.ahead ? `Push ${s.ahead} outgoing commit${s.ahead === 1 ? '' : 's'}` : 'No commits to push';
   return `<header class="commit-toolbar" aria-label="Commit tool window actions" aria-busy="${syncing}">
     <button class="idea-toolbar-button" data-action="refresh" aria-label="Refresh changes" title="Refresh changes" ${ui.busy ? 'disabled' : ''}>${icon('refresh')}</button>
-    ${s.repositoryCount > 1 ? `<button class="idea-toolbar-button" data-action="choose-repository" aria-label="Choose repository, current ${escapeHtml(s.repositoryName)}" title="Repository: ${escapeHtml(s.repositoryName)}" ${ui.busy ? 'disabled' : ''}>${icon('repo')}</button>` : ''}
     <button class="idea-toolbar-button" data-action="branches" aria-label="${escapeHtml(branchActionLabel)}" title="Branches: ${escapeHtml(branchLabel)}" aria-haspopup="dialog" aria-expanded="${ui.branchOpen}">${icon('git-branch')}</button>
     <div class="sync-action-wrap compact-sync-action">
     <button class="idea-toolbar-button ${s.behind ? 'has-count incoming-count' : ''}" data-action="pull-menu" aria-label="${escapeHtml(pullTitle)}" title="${escapeHtml(pullTitle)}" aria-haspopup="menu" aria-expanded="${ui.pullMenuOpen}" ${!hasUpstream || ui.busy || syncing ? 'disabled' : ''}>${icon('arrow-down')}${s.behind ? `<span class="tool-count">${s.behind}</span>` : ''}</button>
@@ -870,6 +878,7 @@ function renderChanges(s) {
   const canCommit = !commitBlocker();
   return `
     <div class="commit-upper" id="kivo-commit-upper" ${ui.commitZoneResized && !ui.recentCommitsCollapsed ? `style="flex-basis:${ui.commitZonePercent}%"` : ''}>
+      ${renderCommitRepository(s)}
       ${renderCommitToolbar(s)}
       <div class="commit-changes-heading" role="heading" aria-level="2"><span class="changes-heading-label">${kivoIcon('changes', 'changes-heading-icon')}<span>Changes</span></span><small>${filtersActive ? `${filteredTotal}/${s.changes.length}` : s.changes.length || ''}</small></div>
       ${ui.changeSearchOpen ? `<div class="commit-change-search"><input id="change-search" type="search" aria-label="Search changed files by path or status" placeholder="Path or status…" value="${escapeHtml(ui.changeQuery)}"><select id="change-filter" aria-label="Filter changed files by type or Git state"><option value="all" ${ui.changeFilter === 'all' ? 'selected' : ''}>All changes</option><option value="staged" ${ui.changeFilter === 'staged' ? 'selected' : ''}>Staged</option><option value="worktree" ${ui.changeFilter === 'worktree' ? 'selected' : ''}>Working tree</option><option value="modified" ${ui.changeFilter === 'modified' ? 'selected' : ''}>Modified</option><option value="added" ${ui.changeFilter === 'added' ? 'selected' : ''}>Added</option><option value="deleted" ${ui.changeFilter === 'deleted' ? 'selected' : ''}>Deleted</option><option value="renamed" ${ui.changeFilter === 'renamed' ? 'selected' : ''}>Renamed</option><option value="untracked" ${ui.changeFilter === 'untracked' ? 'selected' : ''}>Untracked</option><option value="conflict" ${ui.changeFilter === 'conflict' ? 'selected' : ''}>Conflicts</option></select><kbd>Esc</kbd></div>` : ''}
@@ -1736,11 +1745,12 @@ function resetCommitMetadataHeight(event) {
 
 function commitPanelBounds(splitter) {
   const content = splitter.closest('.commit-upper') || splitter.closest('.changes-content');
+  const repositoryHeight = content?.querySelector('.commit-repository-header')?.getBoundingClientRect().height || 34;
   const toolbarHeight = content?.querySelector('.commit-toolbar')?.getBoundingClientRect().height || 31;
   const headingHeight = content?.querySelector('.commit-changes-heading')?.getBoundingClientRect().height || 26;
   const available = content?.clientHeight || 0;
   const maximum = Math.min(COMMIT_PANEL_MAX_HEIGHT, available
-    ? Math.max(COMMIT_PANEL_MIN_HEIGHT, available - toolbarHeight - headingHeight - 82)
+    ? Math.max(COMMIT_PANEL_MIN_HEIGHT, available - repositoryHeight - toolbarHeight - headingHeight - 82)
     : COMMIT_PANEL_MAX_HEIGHT);
   return { minimum: COMMIT_PANEL_MIN_HEIGHT, maximum };
 }

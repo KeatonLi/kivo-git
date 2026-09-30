@@ -60,6 +60,9 @@ try {
   assert.equal(activeHint, '"Drop files here"', 'The drop instruction should appear while dragging over an empty list.');
 
   await openSurface(page, 'surface=changes');
+  assert.equal(await page.locator('.commit-repository-name').textContent(), 'ack-k8s', 'The current repository name should be visible inside the sidebar, independent of VS Code view titles.');
+  assert.match(await page.locator('.commit-repository-label').getAttribute('title'), /\/workspace\/ack-k8s/, 'Hover should expose the full repository path.');
+  assert.equal(await page.locator('.commit-repository-picker').count(), 0, 'A single repository should appear as a plain label.');
   const initialLayout = await page.evaluate(() => {
     const upper = document.querySelector('.commit-upper').getBoundingClientRect();
     const tree = document.querySelector('.commit-changes-tree').getBoundingClientRect();
@@ -159,6 +162,21 @@ try {
   assert.equal(await switchRepository.count(), 1, 'Multiple workspace folders should expose a repository switcher.');
   await switchRepository.click();
   assert.ok(await page.evaluate(() => window.__vscodeMessages.some((message) => message.type === 'chooseRepository')), 'Repository switching should reach VS Code.');
+  await page.evaluate(() => window.dispatchEvent(new MessageEvent('message', {
+    data: { type: 'snapshot', payload: { ...fixture, repositoryCount: 2,
+      repositoryName: 'analytics-platform-with-a-long-repository-name',
+      root: '/workspace/analytics-platform-with-a-long-repository-name' } }
+  })));
+  assert.equal(await page.locator('.commit-repository-name').textContent(), 'analytics-platform-with-a-long-repository-name', 'Switching repositories must update the visible name.');
+  await page.setViewportSize({ width: 240, height: 420 });
+  const repositoryLayout = await page.locator('.commit-repository-name').evaluate((element) => ({
+    truncated: element.scrollWidth > element.clientWidth,
+    horizontalOverflow: document.documentElement.scrollWidth > window.innerWidth
+  }));
+  assert.equal(repositoryLayout.truncated, true, 'Long repository names should truncate within the sidebar.');
+  assert.equal(repositoryLayout.horizontalOverflow, false, 'Long repository names must not push controls outside the sidebar.');
+  assert.match(await page.locator('.commit-repository-picker').getAttribute('title'), /analytics-platform-with-a-long-repository-name/);
+  await page.setViewportSize({ width: 360, height: 820 });
 
   await openSurface(page, 'surface=changes&state=grouped');
   assert.deepEqual(await page.locator('.file-group-heading').allTextContents(), ['Tracked4', 'Untracked2'], 'Tracked files should appear above the Untracked group.');

@@ -2,6 +2,11 @@
 
 ## Unreleased
 
+## 0.3.11 - 2026-09-30
+
+- Show the selected repository in a compact header above Commit actions, with the full path on hover and a clickable picker in multi-repository workspaces.
+- Truncate long repository names without squeezing toolbar controls and update the header when the selected repository changes.
+
 ## 0.3.10 - 2026-09-30
 
 - Remove repeated file-status labels from the changes list; keep Git state in filename colors, hover details, and screen-reader descriptions, including when selected.
