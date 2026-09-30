@@ -2,6 +2,12 @@
 
 ## Unreleased
 
+## 0.3.10 - 2026-09-30
+
+- Remove repeated file-status labels from the changes list; keep Git state in filename colors, hover details, and screen-reader descriptions, including when selected.
+- Use normal theme foregrounds for Commit toolbar icons and the same clear accent for Branches and History.
+- Fit Recent commits to its contents, move timestamps below full-width subjects, and add a persistent collapse control; retain manual resizing with a reset to automatic height.
+
 ## 0.3.9 - 2026-09-29
 
 - Add Rollback for selected files in the Commit view and file context menu, with a native confirmation listing affected paths.

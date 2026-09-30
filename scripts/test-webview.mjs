@@ -75,6 +75,48 @@ try {
   assert.equal(await page.locator('.workspace-brief').count(), 0, 'The Commit view should leave repository status to History.');
   assert.equal(await page.locator('.commit-repository-context').count(), 0, 'The lower area should show recent commits without redundant status cards.');
   assert.match(await page.locator('.commit-recent').textContent(), /Recent commits/);
+  assert.ok((await page.locator('.commit-lower').boundingBox()).height <= 288, 'Recent commits should fit their content instead of reserving a large empty panel.');
+  await page.locator('#commit-message').fill('Keep this draft');
+  const unselectedColor = await page.locator('.file-row .file-name').first().evaluate((element) => getComputedStyle(element).color);
+  await page.locator('[data-select]').first().check({ force: true });
+  const selectedColor = await page.locator('.file-row.selected .file-name').evaluate((element) => getComputedStyle(element).color);
+  assert.equal(selectedColor, unselectedColor, 'Selection must retain the file change color.');
+  await page.getByRole('button', { name: 'Collapse recent commits', exact: true }).click();
+  assert.equal(await page.locator('.commit-recent-list').isVisible(), false);
+  assert.equal(await page.locator('#commit-message').inputValue(), 'Keep this draft', 'Collapsing recent commits must preserve the draft.');
+  assert.equal(await page.locator('[data-select]:checked').count(), 1, 'Collapsing recent commits must preserve the selection.');
+  assert.ok((await page.locator('.commit-lower').boundingBox()).height <= 34, 'Collapsed history should occupy only its heading.');
+  await page.getByRole('button', { name: 'Expand recent commits', exact: true }).click();
+  await page.locator('[data-select]').first().uncheck({ force: true });
+  await page.locator('#commit-message').fill('');
+  await page.locator('[data-recent-commit]').first().click();
+  assert.ok(await page.evaluate(() => window.__vscodeMessages.some((message) => message.type === 'showRecentCommit')), 'Recent commits should continue to open their full History details.');
+  const historyIconColor = await page.locator('.commit-toolbar [data-action="show-log"] svg').evaluate((element) => getComputedStyle(element).color);
+  const branchIconColor = await page.locator('.commit-toolbar [data-action="branches"]').evaluate((element) => getComputedStyle(element).color);
+  assert.equal(historyIconColor, branchIconColor, 'The History shortcut should use the same normal accent as Branches.');
+
+  await page.locator('[data-commit-zone-splitter]').focus();
+  await page.keyboard.press('ArrowUp');
+  assert.equal(await page.locator('.changes-content.recent-resized').count(), 1, 'The split should still support manual resizing.');
+  await page.keyboard.press('Home');
+  assert.equal(await page.locator('.changes-content.recent-resized').count(), 0, 'Resetting the split should restore automatic sizing.');
+  for (const viewport of [{ width: 240, height: 420 }, { width: 360, height: 1000 }]) {
+    await page.setViewportSize(viewport);
+    const layout = await page.evaluate(() => {
+      const actions = document.querySelector('.commit-actions').getBoundingClientRect();
+      const panel = document.querySelector('.commit-panel').getBoundingClientRect();
+      const upper = document.querySelector('.commit-upper').getBoundingClientRect();
+      return {
+        actionsVisible: actions.top >= panel.top && actions.bottom <= upper.bottom,
+        horizontalOverflow: document.documentElement.scrollWidth > window.innerWidth,
+        lowerHeight: document.querySelector('.commit-lower').getBoundingClientRect().height
+      };
+    });
+    assert.equal(layout.actionsVisible, true, 'The Commit actions must remain visible in short or narrow sidebars.');
+    assert.equal(layout.horizontalOverflow, false, 'The sidebar must not scroll horizontally.');
+    assert.ok(layout.lowerHeight <= 288, 'Tall sidebars must not stretch the recent list into unused space.');
+  }
+  await page.setViewportSize({ width: 360, height: 820 });
   assert.equal(await page.locator('.commit-panel').evaluate((element) => getComputedStyle(element).flexBasis), '188px', 'The Commit form should reserve room for selection feedback.');
   assert.equal(await page.locator('.commit-toolbar [data-action="show-log"]').count(), 1, 'History should have a visible bottom-Panel shortcut.');
   await page.locator('.commit-toolbar [data-action="show-log"]').click();
@@ -133,8 +175,9 @@ try {
     getComputedStyle(row.querySelector('.file-name')).color
   ])));
   assert.equal(new Set([statusColors.modified, statusColors.added, statusColors.deleted]).size, 3, 'Modified, added, and deleted files should use distinct theme colors.');
-  assert.match(await page.locator('.file-row.deleted .file-state').textContent(), /Deleted/);
-  assert.match(await page.locator('.file-row.untracked .file-state').first().textContent(), /New file/);
+  assert.equal(await page.locator('.file-state').count(), 0, 'File rows should not repeat state labels beside colored file names.');
+  assert.match(await page.locator('.file-row.deleted .file-main').getAttribute('title'), /deleted/);
+  assert.match(await page.locator('.file-row.untracked .file-main').first().getAttribute('title'), /Git is not tracking/);
   await page.locator('.file-row.untracked [data-select]').first().check({ force: true });
   await page.locator('.file-row.untracked [data-select]').last().check({ force: true });
   await page.locator('[data-action="rollback-selected"]').click();
@@ -144,7 +187,7 @@ try {
   assert.match(await page.locator('[data-file-context-action="rollback"]').textContent(), /Rollback 2 selected files/);
 
   await openSurface(page, 'surface=changes');
-  assert.match(await page.locator('.file-row .file-state').first().textContent(), /Staged|Modified|New file|Conflict/, 'File rows should explain Git state without symbolic XY codes.');
+  assert.match(await page.locator('.file-row .file-main').first().getAttribute('aria-label'), /Staged|Modified|New file|Conflict/, 'Git state should remain accessible without a visible status label.');
   await page.locator('[data-action="toolbar-more"]').click();
   await page.keyboard.press('Escape');
   assert.equal(await page.locator('.commit-toolbar-menu.open').count(), 0, 'Escape should dismiss the Commit action menu.');

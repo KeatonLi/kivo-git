@@ -22,12 +22,13 @@ Kivo Git keeps a familiar two-surface workflow in VS Code: **Commit** stays in t
 - Real repository status powered by the native Git CLI
 - IDE-style named changelists with drag-and-drop assignment
 - Selective commits without forcing a staged/unstaged workflow
+- File change colors with detailed state on hover, plus compact, collapsible recent commits
 - Local and remote branch popup with checkout
 - Branch context actions to create and checkout a new branch from any local branch, remote ref, or tag
 - Native VS Code diff preview on single-click and a pinned editor on double-click
 - Arrow-key file navigation, Space toggle, and Shift range selection
 - Changed-file icons resolved from the active VS Code file icon theme, including compound extensions
-- Readable Staged, Working, Untracked, and Conflict labels, with less-used toolbar actions in a named menu
+- Tracking and staging details on hover, with less-used toolbar actions in a named menu
 - A commit review step that lists the selected files and offers a diff shortcut for each before confirmation
 
 Commit operates on whole selected files, including their working-tree edits; the Staged filter does not turn it into an index-only commit. Unrelated staged files are preserved. Selection counts appear beside the commit form. Filtering never silently drops an existing selection: hidden selections must be reviewed by clearing the filter, or removed with **Remove hidden**, before committing. List checkboxes select matching files, while keyboard select-all and range selection use the expanded, visible rows.
