@@ -2799,14 +2799,26 @@ function submitReviewedCommit() {
 function toast(message, phase = 'success') {
   const element = document.createElement('div');
   element.className = `toast ${phase}`;
-  element.innerHTML = `${icon(phase === 'success' ? 'check' : phase === 'loading' ? 'loading' : 'error', phase === 'loading' ? 'codicon-modifier-spin' : '')}<p>${escapeHtml(message)}</p>`;
-  toastRegion.append(element);
-  if (phase !== 'loading') setTimeout(() => dismissToast(element), 2800);
+  element.setAttribute('role', phase === 'error' ? 'alert' : 'status');
+  element.innerHTML = `${icon(phase === 'success' ? 'check' : phase === 'loading' ? 'loading' : 'error', phase === 'loading' ? 'codicon-modifier-spin' : '')}<p>${escapeHtml(message)}</p><button class="toast-close" aria-label="Dismiss notification" title="Dismiss">${icon('close')}</button>`;
+  clearTimeout(toastRegion.firstElementChild?.dismissTimer);
+  toastRegion.replaceChildren(element);
+  const scheduleDismiss = () => {
+    clearTimeout(element.dismissTimer);
+    if (phase !== 'loading' && !element.matches(':hover, :focus-within')) element.dismissTimer = setTimeout(() => dismissToast(element), phase === 'error' ? 8000 : 2800);
+  };
+  element.querySelector('button').addEventListener('click', () => dismissToast(element));
+  element.addEventListener('mouseenter', () => clearTimeout(element.dismissTimer));
+  element.addEventListener('focusin', () => clearTimeout(element.dismissTimer));
+  element.addEventListener('mouseleave', scheduleDismiss);
+  element.addEventListener('focusout', () => requestAnimationFrame(scheduleDismiss));
+  scheduleDismiss();
   return element;
 }
 
 function dismissToast(element) {
   if (!element?.isConnected || element.classList.contains('leaving')) return;
+  clearTimeout(element.dismissTimer);
   if (!motionEnabled()) { element.remove(); return; }
   element.classList.add('leaving');
   element.addEventListener('animationend', () => element.remove(), { once: true });
@@ -3026,7 +3038,7 @@ window.addEventListener('message', (event) => {
     ui.operationKind = message.phase === 'loading' ? message.kind : undefined;
     if (message.phase === 'loading') ui.pullMenuOpen = false;
     if (message.phase === 'success' && message.clearsCommit) { ui.commitMessage = ''; ui.selected.clear(); persist(); }
-    toast(message.message, message.phase);
+    if (!message.feedbackSurface || message.feedbackSurface === surface) toast(message.message, message.phase);
     render();
     if (message.phase === 'success' && message.clearsCommit) {
       const textarea = app.querySelector('#commit-message');

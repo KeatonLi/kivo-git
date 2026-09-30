@@ -987,10 +987,10 @@ export class IdeaGitViewProvider implements vscode.WebviewViewProvider, vscode.T
     await this.postToView(surface, { type: 'pushReviewClosed', id: review.id });
     if (message.choice === 'cancel') return;
     if (this.selectedWorkspace()?.uri.fsPath !== client.workspaceRoot) return;
-    if (message.choice === 'fetch') { await this.fetchAndReview(client); return; }
+    if (message.choice === 'fetch') { await this.fetchAndReview(client, surface); return; }
     if (review.preview.behind || review.rejection) return;
     const { preview, branch } = review;
-    const pushed = await this.operation('push', 'Pushing…', () => branch ? client.pushBranch(branch, preview) : client.push(preview), 'Push complete');
+    const pushed = await this.operation('push', 'Pushing…', () => branch ? client.pushBranch(branch, preview) : client.push(preview), 'Push complete', false, surface);
     if (!pushed && /rejected|non-fast-forward|fetch first|failed to push/i.test(this.syncError || '')) {
       if (this.selectedWorkspace()?.uri.fsPath !== client.workspaceRoot) return;
       const rejected = this.pushReview.open({ ...review, rejection: 'The remote rejected this push. Fetch the latest commits and review the branch before pushing again.' });
@@ -998,8 +998,8 @@ export class IdeaGitViewProvider implements vscode.WebviewViewProvider, vscode.T
     }
   }
 
-  private async fetchAndReview(client: GitClient): Promise<void> {
-    if (await this.operation('fetch', 'Fetching remote updates…', () => client.fetch(), 'Remote updates fetched')) {
+  private async fetchAndReview(client: GitClient, surface: KivoSurface): Promise<void> {
+    if (await this.operation('fetch', 'Fetching remote updates…', () => client.fetch(), 'Remote updates fetched', false, surface)) {
       await this.showLog();
     }
   }
@@ -1185,13 +1185,13 @@ export class IdeaGitViewProvider implements vscode.WebviewViewProvider, vscode.T
     await this.operation('move', uniquePaths.length === 1 ? `Moving ${uniquePaths[0]}…` : `Moving ${uniquePaths.length} files…`, () => client.moveToChangelist(uniquePaths, target.id), `Moved to ${target.label}`);
   }
 
-  private async operation(kind: OperationKind, label: string, action: () => Promise<void>, success: string, clearsCommit = false): Promise<boolean> {
+  private async operation(kind: OperationKind, label: string, action: () => Promise<void>, success: string, clearsCommit = false, feedbackSurface?: KivoSurface): Promise<boolean> {
     if (this.operationRunning) throw new Error('Another Git operation is already running.');
     this.operationRunning = true;
     const id = ++this.operationId;
     let writeStarted = false;
     try {
-      await this.postToReadyViews({ type: 'operation', id, kind, phase: 'loading', message: label });
+      await this.postToReadyViews({ type: 'operation', id, kind, phase: 'loading', message: label, feedbackSurface });
       if (this.autoFetchPromise) await this.autoFetchPromise;
       this.coordinator.beginWrite();
       writeStarted = true;
@@ -1199,12 +1199,12 @@ export class IdeaGitViewProvider implements vscode.WebviewViewProvider, vscode.T
       if (kind === 'commit' || kind === 'checkout' || kind === 'pull' || kind === 'branch') this.repositoryEmitter.fire();
       if (kind === 'fetch') await this.setSyncState('idle', Date.now());
       else if (kind === 'pull' || kind === 'push') await this.setSyncState('idle', Date.now());
-      await this.postToReadyViews({ type: 'operation', id, kind, phase: 'success', message: success, clearsCommit });
+      await this.postToReadyViews({ type: 'operation', id, kind, phase: 'success', message: success, clearsCommit, feedbackSurface });
       return true;
     } catch (error) {
       this.coordinator.reset();
       if (kind === 'fetch' || kind === 'pull' || kind === 'push') await this.setSyncState('error', undefined, this.errorText(error));
-      await this.postToReadyViews({ type: 'operation', id, kind, phase: 'error', message: this.errorText(error) });
+      await this.postToReadyViews({ type: 'operation', id, kind, phase: 'error', message: this.errorText(error), feedbackSurface });
       return false;
     } finally {
       this.operationRunning = false;
@@ -1399,7 +1399,7 @@ export class IdeaGitViewProvider implements vscode.WebviewViewProvider, vscode.T
           <symbol id="kivo-conflict" viewBox="0 0 24 24"><path d="m12 4 8 15H4z"/><path d="M12 9v4m0 3h.01"/></symbol>
         </svg>
         <main id="app"></main>
-        <div id="toast-region" aria-live="assertive"></div>
+        <div id="toast-region"></div>
         <script nonce="${nonce}" src="${graphLayoutUri}"></script>
         <script nonce="${nonce}" src="${selectionUri}"></script>
         <script nonce="${nonce}" src="${jsUri}"></script>

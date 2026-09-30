@@ -440,13 +440,18 @@ body.commit-panel-resizing .commit-panel-splitter::after { top: 1px; height: 3px
 .empty-state p { margin: 0 0 13px; }
 .empty-state button { display: inline-flex; align-items: center; gap: 5px; padding: 5px 12px; border-radius: var(--radius-sm); background: var(--vscode-button-secondaryBackground); cursor: pointer; }
 
-#toast-region { position: fixed; z-index: 20; left: 8px; right: 8px; bottom: 8px; display: flex; flex-direction: column; gap: 6px; pointer-events: none; }
-.toast { display: flex; align-items: center; gap: 8px; padding: 9px 10px; border: 1px solid var(--vscode-widget-border, var(--border-subtle)); border-radius: var(--radius-md); background: var(--vscode-notifications-background); box-shadow: var(--shadow-popover); animation: toast-in 230ms var(--ease); }
+#toast-region { position: fixed; z-index: 20; right: 8px; bottom: 8px; max-width: calc(100vw - 16px); display: flex; flex-direction: column; align-items: flex-end; pointer-events: none; }
+.toast { width: max-content; max-width: min(360px, calc(100vw - 16px)); display: flex; align-items: center; gap: 7px; padding: 6px 8px; border: 1px solid var(--vscode-widget-border, var(--border-subtle)); border-radius: 4px; background: var(--vscode-notifications-background, var(--surface-base)); color: var(--vscode-notifications-foreground, var(--vscode-foreground)); box-shadow: var(--shadow-popover); animation: toast-in 160ms var(--ease); pointer-events: auto; font-size: 11px; line-height: 1.4; }
 .toast.leaving { animation: toast-out 180ms ease both; }
-.toast p { margin: 0; }
-.toast.success .codicon { color: var(--success); }
-.toast.error .codicon { color: var(--danger); }
-.toast.loading .codicon { color: var(--accent); }
+.toast p { min-width: 0; max-height: min(160px, 40vh); overflow-y: auto; overflow-wrap: anywhere; margin: 0; scrollbar-width: thin; }
+.toast > .codicon { flex: 0 0 auto; font-size: 13px; }
+.toast.success > .codicon { color: var(--success); }
+.toast.error > .codicon { color: var(--danger); }
+.toast.loading > .codicon { color: var(--accent); }
+.toast-close { flex: 0 0 20px; width: 20px; height: 20px; display: grid; place-items: center; padding: 0; background: transparent; color: var(--muted); border-radius: 3px; cursor: pointer; }
+.toast-close .codicon { font-size: 12px; }
+.toast-close:hover { background: var(--vscode-toolbar-hoverBackground, var(--surface-soft)); color: var(--vscode-foreground); }
+.toast-close:focus-visible { outline: 1px solid var(--vscode-focusBorder, var(--accent)); outline-offset: 1px; }
 
 @keyframes list-in { from { opacity: 0; transform: translateY(4px); } }
 @keyframes file-in { from { opacity: 0; transform: translateX(-4px); } }

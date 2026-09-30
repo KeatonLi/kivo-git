@@ -507,6 +507,47 @@ try {
   await page.locator('[data-graph-list]').evaluate((list) => { list.scrollTop = list.scrollHeight; list.dispatchEvent(new Event('scroll')); });
   assert.ok(await page.evaluate(() => window.__vscodeMessages.some((message) => message.type === 'loadMoreCommits')), 'Scrolling to older history should load the next page.');
 
+  for (const feedbackSurface of ['changes', 'history']) {
+    for (const currentSurface of ['changes', 'history']) {
+      await openSurface(page, `surface=${currentSurface}`);
+      await page.mouse.move(0, 0);
+      await page.evaluate((feedbackSurface) => emit({ type: 'operation', kind: 'push', phase: 'loading', message: 'Pushing…', feedbackSurface }), feedbackSurface);
+      assert.equal(await page.locator('.content').getAttribute('aria-busy'), 'true', 'Both views must receive the operation state.');
+      assert.equal(await page.locator('.toast').count(), Number(currentSurface === feedbackSurface), 'Push feedback should appear only in the initiating view.');
+      await page.evaluate((feedbackSurface) => emit({ type: 'operation', kind: 'push', phase: 'success', message: 'Push complete', feedbackSurface }), feedbackSurface);
+      assert.equal(await page.locator('.content').getAttribute('aria-busy'), 'false');
+      assert.equal(await page.locator('.toast').count(), Number(currentSurface === feedbackSurface), 'Success should replace progress without duplicated notifications.');
+      if (currentSurface === feedbackSurface) {
+        assert.equal(await page.locator('.toast').getAttribute('role'), 'status', 'Successful pushes should use a polite announcement.');
+        await page.getByRole('button', { name: 'Dismiss notification' }).click();
+        await page.waitForSelector('.toast', { state: 'detached' });
+      }
+    }
+  }
+  for (const width of [240, 360, 1440]) {
+    await page.setViewportSize({ width, height: 300 });
+    await page.evaluate(() => emit({ type: 'notice', phase: 'success', message: 'Push complete' }));
+    const toastLayout = await page.locator('.toast').evaluate((element) => {
+      const r = element.getBoundingClientRect();
+      return { compact: r.width < 200 && r.height <= 36, fits: r.left >= 0 && r.right <= innerWidth && r.bottom <= innerHeight };
+    });
+    assert.deepEqual(toastLayout, { compact: true, fits: true }, 'Short success messages should stay compact even in a wide History view.');
+    await page.evaluate(() => emit({ type: 'notice', phase: 'error', message: `Push failed: ${'A very long Git error and repository path. '.repeat(100)}` }));
+    assert.equal(await page.locator('.toast').count(), 1, 'New feedback should replace an older message.');
+    assert.equal(await page.locator('.toast').getAttribute('role'), 'alert');
+    const errorLayout = await page.locator('.toast').evaluate((element) => {
+      const r = element.getBoundingClientRect(), p = element.querySelector('p');
+      return { fits: r.left >= 0 && r.right <= innerWidth && r.bottom <= innerHeight,
+        internalOverflow: element.scrollWidth > element.clientWidth, scrolls: p.scrollHeight > p.clientHeight };
+    });
+    assert.deepEqual(errorLayout, { fits: true, internalOverflow: false, scrolls: true }, 'Long errors should scroll within a bounded notification.');
+  }
+  await page.getByRole('button', { name: 'Dismiss notification' }).click();
+  await page.waitForSelector('.toast', { state: 'detached' });
+  await page.mouse.move(0, 0);
+  await page.evaluate(() => emit({ type: 'notice', phase: 'success', message: 'Push complete' }));
+  await page.waitForSelector('.toast', { state: 'detached', timeout: 5000 });
+
   assert.deepEqual(pageErrors, [], 'The webview should not throw browser runtime errors.');
   console.log('Webview E2E passed: reviewed commit, toolbar menu, file states, History focus and Blame reveal, search and filters, branch menus, commit details/diffs, and pagination.');
 } finally {

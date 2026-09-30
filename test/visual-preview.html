@@ -43,7 +43,7 @@
   </head>
   <body class="parity-mode" data-surface="history">
     <main id="app"></main>
-    <div id="toast-region" aria-live="assertive"></div>
+    <div id="toast-region"></div>
     <script>
       const visualSurface = new URLSearchParams(location.search).get('surface') === 'changes' ? 'changes' : 'history';
       document.body.dataset.surface = visualSurface;

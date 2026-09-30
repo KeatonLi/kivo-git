@@ -2,6 +2,12 @@
 
 ## Unreleased
 
+## 0.3.15 - 2026-09-30
+
+- Keep operation notifications compact at the bottom right, with a dismiss button and a single message instead of stacked full-width bars.
+- Show Push progress and results only in the initiating tool window while preserving shared busy state in Commit and History.
+- Use polite success announcements, longer-lived scrollable errors, and pause dismissal while hovering or focusing a notification.
+
 ## 0.3.14 - 2026-09-30
 
 - Prioritize filenames in recent-commit previews, with muted short directory labels and complete paths on hover; retain Git change colors and rename information.
