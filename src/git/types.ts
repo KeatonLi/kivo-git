@@ -103,6 +103,7 @@ export interface ChangeList {
 }
 
 export interface RepositorySnapshot {
+  operation?: GitOperationState;
   repositoryName: string;
   root: string;
   branch: string;
@@ -123,3 +124,14 @@ export interface RepositorySnapshot {
 }
 
 export type PullStrategy = 'merge' | 'rebase' | 'ff-only';
+
+export interface WorkflowFile extends CommitFile { oldRevision: string; newRevision: string }
+export interface BranchComparison {
+  currentName: string; targetName: string; currentOid: string; targetOid: string;
+  current: { count: number; commits: Array<{ hash: string; subject: string }> };
+  target: { count: number; commits: Array<{ hash: string; subject: string }> };
+  files: WorkflowFile[];
+}
+export interface StashEntry { hash: string; ref: string; date: string; subject: string }
+export interface StashDetails extends StashEntry { files: WorkflowFile[] }
+export interface GitOperationState { kind: 'merge' | 'rebase' | 'cherry-pick' | 'revert' | 'conflicts'; token: string; files: string[] }

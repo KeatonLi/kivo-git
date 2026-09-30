@@ -120,6 +120,14 @@
         setState: () => {},
         postMessage: (message) => {
           window.__vscodeMessages.push(message);
+          if (message.type === 'workflowRequest' && !window.__holdWorkflow) {
+            const file = { path: 'src/feature/Panel.tsx', status: 'M', oldRevision: fixture.commits[1].hash, newRevision: fixture.commits[0].hash };
+            const stash = { hash: fixture.commits[0].hash, ref: 'stash@{0}', subject: 'On feature: unfinished UI', date: fixture.commits[0].date };
+            const payload = message.kind === 'compare' ? { currentName: fixture.branch, targetName: message.branch, currentOid: fixture.commits[0].hash, targetOid: fixture.commits[1].hash,
+              current: { count: 1, commits: [fixture.commits[0]] }, target: { count: 2, commits: fixture.commits.slice(1, 3) }, files: [file] }
+              : message.kind === 'stashes' ? [stash] : { ...stash, files: [file, { ...file, path: 'new.txt', status: 'A' }] };
+            setTimeout(() => emit({ type: 'workflowResult', root: message.root, requestId: message.requestId, payload }), 20);
+          }
           if (message.type === 'push' || message.type === 'pushBranch') {
             const branch = message.branch || fixture.branch;
             const upstream = fixture.branches.find((item) => item.name === branch)?.upstream || fixture.upstream;

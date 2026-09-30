@@ -41,7 +41,7 @@ describe('Kivo Git two-surface routing', () => {
   });
 
   it('allows synchronisation and branch operations from either surface', () => {
-    for (const message of ['ready', 'refresh', 'fetch', 'pull', 'push', 'respondPushReview', 'pushCommitDetails', 'openPushCommitDiff', 'checkout', 'createBranch']) {
+    for (const message of ['ready', 'refresh', 'fetch', 'pull', 'push', 'respondPushReview', 'pushCommitDetails', 'openPushCommitDiff', 'checkout', 'createBranch', 'workflowRequest', 'closeWorkflow', 'openWorkflowDiff', 'stashCreate', 'stashApply', 'stashDrop', 'openConflict', 'resolveConflict', 'continueOperation', 'abortOperation']) {
       expect(isMessageAllowedOnSurface('changes', message)).toBe(true);
       expect(isMessageAllowedOnSurface('history', message)).toBe(true);
     }

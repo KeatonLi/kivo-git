@@ -2,12 +2,19 @@ import * as vscode from 'vscode';
 import path from 'node:path';
 import { FileIconThemeResolver, type WebviewFileIcon } from './FileIconThemeResolver';
 import { GitClient } from './git/GitClient';
-import type { CommitDetails, PullStrategy, RepositorySnapshot } from './git/types';
+import type { CommitDetails, PullStrategy, RepositorySnapshot, WorkflowFile } from './git/types';
 import { SnapshotCoordinator } from './SnapshotCoordinator';
 import { PushReviewSession } from './PushReviewSession';
 import { isMessageAllowedOnSurface, KivoViewTypes, type KivoSurface, surfaceForViewType } from './viewLayout';
 
 type WebviewMessage =
+  | { type: 'workflowRequest'; root: string; requestId: number; kind: 'compare' | 'stashes' | 'stashDetails'; branch?: string; remote?: boolean; hash?: string }
+  | { type: 'closeWorkflow'; requestId: number }
+  | { type: 'openWorkflowDiff'; root: string; requestId: number; path: string }
+  | { type: 'stashCreate'; root: string; message: string }
+  | { type: 'stashApply' | 'stashDrop'; root: string; hash: string }
+  | { type: 'openConflict' | 'resolveConflict'; root: string; path: string }
+  | { type: 'continueOperation' | 'abortOperation'; root: string; token: string }
   | { type: 'ready'; historyRef?: string }
   | { type: 'refresh' | 'fetch' | 'push' | 'loadMoreCommits' | 'showLog' | 'showChanges' | 'openSettings' }
   | { type: 'setHistoryRef'; branch: string }
@@ -53,7 +60,7 @@ type WebviewMessage =
   | { type: 'deleteChangelist'; id: string; name: string }
   | { type: 'setActiveChangelist'; id: string }
   | { type: 'moveFiles'; paths: string[]; listId: string };
-type OperationKind = 'commit' | 'checkout' | 'branch' | 'tag' | 'changelist' | 'move' | 'rollback' | 'fetch' | 'pull' | 'push' | 'identity';
+type OperationKind = 'commit' | 'checkout' | 'branch' | 'tag' | 'changelist' | 'move' | 'rollback' | 'fetch' | 'pull' | 'push' | 'identity' | 'stash' | 'conflict';
 type WebviewRepositorySnapshot = RepositorySnapshot & { fileIcons: Record<string, WebviewFileIcon>; repositoryCount: number; allRepositoryChanges: number };
 const HISTORY_PAGE_SIZE = 80;
 
@@ -84,6 +91,7 @@ export class IdeaGitViewProvider implements vscode.WebviewViewProvider, vscode.T
   private operationId = 0;
   private operationRunning = false;
   private readonly pushReview = new PushReviewSession();
+  private readonly workflowSessions = new Map<KivoSurface, { root: string; id: number; files: WorkflowFile[] }>();
   private pushPreviewRequestId = 0;
   private lastFetchAttemptAt = 0;
   private lastFetchedAt?: number;
@@ -156,6 +164,7 @@ export class IdeaGitViewProvider implements vscode.WebviewViewProvider, vscode.T
       if (this.views.get(surface) === view) {
         this.views.delete(surface);
         this.readyViews.delete(surface);
+        this.workflowSessions.delete(surface);
         if (this.pushReview.current?.surface === surface) this.pushReview.clear();
       }
       this.configurePolling();
@@ -488,6 +497,7 @@ export class IdeaGitViewProvider implements vscode.WebviewViewProvider, vscode.T
   }
 
   private resetRepository(): void {
+    this.workflowSessions.clear();
     this.pushReview.clear();
     this.pushPreviewRequestId++;
     this.client = undefined;
@@ -741,6 +751,81 @@ export class IdeaGitViewProvider implements vscode.WebviewViewProvider, vscode.T
         case 'openCommitDiff':
           await this.openCommitDiff(client, message.hash, message.path, message.originalPath, message.kind);
           return;
+        case 'workflowRequest': {
+          if (message.root !== client.workspaceRoot || !Number.isSafeInteger(message.requestId) || message.requestId < 0) return;
+          const session = { root: client.workspaceRoot, id: message.requestId, files: [] as WorkflowFile[] };
+          this.workflowSessions.set(surface, session);
+          try {
+            let payload;
+            if (message.kind === 'compare' && typeof message.branch === 'string') {
+              payload = await client.workflows.compare(`refs/${message.remote ? 'remotes' : 'heads'}/${message.branch}`);
+              session.files = payload.files;
+            } else if (message.kind === 'stashDetails' && typeof message.hash === 'string') {
+              payload = await client.workflows.stashDetails(message.hash);
+              session.files = payload.files;
+            } else if (message.kind === 'stashes') payload = await client.workflows.stashes();
+            else throw new Error('Choose a valid Git workflow.');
+            if (this.workflowSessions.get(surface) !== session || this.selectedWorkspace()?.uri.fsPath !== session.root) return;
+            await this.postToView(surface, { type: 'workflowResult', root: session.root, requestId: session.id, payload });
+          } catch (error) {
+            if (this.workflowSessions.get(surface) === session) await this.postToView(surface, { type: 'workflowResult', root: session.root, requestId: session.id, error: this.errorText(error) });
+          }
+          return;
+        }
+        case 'closeWorkflow':
+          if (this.workflowSessions.get(surface)?.id === message.requestId) this.workflowSessions.delete(surface);
+          return;
+        case 'openWorkflowDiff': {
+          const session = this.workflowSessions.get(surface);
+          if (!session || session.root !== client.workspaceRoot || message.root !== session.root || message.requestId !== session.id) return;
+          const file = session.files.find(file => file.path === message.path);
+          if (!file) return;
+          const oldUri = this.revisionUri(file.originalPath || file.path, file.status === 'A' ? 'empty=1' : `commit=${file.oldRevision}`);
+          const newUri = this.revisionUri(file.path, file.status === 'D' ? 'empty=1' : `commit=${file.newRevision}`);
+          await vscode.commands.executeCommand('vscode.diff', oldUri, newUri, `${file.path} (${file.oldRevision.slice(0, 7)} ↔ ${file.newRevision.slice(0, 7)})`, { preview: false, preserveFocus: true });
+          return;
+        }
+        case 'stashCreate':
+          if (message.root !== client.workspaceRoot || typeof message.message !== 'string') return;
+          await this.operation('stash', 'Saving changes…', async () => { await client.workflows.saveStash(message.message); }, 'Changes saved in Stashes', false, surface);
+          return;
+        case 'stashApply':
+          if (message.root !== client.workspaceRoot) return;
+          await this.operation('stash', 'Restoring stash…', () => client.workflows.applyStash(message.hash), 'Stash restored; saved copy kept', false, surface);
+          return;
+        case 'stashDrop': {
+          if (message.root !== client.workspaceRoot) return;
+          const stash = (await client.workflows.stashes()).find(stash => stash.hash === message.hash);
+          if (!stash) return;
+          const answer = await vscode.window.showWarningMessage(`Delete saved stash ${stash.hash.slice(0, 8)}?`, { modal: true, detail: `${stash.subject}\nThis deletes the saved copy. Files already restored to the working tree remain.` }, 'Delete Stash');
+          if (answer === 'Delete Stash' && this.selectedWorkspace()?.uri.fsPath === client.workspaceRoot) await this.operation('stash', 'Deleting stash…', () => client.workflows.dropStash(stash.hash), 'Saved stash deleted', false, surface);
+          return;
+        }
+        case 'openConflict': {
+          if (message.root !== client.workspaceRoot || !(await client.workflows.operationState())?.files.includes(message.path)) return;
+          const uri = vscode.Uri.file(path.join(client.workspaceRoot, message.path));
+          const extension = vscode.extensions.getExtension('vscode.git');
+          if (extension && !extension.isActive) await extension.activate();
+          if (!(await vscode.commands.getCommands(true)).includes('git.openMergeEditor')) throw new Error('Enable the built-in Git extension to open the Merge Editor.');
+          await vscode.commands.executeCommand('git.openMergeEditor', uri);
+          return;
+        }
+        case 'resolveConflict':
+          if (message.root !== client.workspaceRoot) return;
+          await this.operation('conflict', 'Marking file resolved…', () => client.workflows.resolveConflict(message.path), 'File staged as resolved', false, surface);
+          return;
+        case 'continueOperation':
+          if (message.root !== client.workspaceRoot) return;
+          await this.operation('conflict', 'Continuing Git operation…', () => client.workflows.finishOperation(message.token, 'continue'), 'Git operation continued', false, surface);
+          return;
+        case 'abortOperation': {
+          if (message.root !== client.workspaceRoot) return;
+          const state = await client.workflows.operationState();
+          if (!state || state.token !== message.token || state.kind === 'conflicts') return;
+          const answer = await vscode.window.showWarningMessage(`Abort ${state.kind}?`, { modal: true, detail: 'Git will return to the state before this operation. Resolution edits made during it may be discarded.' }, 'Abort Operation');
+          if (answer === 'Abort Operation' && this.selectedWorkspace()?.uri.fsPath === client.workspaceRoot) await this.operation('conflict', 'Aborting Git operation…', () => client.workflows.finishOperation(message.token, 'abort'), 'Git operation aborted', false, surface);
+          return;
+        }
         case 'commit':
           await this.operation('commit', 'Creating commit…', async () => client.commit(message.message, message.paths), 'Commit created', true);
           return;
@@ -768,7 +853,7 @@ export class IdeaGitViewProvider implements vscode.WebviewViewProvider, vscode.T
           return;
         }
         case 'checkout':
-          await this.operation('checkout', `Switching to ${message.branch}…`, async () => client.checkout(message.branch, message.remote), `Switched to ${message.branch}`);
+          await this.checkoutWithReview(client, surface, message.branch, message.remote);
           return;
         case 'createBranch':
           await this.createBranch(client, message.startPoint);
@@ -842,6 +927,21 @@ export class IdeaGitViewProvider implements vscode.WebviewViewProvider, vscode.T
       await this.postToView(surface, { type: 'notice', phase: 'error', message: detail });
       void vscode.window.showErrorMessage(`${IdeaGitViewProvider.productName}: ${detail}`);
     }
+  }
+
+  private async checkoutWithReview(client: GitClient, surface: KivoSurface, branch: string, remote: boolean): Promise<void> {
+    const snapshot = await client.snapshot(5);
+    if (snapshot.operation) throw new Error('Finish the current Git operation or conflicts before switching branches.');
+    let stashFirst = false;
+    if (snapshot.changes.length) {
+      const choice = await vscode.window.showQuickPick([
+        { label: 'Stash and Switch', description: `Save ${snapshot.changes.length} changed files, including untracked files; keep ignored files` },
+        { label: 'Switch with Changes', description: 'Carry changes over; Git refuses if they would be overwritten' }
+      ], { title: `Switch to ${branch}`, placeHolder: 'Keep your current work before switching branches' });
+      if (!choice || this.selectedWorkspace()?.uri.fsPath !== client.workspaceRoot) return;
+      stashFirst = choice.label === 'Stash and Switch';
+    }
+    await this.operation('checkout', `Switching to ${branch}…`, () => stashFirst ? client.stashAndCheckout(branch, remote) : client.checkout(branch, remote), `Switched to ${branch}${stashFirst ? '; changes saved in Stashes' : ''}`, false, surface);
   }
 
   private async createChangelist(client: GitClient): Promise<void> {

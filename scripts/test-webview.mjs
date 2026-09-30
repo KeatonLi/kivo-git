@@ -507,6 +507,104 @@ try {
   await page.locator('[data-graph-list]').evaluate((list) => { list.scrollTop = list.scrollHeight; list.dispatchEvent(new Event('scroll')); });
   assert.ok(await page.evaluate(() => window.__vscodeMessages.some((message) => message.type === 'loadMoreCommits')), 'Scrolling to older history should load the next page.');
 
+  await page.setViewportSize({ width: 1200, height: 500 });
+  await openSurface(page, 'surface=history');
+  await page.evaluate(() => {
+    fixture.commits[0].refs = [
+      { name: 'feature/a-very-long-current-branch-name', kind: 'local', current: true },
+      { name: 'origin/feature/a-very-long-current-branch-name', kind: 'remote' },
+      { name: 'release/a-very-long-tag-name', kind: 'tag' }
+    ];
+    fixture.commits[0].subject = 'A readable commit title with several long refs';
+    emit({ type: 'snapshot', payload: fixture });
+  });
+  const refRow = page.locator('.graph-row').first();
+  assert.equal(await refRow.locator('.log-row-refs .graph-ref').count(), 1, 'Rows should show one primary ref and summarize the others.');
+  assert.equal(await refRow.locator('.ref-overflow').textContent(), '+2');
+  assert.match(await refRow.locator('.log-row-refs').getAttribute('title'), /origin\/feature\/a-very-long/);
+  assert.ok(await refRow.locator('.log-subject').evaluate(element => element.querySelector('strong').getBoundingClientRect().width >= element.getBoundingClientRect().width * .5), 'Long refs should leave at least half of the subject area for the commit title.');
+
+  const comparisonBranch = 'feature/keaton/20260924-solar';
+  await page.locator(`[data-log-branch="${comparisonBranch}"]`).click({ button: 'right' });
+  await page.locator('[data-branch-context-action="compare"]').click();
+  await page.waitForSelector('.workflow-file');
+  assert.match(await page.locator('.workflow-route').textContent(), /ACKk8s.*20260924-solar/);
+  await page.locator('[data-workflow-tab="current"]').click();
+  assert.equal(await page.locator('.workflow-commit').count(), 1);
+  await page.locator('[data-workflow-tab="target"]').click();
+  assert.equal(await page.locator('.workflow-commit').count(), 2);
+  await page.locator('[data-workflow-tab="files"]').click();
+  await page.locator('.workflow-file').click();
+  assert.ok(await page.evaluate(() => window.__vscodeMessages.some(message => message.type === 'openWorkflowDiff' && message.path === 'src/feature/Panel.tsx' && message.root === fixture.root)));
+  assert.equal(await page.locator('.workflow-dialog').count(), 1, 'Opening a diff should retain comparison context.');
+  await page.keyboard.press('Escape');
+  assert.equal(await page.locator('.workflow-dialog').count(), 0);
+
+  await page.locator('[data-action="stashes"]').click();
+  await page.waitForSelector('.workflow-stash');
+  await page.locator('#stash-message').fill('unfinished feature');
+  await page.locator('[data-action="save-stash"]').click();
+  assert.ok(await page.evaluate(() => window.__vscodeMessages.some(message => message.type === 'stashCreate' && message.message === 'unfinished feature' && message.root === fixture.root)));
+  await page.locator('.workflow-stash').click();
+  await page.waitForSelector('[data-action="apply-stash"]');
+  assert.equal(await page.locator('[data-action="apply-stash"]').isDisabled(), true, 'Dirty work must be saved before restoring a stash.');
+  assert.equal(await page.locator('.workflow-file').count(), 2);
+  await page.evaluate(() => emit({ type: 'snapshot', payload: { ...fixture, changes: [], changelists: fixture.changelists.map(list => ({ ...list, changes: [] })) } }));
+  await page.locator('[data-action="apply-stash"]').click();
+  assert.ok(await page.evaluate(() => window.__vscodeMessages.some(message => message.type === 'stashApply' && message.hash === fixture.commits[0].hash)), 'Restore must target the full stash hash.');
+  await page.locator('[data-action="drop-stash"]').click();
+  assert.ok(await page.evaluate(() => window.__vscodeMessages.some(message => message.type === 'stashDrop' && message.hash === fixture.commits[0].hash)));
+  await page.keyboard.press('Escape');
+
+  await page.evaluate(() => { window.__holdWorkflow = true; });
+  await page.locator('[data-action="stashes"]').click();
+  const oldWorkflow = await page.evaluate(() => window.__vscodeMessages.filter(message => message.type === 'workflowRequest').at(-1));
+  await page.keyboard.press('Escape');
+  await page.locator('[data-action="stashes"]').click();
+  const newWorkflow = await page.evaluate(() => window.__vscodeMessages.filter(message => message.type === 'workflowRequest').at(-1));
+  await page.evaluate(({ oldWorkflow, newWorkflow }) => {
+    emit({ type: 'workflowResult', root: oldWorkflow.root, requestId: oldWorkflow.requestId, payload: [{ subject: 'stale stash' }] });
+    emit({ type: 'workflowResult', root: '/wrong/repository', requestId: newWorkflow.requestId, payload: [{ subject: 'wrong repository' }] });
+    emit({ type: 'workflowResult', root: newWorkflow.root, requestId: newWorkflow.requestId, error: 'Temporary stash lookup failure' });
+  }, { oldWorkflow, newWorkflow });
+  assert.equal(await page.locator('.workflow-stash').count(), 0);
+  assert.match(await page.locator('.workflow-dialog').textContent(), /Temporary stash lookup failure/);
+  await page.evaluate(() => { window.__holdWorkflow = false; });
+  await page.locator('[data-action="retry-workflow"]').click();
+  await page.waitForSelector('.workflow-stash');
+  await page.evaluate(() => emit({ type: 'snapshot', payload: { ...fixture, root: '/another/repository' } }));
+  assert.equal(await page.locator('.workflow-dialog').count(), 0, 'Changing repositories should dismiss stale workflow results.');
+
+  for (const currentSurface of ['changes', 'history']) {
+    await page.setViewportSize({ width: currentSurface === 'changes' ? 360 : 1200, height: 420 });
+    await openSurface(page, `surface=${currentSurface}`);
+    await page.evaluate(() => emit({ type: 'snapshot', payload: { ...fixture, operation: { kind: 'merge', token: 'operation-token', files: ['src/conflicted.ts'] } } }));
+    assert.equal(await page.locator('.conflict-state').count(), 1);
+    assert.equal(await page.locator('[data-action="continue-operation"]').isDisabled(), true);
+    await page.locator('[data-open-conflict]').click();
+    await page.locator('[data-resolve-conflict]').click();
+    assert.ok(await page.evaluate(() => window.__vscodeMessages.some(message => message.type === 'openConflict' && message.path === 'src/conflicted.ts')));
+    assert.ok(await page.evaluate(() => window.__vscodeMessages.some(message => message.type === 'resolveConflict' && message.path === 'src/conflicted.ts')));
+    await page.evaluate(() => emit({ type: 'snapshot', payload: { ...fixture, operation: { kind: 'merge', token: 'operation-token', files: [] } } }));
+    await page.locator('[data-action="continue-operation"]').click();
+    assert.ok(await page.evaluate(() => window.__vscodeMessages.some(message => message.type === 'continueOperation' && message.token === 'operation-token')));
+    await page.locator('[data-action="abort-operation"]').click();
+    assert.ok(await page.evaluate(() => window.__vscodeMessages.some(message => message.type === 'abortOperation' && message.token === 'operation-token')));
+  }
+  for (const viewport of [{ width: 240, height: 300 }, { width: 1200, height: 300 }]) {
+    await page.setViewportSize(viewport);
+    await openSurface(page, viewport.width > 600 ? 'surface=history' : 'surface=changes');
+    if (viewport.width > 600) await page.locator('[data-action="stashes"]').click();
+    else { await page.locator('[data-action="toolbar-more"]').click(); await page.locator('[data-action="stashes"]').click(); }
+    await page.waitForSelector('.workflow-stash');
+    const fits = await page.locator('.workflow-dialog').evaluate(element => { const r = element.getBoundingClientRect(), f = element.querySelector('footer').getBoundingClientRect(); return r.top >= 0 && r.bottom <= innerHeight && r.left >= 0 && r.right <= innerWidth && f.bottom <= innerHeight && element.scrollWidth <= element.clientWidth; });
+    assert.equal(fits, true, 'Workflow panels should fit short/narrow windows and retain footer actions.');
+    await page.locator('.workflow-dialog footer button').focus();
+    await page.keyboard.press('Tab');
+    assert.equal(await page.locator('.workflow-dialog header button').evaluate(button => document.activeElement === button), true);
+    await page.keyboard.press('Escape');
+  }
+
   for (const feedbackSurface of ['changes', 'history']) {
     for (const currentSurface of ['changes', 'history']) {
       await openSurface(page, `surface=${currentSurface}`);

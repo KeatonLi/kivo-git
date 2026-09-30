@@ -197,8 +197,17 @@ button:disabled { cursor: default !important; }
 .graph-node.graph-lane-1, .graph-node.graph-lane-2, .graph-node.graph-lane-3, .graph-node.graph-lane-4, .graph-node.graph-lane-5 { stroke: var(--lane-color); }
 .graph-node.merge { fill: var(--accent); stroke: var(--surface-base); stroke-width: 2.7; }
 .graph-node.merge.graph-lane-1, .graph-node.merge.graph-lane-2, .graph-node.merge.graph-lane-3, .graph-node.merge.graph-lane-4, .graph-node.merge.graph-lane-5 { fill: var(--lane-color); }
-.graph-commit { min-width: 0; display: flex; align-items: center; gap: 7px; }
+.graph-commit { min-width: 0; display: flex; align-items: center; gap: 7px; container-type: inline-size; }
 .log-subject { min-width: 0; flex: 1; display: flex; align-items: center; gap: 4px; overflow: hidden; }
+.log-subject > strong { flex: 1 1 0; }
+.log-row-refs { min-width: 0; max-width: 30%; flex: 0 1 auto; display: inline-flex; align-items: center; gap: 3px; overflow: hidden; }
+.log-row-refs .graph-ref { min-width: 0; }
+.ref-overflow { flex: 0 0 auto; font-size: 10px; color: var(--vscode-foreground); }
+.log-row-refs .graph-ref.local.current { color: var(--vscode-textLink-foreground, var(--vscode-foreground)); }
+.log-row-refs .codicon { flex: 0 0 auto; }
+.log-row-refs .graph-ref span:last-child { min-width: 0; }
+@container (max-width: 480px) { .log-subject .unpushed-badge > span { display: none; } }
+@container (max-width: 260px) { .log-row-refs .graph-ref > span { display: none; } }
 .graph-commit strong { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-weight: 560; }
 .log-meta { flex: 0 0 auto; display: inline-flex; align-items: center; gap: 5px; color: var(--muted); font-size: 9px; }
 .log-meta code { color: inherit; font-size: 9px; }
@@ -1402,6 +1411,48 @@ body.commit-zone-resizing, body.commit-zone-resizing * { cursor: row-resize !imp
 .push-review-dialog footer { flex: 0 0 auto; display: flex; justify-content: flex-end; gap: 8px; padding: 10px 16px; border-top: 1px solid var(--border-subtle); }
 .push-review-dialog footer button { display: inline-flex; align-items: center; justify-content: center; gap: 5px; min-height: 30px; padding: 5px 10px; border-radius: 3px; cursor: pointer; font: 11px var(--vscode-font-family); }
 .push-review-cancel { background: transparent; color: var(--vscode-foreground); }
+.workflow-dialog { width: min(640px, 100%); max-height: min(660px, calc(100vh - 24px)); }
+.workflow-dialog .push-review-body { padding-top: 4px; }
+.workflow-dialog footer { flex-wrap: wrap; }
+.workflow-route { display: flex; gap: 8px; align-items: center; margin-bottom: 8px; font-size: 12px; }
+.workflow-route strong { min-width: 0; flex: 1; overflow-wrap: anywhere; font-weight: 500; }
+.workflow-route .codicon { flex: 0 0 auto; }
+.workflow-tabs { display: flex; flex-wrap: wrap; gap: 4px; margin: 12px 0 6px; border-bottom: 1px solid var(--border-subtle); }
+.workflow-tabs button { padding: 7px 6px; background: transparent; color: var(--muted); cursor: pointer; font-size: 11px; }
+.workflow-tabs [aria-selected="true"] { color: var(--vscode-foreground); box-shadow: inset 0 -2px var(--vscode-focusBorder, var(--accent)); }
+.workflow-files { padding: 6px 0 10px; }
+.workflow-commit { display: flex; gap: 9px; padding: 7px 0; align-items: baseline; font-size: 11px; }
+.workflow-commit code { flex: 0 0 auto; font-size: 10px; color: var(--muted); }
+.workflow-commit span { min-width: 0; overflow-wrap: anywhere; }
+.workflow-empty { padding: 16px 0; color: var(--muted); font-size: 11px; }
+.workflow-save { padding-bottom: 12px; border-bottom: 1px solid var(--border-subtle); }
+.workflow-save label { display: block; font-size: 11px; margin-bottom: 6px; }
+.workflow-save > div { display: flex; gap: 6px; margin-bottom: 6px; }
+.workflow-save input { min-width: 0; flex: 1; padding: 5px 6px; background: var(--vscode-input-background); color: var(--vscode-input-foreground, var(--vscode-foreground)); border: 1px solid var(--vscode-input-border, var(--border-subtle)); font: inherit; }
+.workflow-save button { padding: 5px 10px; cursor: pointer; }
+.workflow-stash { width: 100%; min-width: 0; display: flex; flex-direction: column; gap: 5px; padding: 11px 2px; text-align: left; background: transparent; color: var(--vscode-foreground); cursor: pointer; border-bottom: 1px solid var(--border-subtle); }
+.workflow-stash:hover { background: var(--vscode-list-hoverBackground); }
+.workflow-stash > span { min-width: 0; display: flex; align-items: center; gap: 6px; width: 100%; }
+.workflow-stash strong { flex: 1; min-width: 0; font-size: 12px; font-weight: 500; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.workflow-stash small { display: flex; flex-wrap: wrap; gap: 5px 10px; color: var(--muted); font-size: 10px; }
+.workflow-stash-heading { display: flex; flex-direction: column; gap: 6px; margin: 10px 0; overflow-wrap: anywhere; }
+.workflow-stash-heading small { color: var(--muted); font-size: 10px; }
+.conflict-state { flex: 0 0 auto; display: flex; flex-direction: column; min-height: 0; max-height: min(200px, 42vh); gap: 6px; padding: 8px 10px; border-bottom: 1px solid var(--border-subtle); background: color-mix(in srgb, var(--warning) 7%, transparent); font-size: 11px; }
+.conflict-state-heading { display: flex; flex-wrap: wrap; gap: 5px; align-items: center; }
+.conflict-state-heading > .codicon { color: var(--warning); }
+.conflict-state-heading > span { color: var(--muted); margin-left: auto; }
+.conflict-state p { margin: 0; color: var(--muted); font-size: 10px; }
+.conflict-files { min-height: 0; overflow: auto; scrollbar-width: thin; }
+.conflict-file { display: flex; align-items: center; gap: 5px; }
+.conflict-file button { min-width: 0; display: flex; gap: 5px; align-items: center; padding: 4px 0; font: inherit; color: var(--vscode-foreground); background: transparent; cursor: pointer; }
+.conflict-file button:first-child { flex: 1; }
+.conflict-file button:first-child span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.conflict-file button:last-child { flex: 0 0 auto; font-size: 10px; color: var(--vscode-textLink-foreground); }
+.conflict-actions { display: flex; justify-content: flex-end; flex-wrap: wrap; gap: 8px; }
+.conflict-actions button { padding: 4px 8px; cursor: pointer; font: inherit; color: var(--vscode-foreground); background: transparent; }
+.conflict-actions button.primary-button { background: var(--vscode-button-background); color: var(--vscode-button-foreground); }
+.workflow-dialog button:disabled, .conflict-state button:disabled { opacity: .5; cursor: default; }
+.conflict-state button:focus-visible, .workflow-dialog input:focus-visible { outline: 1px solid var(--vscode-focusBorder, var(--accent)); outline-offset: 1px; }
 .push-review-cancel:hover, .push-review-dialog header button:hover { background: var(--vscode-toolbar-hoverBackground, var(--surface-soft)); }
 .push-review-dialog button:focus-visible { outline: 1px solid var(--vscode-focusBorder, var(--accent)); outline-offset: 2px; }
 @media (max-width: 280px) { .push-review-overlay { padding: 8px; } .push-review-dialog { max-height: calc(100vh - 16px); } .push-review-dialog header, .push-review-dialog footer { padding: 10px; } .push-review-body { padding: 0 10px 8px; } .push-review-dialog footer { flex-direction: column-reverse; } .push-review-dialog footer button { width: 100%; } }

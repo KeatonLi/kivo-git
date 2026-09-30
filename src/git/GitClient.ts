@@ -3,6 +3,7 @@ import { promisify } from 'node:util';
 import path from 'node:path';
 import { ChangelistStore } from './ChangelistStore';
 import { parsePorcelainV2 } from './statusParser';
+import { GitWorkflows } from './GitWorkflows';
 import type { BranchSummary, CommitDetails, CommitFile, CommitSummary, GitRef, LineBlame, PullStrategy, PushPreview, RepositorySnapshot } from './types';
 
 const execFileAsync = promisify(execFile);
@@ -19,7 +20,10 @@ export class GitClient {
   private recentCache?: { head: string; commits: CommitSummary[] };
   private outgoingCache = new Map<string, Promise<Set<string>>>();
 
-  constructor(readonly workspaceRoot: string) {}
+  readonly workflows: GitWorkflows;
+  constructor(readonly workspaceRoot: string) {
+    this.workflows = new GitWorkflows(workspaceRoot, (args, options) => this.run(args, undefined, options));
+  }
 
   isChangelistStorageFile(filePath: string): boolean {
     return this.store?.isStorageFile(filePath) ?? false;
@@ -61,12 +65,13 @@ export class GitClient {
 
   async snapshot(commitLimit = 80, historyRef?: string): Promise<RepositorySnapshot> {
     if (!this.store) await this.initialize();
-    const [statusOutput, branches, tags, topLevel, identity] = await Promise.all([
+    const [statusOutput, branches, tags, topLevel, identity, operation] = await Promise.all([
       this.run(['status', '--porcelain=v2', '--branch', '-z', '--untracked-files=all']),
       this.getBranches(),
       this.getTags(),
       this.run(['rev-parse', '--show-toplevel']),
-      this.getCommitIdentity()
+      this.getCommitIdentity(),
+      this.workflows.operationState()
     ]);
     const parsed = parsePorcelainV2(statusOutput);
     const root = topLevel.trim();
@@ -90,6 +95,7 @@ export class GitClient {
       repositoryName: path.basename(root),
       root,
       identity,
+      operation,
       ...parsed,
       changelists: await this.store!.group(parsed.changes),
       branches,
@@ -171,7 +177,7 @@ export class GitClient {
       return empty;
     }
     const refs = await this.getRefs(currentBranch);
-    const output = await this.run(['log', ...(exactRef ? [exactRef] : head.trim() ? ['--all', 'HEAD'] : ['--all']), '--topo-order', '-n', String(safeLimit + 1), '--date=iso-strict', '--name-only', '-z', '--pretty=format:%H%x1f%h%x1f%P%x1f%an%x1f%aI%x1f%s%x1e']);
+    const output = await this.run(['log', ...(exactRef ? [exactRef] : head.trim() ? ['--exclude=refs/stash', '--all', 'HEAD'] : ['--exclude=refs/stash', '--all']), '--topo-order', '-n', String(safeLimit + 1), '--date=iso-strict', '--name-only', '-z', '--pretty=format:%H%x1f%h%x1f%P%x1f%an%x1f%aI%x1f%s%x1e']);
     const commits = this.parseCommitLog(output, refs);
     const result = { key, commits: this.layoutCommits(commits.slice(0, safeLimit)), hasMore: commits.length > safeLimit };
     this.historyCache = result;
@@ -195,7 +201,7 @@ export class GitClient {
     const ageDays = ({ '7d': 7, '30d': 30, '90d': 90 } as Record<string, number>)[filters.age || ''] || 0;
     const head = (await this.run(['rev-parse', '--verify', 'HEAD']).catch(() => '')).trim();
     if (!head && !branches.length && !tags.length) return { commits: [], hasMore: false };
-    const args = ['log', ...(exactRef ? [exactRef] : head ? ['--all', 'HEAD'] : ['--all']), '--topo-order', '-n', String(safeLimit + 1), '--date=iso-strict', '--name-only', '-z', '--pretty=format:%H%x1f%h%x1f%P%x1f%an%x1f%aI%x1f%s%x1e'];
+    const args = ['log', ...(exactRef ? [exactRef] : head ? ['--exclude=refs/stash', '--all', 'HEAD'] : ['--exclude=refs/stash', '--all']), '--topo-order', '-n', String(safeLimit + 1), '--date=iso-strict', '--name-only', '-z', '--pretty=format:%H%x1f%h%x1f%P%x1f%an%x1f%aI%x1f%s%x1e'];
     if (author) args.push(`--author=${author}`);
     if (ageDays) args.push(`--since=${new Date(Date.now() - ageDays * 86400000).toISOString()}`);
     let hashSearch = false;
@@ -205,7 +211,7 @@ export class GitClient {
         if (exactRef && !(await this.run(['merge-base', '--is-ancestor', resolved, exactRef]).then(() => true).catch(() => false))) {
           return { commits: [], hasMore: false };
         }
-        args.splice(1, exactRef ? 1 : head ? 2 : 1, resolved);
+        args.splice(1, exactRef ? 1 : head ? 3 : 2, resolved);
         args.push('-1');
         hashSearch = true;
       }
@@ -434,14 +440,29 @@ export class GitClient {
     await this.run(['--literal-pathspecs', 'update-index', '--force-remove', '--', ...new Set(paths)]);
   }
 
-  async checkout(branchName: string, remote: boolean): Promise<void> {
+  private async checkoutArgs(branchName: string, remote: boolean): Promise<string[]> {
+    const branches = await this.getBranches();
+    if (!branches.some(branch => branch.name === branchName && branch.remote === remote)) throw new Error('This branch no longer exists. Refresh and try again.');
     if (!remote) {
-      await this.run(['switch', branchName]);
-      return;
+      return ['switch', branchName];
     }
     const slash = branchName.indexOf('/');
     const localName = slash >= 0 ? branchName.slice(slash + 1) : branchName;
-    await this.run(['switch', '--track', '-c', localName, branchName]);
+    const local = branches.find(branch => !branch.remote && branch.name === localName);
+    if (local && local.upstream !== branchName) throw new Error(`${localName} already exists and tracks a different branch. Choose its local branch explicitly.`);
+    return local ? ['switch', localName] : ['switch', '--track', '-c', localName, branchName];
+  }
+
+  async checkout(branchName: string, remote: boolean): Promise<void> {
+    if (await this.workflows.operationState()) throw new Error('Finish the current Git operation or conflicts before switching branches.');
+    await this.run(await this.checkoutArgs(branchName, remote));
+  }
+
+  async stashAndCheckout(branchName: string, remote: boolean): Promise<void> {
+    const args = await this.checkoutArgs(branchName, remote);
+    const saved = await this.workflows.saveStash(`Kivo Git: before switching to ${branchName}`);
+    try { await this.run(args); }
+    catch (error) { throw new Error(`${error instanceof Error ? error.message : String(error)}\nYour changes remain saved in stash ${saved.slice(0, 8)}. Open Stashes to restore them.`); }
   }
 
   /**

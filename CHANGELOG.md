@@ -2,6 +2,14 @@
 
 ## Unreleased
 
+## 0.4.0 - 2026-09-30
+
+- Give History commit titles priority over branch labels: show one readable primary ref and summarize the rest, with full names on hover and in commit details.
+- Compare another local or remote branch with the current branch without checkout, inspect each side's unique commits, and open immutable branch-tip file diffs.
+- Save, preview, restore and explicitly delete Git stashes. Include untracked files, preserve staged state, keep saved copies after restore, and offer Stash and Switch for unfinished work.
+- Detect merge, rebase, cherry-pick, revert and stash-restore conflicts; open VS Code's native Merge Editor, stage resolved files, and continue or confirm abort with operation-state revalidation.
+- Add real-Git workflow tests, browser interaction and narrow-view coverage, and a native Merge Editor smoke test in VS Code's Extension Host.
+
 ## 0.3.15 - 2026-09-30
 
 - Keep operation notifications compact at the bottom right, with a dismiss button and a single message instead of stacked full-width bars.

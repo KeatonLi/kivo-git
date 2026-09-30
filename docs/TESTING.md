@@ -22,3 +22,9 @@ npm run test:webview
 Inline blame additionally has focused controller and cache tests for cursor debounce, cancellation, stale results, unsaved edits, non-repository workspaces, and the settings toggle. The Extension Host test verifies the toggle command against VS Code's real configuration API.
 
 The VS Code Web extension host cannot run this extension as-is: Kivo Git uses Node APIs and starts local Git processes. The browser suite therefore tests the real webview front end, while the Extension Development Host suite tests VS Code integration.
+
+## 0.4 workflows
+
+`test/gitWorkflows.integration.test.ts` uses disposable real repositories for branch-tip comparisons, unique commits, remote refs, renames, stash previews (including untracked files), restored index state, checkout prevalidation and failure recovery, stash identity after reflog reordering, merge continuation/abort, linked-worktree rebase, and conflicts from externally started cherry-pick/revert.
+
+Webview E2E covers primary-ref summaries and title space, branch comparison tabs and diff messages, stash save/preview/restore, stale responses, retry, repository changes, conflict controls in both surfaces, and bounded workflow dialogs with keyboard focus containment. The Extension Host suite creates a real Git conflict and verifies that the built-in Merge Editor opens.

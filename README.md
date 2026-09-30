@@ -53,6 +53,15 @@ Kivo Git shows a quiet author, relative time, and commit summary after the curre
 
 Inline blame is on by default. Run **Kivo Git: Toggle Inline Blame** from the Command Palette, or change `ideaGit.inlineBlame.enabled` in Settings, to turn it off or back on.
 
+### Branch comparison, stashes and conflicts
+
+- Right-click another local or remote branch and choose **Compare with Current**. File diffs compare the two branch tips; the two commit tabs show commits unique to each side (up to 80 per side). Opening a diff retains the comparison. No checkout is needed.
+- Open **Stashes** from History's action rail or Commit's **More actions** menu. Save staged/unstaged work and untracked files, preview saved files, and restore their original staged state into a clean working tree. Restoration keeps the saved copy; deletion is a separate confirmed action. Ignored files are left in place.
+- Switching branches with unfinished work offers **Stash and Switch** or **Switch with Changes**. A failed switch keeps the saved stash available for recovery.
+- An in-progress merge, rebase, cherry-pick or revert appears in Commit and History with unresolved files, **Open Merge Editor**, **Mark resolved**, **Continue** and confirmed **Abort** actions. Continuing requires all conflicts to be staged. Conflicts from stash restoration can be resolved here too; their saved copy stays available.
+
+The Merge Editor requires VS Code's built-in Git extension. Use it to edit and save the resolution, then mark the file resolved if it is still listed. Mark resolved stages the complete file. Ordinary commits are unavailable while a Git operation is in progress; use its Continue action.
+
 ### Sync and safety
 
 - Ahead/behind state with fetch, pull, and push actions
