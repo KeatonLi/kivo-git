@@ -1452,6 +1452,37 @@ body.commit-zone-resizing, body.commit-zone-resizing * { cursor: row-resize !imp
 .conflict-actions button { padding: 4px 8px; cursor: pointer; font: inherit; color: var(--vscode-foreground); background: transparent; }
 .conflict-actions button.primary-button { background: var(--vscode-button-background); color: var(--vscode-button-foreground); }
 .workflow-dialog button:disabled, .conflict-state button:disabled { opacity: .5; cursor: default; }
+.parity-mode .commit-toolbar .commit-branch-picker { display: inline-flex; width: auto; min-width: 26px; max-width: 136px; gap: 5px; padding: 0 5px; flex: 0 1 auto; }
+.commit-branch-picker .codicon { flex: 0 0 auto; }
+.commit-branch-name { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 11px; }
+@media (max-width: 330px) { .commit-branch-name { display: none; } }
+
+/* Size columns against the history pane, including user-resized dividers. */
+.parity-mode .log-history-pane { container: kivo-history / inline-size; }
+.log-time-compact { display: none; }
+@container kivo-history (max-width: 640px) {
+  .parity-mode .log-column-header, .parity-mode .graph-row { grid-template-columns: 68px var(--graph-width) minmax(0, 1fr) 84px; }
+  .parity-mode .log-column-header > span:first-child, .parity-mode .log-column-header > span:last-child, .parity-mode .graph-row .log-author { display: block; }
+  .parity-mode .graph-row .log-date { display: block; overflow: hidden; white-space: nowrap; }
+  .parity-mode .graph-commit .log-meta { display: none; }
+  .log-time-full { display: none; }
+  .log-time-compact { display: inline; }
+}
+@container kivo-history (max-width: 440px) {
+  .parity-mode .log-column-header, .parity-mode .graph-row { grid-template-columns: var(--graph-width) minmax(0, 1fr) 84px; }
+  .parity-mode .log-column-header > span:first-child, .parity-mode .graph-row .log-author { display: none; }
+}
+@container kivo-history (max-width: 300px) {
+  .parity-mode .log-column-header, .parity-mode .graph-row { grid-template-columns: var(--graph-width) minmax(0, 1fr); }
+  .parity-mode .log-column-header > span:last-child, .parity-mode .graph-row .log-date { display: none; }
+}
+
+/* Keep unresolved files ahead of the recent-commit preview in short sidebars. */
+.parity-mode .changes-content:has(.conflict-state):not(.recent-collapsed) .commit-lower { max-height: min(288px, 26%, max(33px, calc(100% - 440px))); }
+.parity-mode .changes-content:has(.conflict-state) .commit-changes-tree { min-height: clamp(40px, calc(100vh - 440px), 72px); }
+@media (max-height: 580px) {
+  .parity-mode .changes-content:has(.conflict-state) .commit-panel { flex-basis: 148px; min-height: 148px; }
+}
 .conflict-state button:focus-visible, .workflow-dialog input:focus-visible { outline: 1px solid var(--vscode-focusBorder, var(--accent)); outline-offset: 1px; }
 .push-review-cancel:hover, .push-review-dialog header button:hover { background: var(--vscode-toolbar-hoverBackground, var(--surface-soft)); }
 .push-review-dialog button:focus-visible { outline: 1px solid var(--vscode-focusBorder, var(--accent)); outline-offset: 2px; }

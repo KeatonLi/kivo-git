@@ -2,6 +2,12 @@
 
 ## Unreleased
 
+## 0.4.2 - 2026-09-30
+
+- Keep History commit titles readable as its pane narrows or dividers move: compact dates and progressively hide secondary columns, retaining full timestamps and metadata in hover text and details.
+- Show the current branch in the Commit toolbar where space permits, and reserve changed-file space when conflict controls are visible.
+- Capture Commit, History, Push, branch comparison, Stashes and conflict layouts alongside passing browser interaction tests for visual review before release.
+
 ## 0.4.1 - 2026-09-30
 
 - Initialize the Webview event binder before registering workflow and conflict actions, preserving file selection, drag-and-drop and toolbar interactions on first render.

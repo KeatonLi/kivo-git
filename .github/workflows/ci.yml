@@ -25,5 +25,12 @@ jobs:
       - name: Install Chromium for Webview E2E
         run: npx playwright install --with-deps chromium
       - run: npm run test:webview
+        env:
+          KIVO_CAPTURE_DIR: visual-audit
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: kivo-webview-screenshots
+          path: visual-audit/*.png
       - run: npm run compile
       - run: xvfb-run -a npm run test:extension
