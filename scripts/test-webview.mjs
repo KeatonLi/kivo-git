@@ -681,7 +681,7 @@ try {
 
     await page.setViewportSize({ width: 1200, height: 500 });
     await openSurface(page, 'surface=history');
-    await page.locator('.log-branch-row[data-branch-remote="false"]').first().click({ button: 'right' });
+    await page.locator('.log-branch-row[data-branch-remote="false"]:not(.current)').first().click({ button: 'right' });
     await page.locator('[data-branch-context-action="compare"]').click();
     await page.waitForSelector('[data-workflow-file]');
     await capture('06-branch-comparison');
