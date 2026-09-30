@@ -114,7 +114,7 @@ describe('webview surface composition', () => {
     expect(css).toContain('--idea-hover:');
     expect(css).toContain('--idea-selection:');
     expect(css).toContain('.parity-mode .graph-row:hover:not(.selected)');
-    expect(css).toContain('.graph-loading-row');
+    expect(css).toContain('.graph-load-sentinel');
   });
 
   it('renders active-theme file icons for changed files and keeps a native fallback', async () => {
