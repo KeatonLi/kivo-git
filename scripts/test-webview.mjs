@@ -78,6 +78,14 @@ try {
   assert.equal(await page.locator('.workspace-brief').count(), 0, 'The Commit view should leave repository status to History.');
   assert.equal(await page.locator('.commit-repository-context').count(), 0, 'The lower area should show recent commits without redundant status cards.');
   assert.match(await page.locator('.commit-recent').textContent(), /Recent commits/);
+  assert.equal(await page.locator('[data-recent-commit]').count(), 5, 'The sidebar must show exactly five recent commits.');
+  assert.equal(await page.locator('.commit-recent-branch span:last-child').textContent(), 'feature/keaton/ACKk8s');
+  assert.match(await page.locator('.commit-recent-date').first().textContent(), /^\d{4}-\d{2}-\d{2}$/);
+  assert.match(await page.locator('.commit-recent-row time').first().textContent(), /^\d{2}:\d{2}:\d{2}$/);
+  assert.match(await page.locator('.commit-recent-row time').first().getAttribute('title'), /^\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}$/);
+  assert.equal(await page.locator('.commit-changes-heading small').textContent(), '3 files');
+  assert.equal(await page.locator('.list-heading .count').count(), 0, 'One changelist should not repeat the total count.');
+  assert.equal(await page.locator('.file-group-heading').textContent(), 'Tracked', 'One file group should not repeat the total count.');
   assert.ok((await page.locator('.commit-lower').boundingBox()).height <= 288, 'Recent commits should fit their content instead of reserving a large empty panel.');
   await page.locator('#commit-message').fill('Keep this draft');
   const unselectedColor = await page.locator('.file-row .file-name').first().evaluate((element) => getComputedStyle(element).color);
@@ -93,7 +101,34 @@ try {
   await page.locator('[data-select]').first().uncheck({ force: true });
   await page.locator('#commit-message').fill('');
   await page.locator('[data-recent-commit]').first().click();
-  assert.ok(await page.evaluate(() => window.__vscodeMessages.some((message) => message.type === 'showRecentCommit')), 'Recent commits should continue to open their full History details.');
+  await page.waitForSelector('[data-recent-file]');
+  assert.equal(await page.locator('.commit-recent-preview').count(), 1, 'A recent commit should expand changed files in place.');
+  assert.equal(await page.locator('[data-recent-file]').count(), await page.evaluate(() => fixture.commits[0].paths.length));
+  const firstRecentRequest = await page.evaluate(() => window.__vscodeMessages.find((message) => message.type === 'recentCommitDetails'));
+  await page.locator('[data-recent-file]').first().click();
+  assert.ok(await page.evaluate(() => window.__vscodeMessages.some((message) => message.type === 'openRecentCommitDiff' && message.hash === fixture.commits[0].hash && message.root === fixture.root)), 'Clicking a recent file should open its committed diff in the correct repository.');
+  await page.locator('[data-recent-history]').click();
+  assert.ok(await page.evaluate(() => window.__vscodeMessages.some((message) => message.type === 'showRecentCommit')), 'The expanded preview should still link to full History.');
+  await page.locator('[data-recent-commit]').first().click();
+  assert.equal(await page.locator('.commit-recent-preview').count(), 0, 'Clicking the expanded commit should collapse its files.');
+  await page.locator('[data-recent-commit]').first().click();
+  assert.equal(await page.locator('[data-recent-file]').count(), await page.evaluate(() => fixture.commits[0].paths.length));
+  assert.equal(await page.evaluate(() => window.__vscodeMessages.filter((message) => message.type === 'recentCommitDetails').length), 1, 'Reopening an immutable commit should reuse its cached files.');
+  await page.locator('[data-recent-commit]').first().click();
+  await page.evaluate(() => { window.__holdRecentDetails = true; });
+  await page.locator('[data-recent-commit]').nth(1).click();
+  const secondRecentRequest = await page.evaluate(() => window.__vscodeMessages.filter((message) => message.type === 'recentCommitDetails').at(-1));
+  await page.evaluate(({ old, current }) => {
+    emit({ type: 'recentCommitDetails', root: old.root, requestId: old.requestId, payload: { hash: old.hash, files: [{ path: 'stale.txt', status: 'M' }] } });
+    emit({ type: 'recentCommitDetailsError', root: current.root, requestId: current.requestId, hash: current.hash, message: 'Temporary Git failure' });
+  }, { old: firstRecentRequest, current: secondRecentRequest });
+  assert.equal(await page.locator('[data-recent-file="stale.txt"]').count(), 0, 'A late response for another commit must not replace the preview.');
+  assert.match(await page.locator('.commit-recent-preview').textContent(), /Temporary Git failure/);
+  await page.evaluate(() => { window.__holdRecentDetails = false; });
+  await page.locator('[data-recent-retry]').click();
+  await page.waitForSelector('[data-recent-file]');
+  assert.equal(await page.locator('[data-recent-commit]').nth(1).getAttribute('aria-expanded'), 'true');
+  await page.locator('[data-recent-commit]').nth(1).click();
   const historyIconColor = await page.locator('.commit-toolbar [data-action="show-log"] svg').evaluate((element) => getComputedStyle(element).color);
   const branchIconColor = await page.locator('.commit-toolbar [data-action="branches"]').evaluate((element) => getComputedStyle(element).color);
   assert.equal(historyIconColor, branchIconColor, 'The History shortcut should use the same normal accent as Branches.');
@@ -167,6 +202,8 @@ try {
       repositoryName: 'analytics-platform-with-a-long-repository-name',
       root: '/workspace/analytics-platform-with-a-long-repository-name' } }
   })));
+  await page.evaluate((request) => emit({ type: 'recentCommitDetails', root: request.root, requestId: request.requestId, payload: { hash: request.hash, files: [{ path: 'wrong-repo.txt', status: 'M' }] } }), firstRecentRequest);
+  assert.equal(await page.locator('.commit-recent-preview').count(), 0, 'Responses from a previous repository must not reopen a preview.');
   assert.equal(await page.locator('.commit-repository-name').textContent(), 'analytics-platform-with-a-long-repository-name', 'Switching repositories must update the visible name.');
   await page.setViewportSize({ width: 240, height: 420 });
   const repositoryLayout = await page.locator('.commit-repository-name').evaluate((element) => ({

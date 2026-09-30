@@ -109,6 +109,7 @@
         fixture.changes = [];
         fixture.changelists[0].changes = [];
       }
+      fixture.recentCommits = fixture.commits.slice(0, 5);
       window.__vscodeMessages = [];
       function emit(data) { window.dispatchEvent(new MessageEvent('message', { data })); }
       window.acquireVsCodeApi = () => ({
@@ -128,10 +129,11 @@
             setTimeout(() => emit({ type: 'historySearchResults', requestId: message.requestId, root: fixture.root,
               commits: matches.slice(0, message.limit), hasMore: matches.length > message.limit }), 20);
           }
-          if (message.type === 'commitDetails') {
+          if (message.type === 'commitDetails' || message.type === 'recentCommitDetails') {
+            if (message.type === 'recentCommitDetails' && window.__holdRecentDetails) return;
             const commit = fixture.commits.find((item) => item.hash === message.hash);
             if (!commit) return;
-            setTimeout(() => emit({ type: 'commitDetails', payload: {
+            setTimeout(() => emit({ type: message.type, root: message.root, requestId: message.requestId, payload: {
               hash: commit.hash,
               subject: commit.subject,
               body: commit.hash === fixture.commits[0].hash

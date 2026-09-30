@@ -241,6 +241,22 @@ describe('GitClient integration', () => {
     expect(rootDetails.files.map((file) => file.path)).toContain('alpha.txt');
   });
 
+  it('keeps the five recent HEAD commits independent of History filters and refreshes after commits or checkout', async () => {
+    const root = await createRepository();
+    const initial = await git(root, ['rev-parse', 'HEAD']);
+    await git(root, ['branch', 'old-branch']);
+    for (let index = 0; index < 6; index++) await git(root, ['commit', '--allow-empty', '-m', `main ${index}`]);
+    const client = new GitClient(root);
+    const filtered = await client.snapshot(1, 'old-branch');
+    expect(filtered.commits.map((commit) => commit.hash)).toEqual([initial]);
+    expect(filtered.recentCommits?.map((commit) => commit.subject)).toEqual(['main 5', 'main 4', 'main 3', 'main 2', 'main 1']);
+    expect((await client.snapshot(80)).recentCommits).toEqual(filtered.recentCommits);
+    await git(root, ['commit', '--allow-empty', '-m', 'new tip']);
+    expect((await client.snapshot(1, 'old-branch')).recentCommits?.[0]?.subject).toBe('new tip');
+    await git(root, ['switch', 'old-branch']);
+    expect((await client.snapshot()).recentCommits?.map((commit) => commit.hash)).toEqual([initial]);
+  });
+
   it('can return identical snapshots when switching between refs at the same tip', async () => {
     const root = await createRepository();
     await git(root, ['branch', 'same-tip']);
@@ -259,6 +275,7 @@ describe('GitClient integration', () => {
     const emptyClient = new GitClient(emptyRoot);
     await emptyClient.initialize();
     expect((await emptyClient.snapshot()).commits).toEqual([]);
+    expect((await emptyClient.snapshot()).recentCommits).toEqual([]);
 
     const root = await createRepository();
     await git(root, ['checkout', '--detach']);
@@ -266,6 +283,7 @@ describe('GitClient integration', () => {
     const client = new GitClient(root);
     await client.initialize();
     expect((await client.snapshot()).commits[0]?.subject).toBe('detached revision');
+    expect((await client.snapshot()).recentCommits?.[0]?.subject).toBe('detached revision');
   });
 
   it('reuses history on file changes and refreshes it when Git refs move', async () => {
@@ -275,14 +293,14 @@ describe('GitClient integration', () => {
     const run = vi.spyOn(client as never, 'run');
     await client.snapshot();
     const logCalls = () => run.mock.calls.filter(([args]) => (args as string[])[0] === 'log').length;
-    expect(logCalls()).toBe(1);
+    expect(logCalls()).toBe(2); // History and HEAD's recent commits have independent cached queries.
     await fs.appendFile(path.join(root, 'alpha.txt'), 'working tree only\n');
     expect((await client.snapshot()).changes.length).toBeGreaterThan(0);
-    expect(logCalls()).toBe(1);
+    expect(logCalls()).toBe(2);
     await git(root, ['add', 'alpha.txt']);
     await git(root, ['commit', '-m', 'move branch tip']);
     expect((await client.snapshot()).commits[0]?.subject).toBe('move branch tip');
-    expect(logCalls()).toBe(2);
+    expect(logCalls()).toBe(4);
   });
 
   it('refreshes upstream ahead and behind counts after fetching remote refs', async () => {

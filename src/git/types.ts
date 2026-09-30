@@ -114,6 +114,8 @@ export interface RepositorySnapshot {
   branches: BranchSummary[];
   tags?: GitRef[];
   commits: CommitSummary[];
+  /** Latest five commits reachable from HEAD, independent of the History ref filter. */
+  recentCommits?: CommitSummary[];
   /** True when the repository has more history than the current graph window. */
   commitsHasMore: boolean;
 }

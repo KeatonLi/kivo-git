@@ -16,6 +16,7 @@ export function pullArgs(strategy: PullStrategy): string[] {
 export class GitClient {
   private store?: ChangelistStore;
   private historyCache?: { key: string; commits: CommitSummary[]; hasMore: boolean };
+  private recentCache?: { head: string; commits: CommitSummary[] };
 
   constructor(readonly workspaceRoot: string) {}
 
@@ -74,7 +75,10 @@ export class GitClient {
     const exactRef = selectedBranch
       ? `refs/${selectedBranch.remote ? 'remotes' : 'heads'}/${selectedBranch.name}`
       : selectedTag ? `refs/tags/${selectedTag.name}` : undefined;
-    const commitWindow = await this.getCommits(currentBranch, commitLimit, exactRef);
+    const [commitWindow, recentCommits] = await Promise.all([
+      this.getCommits(currentBranch, commitLimit, exactRef),
+      this.getRecentCommits(parsed.headOid)
+    ]);
     return {
       repositoryName: path.basename(root),
       root,
@@ -84,8 +88,18 @@ export class GitClient {
       branches,
       tags,
       commits: commitWindow.commits,
+      recentCommits,
       commitsHasMore: commitWindow.hasMore
     };
+  }
+
+  private async getRecentCommits(head?: string): Promise<CommitSummary[]> {
+    if (!head) return [];
+    if (this.recentCache?.head === head) return this.recentCache.commits;
+    const output = await this.run(['log', head, '--topo-order', '-n', '5', '--date=iso-strict', '-z', '--pretty=format:%H%x1f%h%x1f%P%x1f%an%x1f%aI%x1f%s%x1e']);
+    const commits = this.layoutCommits(this.parseCommitLog(output, new Map()));
+    this.recentCache = { head, commits };
+    return commits;
   }
 
   private async getBranches(): Promise<BranchSummary[]> {

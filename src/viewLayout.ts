@@ -48,6 +48,8 @@ const messagesBySurface: Record<KivoSurface, ReadonlySet<string>> = {
     'configureUpstream',
     'showLog',
     'showRecentCommit',
+    'recentCommitDetails',
+    'openRecentCommitDiff',
     'openSettings',
     'createChangelist',
     'renameChangelist',

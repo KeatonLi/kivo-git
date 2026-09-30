@@ -73,6 +73,12 @@ const ui = {
   commitZonePercent: clamp(Number(initialRepositoryState.commitZonePercent) || COMMIT_ZONE_DEFAULT_PERCENT, 35, 75),
   commitZoneResized: hasCustomCommitSplit(initialRepositoryState),
   recentCommitsCollapsed: initialRepositoryState.recentCommitsCollapsed === true,
+  recentSelectedHash: undefined,
+  recentDetails: undefined,
+  recentDetailsLoading: false,
+  recentDetailsError: undefined,
+  recentRequestId: 0,
+  recentDetailsCache: new Map(),
   branchGroupsExpanded: {
     local: initialRepositoryState.branchGroupsExpanded?.local !== false,
     remote: initialRepositoryState.branchGroupsExpanded?.remote !== false,
@@ -286,6 +292,7 @@ function restoreRepositoryState(root, state = {}) {
   ui.commitZonePercent = clamp(Number(state.commitZonePercent) || COMMIT_ZONE_DEFAULT_PERCENT, 35, 75);
   ui.commitZoneResized = hasCustomCommitSplit(state);
   ui.recentCommitsCollapsed = state.recentCommitsCollapsed === true;
+  clearRecentCommitPreview(true);
   ui.branchGroupsExpanded = {
     local: state.branchGroupsExpanded?.local !== false,
     remote: state.branchGroupsExpanded?.remote !== false,
@@ -862,11 +869,11 @@ function renderChanges(s) {
     const allSelected = changes.length > 0 && selected === changes.length;
     return `<section class="changelist ${collapsed ? 'collapsed' : ''} ${list.active ? 'active-list' : ''}" data-list-id="${escapeHtml(list.id)}">
       <div class="list-heading"><label class="list-check check"><input type="checkbox" data-select-list="${escapeHtml(list.id)}" aria-label="Select matching files in ${escapeHtml(list.name)}" ${allSelected ? 'checked' : ''} ${ui.busy || !changes.length ? 'disabled' : ''}><span></span></label><button class="list-collapse" data-collapse="${escapeHtml(list.id)}" aria-expanded="${!collapsed}">
-        ${icon('chevron-down', 'disclosure')}<span class="active-dot" title="${list.active ? 'Active changelist' : ''}"></span><span class="list-name">${escapeHtml(list.name)}</span><span class="count">${filtersActive ? `${changes.length}/${list.changes.length}` : list.changes.length}</span>
+        ${icon('chevron-down', 'disclosure')}<span class="active-dot" title="${list.active ? 'Active changelist' : ''}"></span><span class="list-name">${escapeHtml(list.name)}</span>${s.changelists.length > 1 ? `<span class="count">${filtersActive ? `${changes.length}/${list.changes.length}` : list.changes.length}</span>` : ''}
       </button><button class="list-more" data-list-menu="${escapeHtml(list.id)}" aria-label="Actions for ${escapeHtml(list.name)}" aria-expanded="${ui.listMenuId === list.id}">${icon('more')}</button></div>
       <div class="file-list-shell"><div class="file-list ${list.changes.length ? '' : 'empty'}" data-drop-list="${escapeHtml(list.id)}">
-        ${tracked.length ? `<div class="file-group-heading" role="heading" aria-level="3"><span>Tracked</span><span>${tracked.length}</span></div>${tracked.map((change) => renderFile(change, list.id)).join('')}` : ''}
-        ${untracked.length ? `<div class="file-group-heading untracked-group" role="heading" aria-level="3"><span>Untracked</span><span>${untracked.length}</span></div>${untracked.map((change) => renderFile(change, list.id)).join('')}` : ''}
+        ${tracked.length ? `<div class="file-group-heading" role="heading" aria-level="3"><span>Tracked</span>${untracked.length ? `<span>${tracked.length}</span>` : ''}</div>${tracked.map((change) => renderFile(change, list.id)).join('')}` : ''}
+        ${untracked.length ? `<div class="file-group-heading untracked-group" role="heading" aria-level="3"><span>Untracked</span>${tracked.length ? `<span>${untracked.length}</span>` : ''}</div>${untracked.map((change) => renderFile(change, list.id)).join('')}` : ''}
       </div></div><div class="list-menu ${ui.listMenuId === list.id ? 'open' : ''}" role="menu" ${ui.listMenuId === list.id ? '' : 'inert'}>
         ${list.active ? '' : `<button role="menuitem" data-list-action="active" data-list-id="${escapeHtml(list.id)}">Set Active</button>`}
         <button role="menuitem" data-list-action="rename" data-list-id="${escapeHtml(list.id)}" data-list-name="${escapeHtml(list.name)}">Rename</button>
@@ -880,7 +887,7 @@ function renderChanges(s) {
     <div class="commit-upper" id="kivo-commit-upper" ${ui.commitZoneResized && !ui.recentCommitsCollapsed ? `style="flex-basis:${ui.commitZonePercent}%"` : ''}>
       ${renderCommitRepository(s)}
       ${renderCommitToolbar(s)}
-      <div class="commit-changes-heading" role="heading" aria-level="2"><span class="changes-heading-label">${kivoIcon('changes', 'changes-heading-icon')}<span>Changes</span></span><small>${filtersActive ? `${filteredTotal}/${s.changes.length}` : s.changes.length || ''}</small></div>
+      <div class="commit-changes-heading" role="heading" aria-level="2"><span class="changes-heading-label">${kivoIcon('changes', 'changes-heading-icon')}<span>Changes</span></span><small>${filtersActive ? `${filteredTotal}/${s.changes.length}` : s.changes.length} ${s.changes.length === 1 ? 'file' : 'files'}</small></div>
       ${ui.changeSearchOpen ? `<div class="commit-change-search"><input id="change-search" type="search" aria-label="Search changed files by path or status" placeholder="Path or status…" value="${escapeHtml(ui.changeQuery)}"><select id="change-filter" aria-label="Filter changed files by type or Git state"><option value="all" ${ui.changeFilter === 'all' ? 'selected' : ''}>All changes</option><option value="staged" ${ui.changeFilter === 'staged' ? 'selected' : ''}>Staged</option><option value="worktree" ${ui.changeFilter === 'worktree' ? 'selected' : ''}>Working tree</option><option value="modified" ${ui.changeFilter === 'modified' ? 'selected' : ''}>Modified</option><option value="added" ${ui.changeFilter === 'added' ? 'selected' : ''}>Added</option><option value="deleted" ${ui.changeFilter === 'deleted' ? 'selected' : ''}>Deleted</option><option value="renamed" ${ui.changeFilter === 'renamed' ? 'selected' : ''}>Renamed</option><option value="untracked" ${ui.changeFilter === 'untracked' ? 'selected' : ''}>Untracked</option><option value="conflict" ${ui.changeFilter === 'conflict' ? 'selected' : ''}>Conflicts</option></select><kbd>Esc</kbd></div>` : ''}
       <div class="lists commit-changes-tree" id="kivo-commit-changes">${lists || `<div class="commit-empty-list">${filtersActive ? 'No changed files match the current filters' : 'No changes'}</div>`}</div>
       <div class="commit-panel-splitter" data-commit-panel-splitter role="separator" aria-label="Resize changes and commit message" aria-controls="kivo-commit-changes kivo-commit-message" aria-orientation="horizontal" aria-valuemin="${COMMIT_PANEL_MIN_HEIGHT}" aria-valuenow="${Math.round(ui.commitPanelHeight)}" tabindex="0" title="Drag to resize. Double-click to reset."></div>
@@ -919,13 +926,61 @@ function renderCommitReview(s) {
   </div>`;
 }
 
+function clearRecentCommitPreview(clearCache = false) {
+  ui.recentRequestId++;
+  ui.recentSelectedHash = undefined;
+  ui.recentDetails = undefined;
+  ui.recentDetailsLoading = false;
+  ui.recentDetailsError = undefined;
+  if (clearCache) ui.recentDetailsCache.clear();
+}
+
+function selectRecentCommit(hash, retry = false) {
+  if (!ui.snapshot || !recentCommits(ui.snapshot).some((commit) => commit.hash === hash)) return;
+  if (ui.recentSelectedHash === hash && !retry) {
+    clearRecentCommitPreview();
+  } else {
+    clearRecentCommitPreview();
+    ui.recentSelectedHash = hash;
+    ui.recentDetails = ui.recentDetailsCache.get(hash);
+    ui.recentDetailsLoading = !ui.recentDetails;
+    if (ui.recentDetailsLoading) post('recentCommitDetails', { hash, root: ui.snapshot.root, requestId: ui.recentRequestId });
+  }
+  render();
+}
+
+function recentCommits(s) { return (s.recentCommits || s.commits || []).slice(0, 5); }
+
+function renderRecentCommitPreview(commit) {
+  let content = '';
+  if (ui.recentDetailsLoading) content = '<div class="commit-recent-status" role="status">Loading changed files…</div>';
+  else if (ui.recentDetailsError) content = `<div class="commit-recent-status" role="alert">${escapeHtml(ui.recentDetailsError)} <button data-recent-retry="${escapeHtml(commit.hash)}">Retry</button></div>`;
+  else if (ui.recentDetails) {
+    const files = ui.recentDetails.files || [];
+    content = `<div class="commit-recent-file-count">${files.length} ${files.length === 1 ? 'changed file' : 'changed files'}</div>${files.slice(0, 8).map((file) => {
+      const kind = ({ A: 'added', D: 'deleted', R: 'renamed', C: 'added' })[file.status?.[0]] || 'modified';
+      const label = ({ added: 'Added', deleted: 'Deleted', renamed: 'Renamed', modified: 'Modified' })[kind];
+      return `<button class="commit-recent-file ${kind}" data-recent-file="${escapeHtml(file.path)}" data-original-path="${escapeHtml(file.originalPath || '')}" data-kind="${escapeHtml(file.status || '')}" title="${label}: ${escapeHtml(file.originalPath ? `${file.originalPath} → ${file.path}` : file.path)}" aria-label="${label}: ${escapeHtml(file.path)}; view committed diff">${renderFileTypeIcon(file, ui.recentDetails.fileIcons)}<span>${escapeHtml(file.path)}</span></button>`;
+    }).join('')}${files.length > 8 ? `<div class="commit-recent-status">${files.length - 8} more in History</div>` : ''}`;
+  }
+  return `<div class="commit-recent-preview" id="recent-${escapeHtml(commit.hash)}" aria-busy="${ui.recentDetailsLoading}">${content}<button class="commit-recent-history" data-recent-history="${escapeHtml(commit.hash)}">Open in History ${icon('arrow-right')}</button></div>`;
+}
+
 function renderRecentCommits(s) {
-  const commits = (s.commits || []).slice(0, 5);
+  const commits = recentCommits(s);
+  let previousDate;
   return `<section class="commit-recent" aria-label="Recent commits">
     <div class="commit-lower-heading"><button class="commit-recent-toggle" data-action="toggle-recent-commits" aria-label="${ui.recentCommitsCollapsed ? 'Expand' : 'Collapse'} recent commits" aria-expanded="${!ui.recentCommitsCollapsed}" aria-controls="kivo-recent-list">${icon(ui.recentCommitsCollapsed ? 'chevron-right' : 'chevron-down')}<span>Recent commits</span></button><button class="commit-recent-view-all" data-action="show-log" aria-label="Show all commit history">View all</button></div>
-    <div class="commit-recent-list" id="kivo-recent-list" ${ui.recentCommitsCollapsed ? 'hidden' : ''}>${commits.length ? commits.map((commit) => `<button class="commit-recent-row" data-recent-commit="${escapeHtml(commit.hash)}" title="Open ${escapeHtml(commit.subject)} in History">
-      <span class="commit-recent-node" aria-hidden="true"></span><span class="commit-recent-copy"><strong title="${escapeHtml(commit.subject)}">${escapeHtml(commit.subject)}</strong><span class="commit-recent-meta"><code>${escapeHtml(commit.shortHash)}</code><span class="commit-recent-author" title="${escapeHtml(commit.author)}">${escapeHtml(commit.author)}</span><time datetime="${escapeHtml(commit.date)}" title="${absoluteTime(commit.date)}">${absoluteTime(commit.date)}</time></span></span>
-    </button>`).join('') : '<div class="commit-recent-empty">No commits yet</div>'}</div>
+    <div class="commit-recent-list" id="kivo-recent-list" ${ui.recentCommitsCollapsed ? 'hidden' : ''}><div class="commit-recent-branch" title="Recent commits on ${escapeHtml(s.branch)}">${icon('git-branch')}<span>${escapeHtml(s.branch || 'HEAD')}</span></div>${commits.length ? commits.map((commit) => {
+      const timestamp = absoluteTime(commit.date);
+      const date = timestamp.split(' ')[0];
+      const heading = previousDate !== date ? `<div class="commit-recent-date">${date}</div>` : '';
+      previousDate = date;
+      const expanded = ui.recentSelectedHash === commit.hash;
+      return `<div class="commit-recent-entry" data-hash="${escapeHtml(commit.hash)}">${heading}<button class="commit-recent-row" data-recent-commit="${escapeHtml(commit.hash)}" aria-expanded="${expanded}" ${expanded ? `aria-controls="recent-${escapeHtml(commit.hash)}"` : ''} title="${expanded ? 'Hide' : 'Show'} changed files · ${escapeHtml(commit.subject)}">
+        <span class="commit-recent-node" aria-hidden="true"></span><span class="commit-recent-copy"><strong title="${escapeHtml(commit.subject)}">${escapeHtml(commit.subject)}</strong><span class="commit-recent-meta"><code>${escapeHtml(commit.shortHash)}</code><span class="commit-recent-author" title="${escapeHtml(commit.author)}">${escapeHtml(commit.author)}</span><time datetime="${escapeHtml(commit.date)}" title="${timestamp}">${timestamp.split(' ')[1] || '—'}</time></span></span>
+      </button>${expanded ? renderRecentCommitPreview(commit) : ''}</div>`;
+    }).join('') : '<div class="commit-recent-empty">No commits yet</div>'}</div>
   </section>`;
 }
 
@@ -1968,7 +2023,13 @@ function bind() {
   once('[data-graph-list]', 'scroll', onGraphScroll);
   bindGraphViewport();
   once('[data-commit]', 'click', (event) => selectCommit(event.currentTarget.dataset.commit));
-  once('[data-recent-commit]', 'click', (event) => post('showRecentCommit', { hash: event.currentTarget.dataset.recentCommit }));
+  once('[data-recent-commit]', 'click', (event) => selectRecentCommit(event.currentTarget.dataset.recentCommit));
+  once('[data-recent-retry]', 'click', (event) => selectRecentCommit(event.currentTarget.dataset.recentRetry, true));
+  once('[data-recent-history]', 'click', (event) => post('showRecentCommit', { hash: event.currentTarget.dataset.recentHistory }));
+  once('[data-recent-file]', 'click', (event) => {
+    const file = event.currentTarget.dataset;
+    post('openRecentCommitDiff', { root: ui.snapshot.root, hash: ui.recentSelectedHash, path: file.recentFile, originalPath: file.originalPath, kind: file.kind });
+  });
   once('[data-commit]', 'keydown', (event) => {
     if (event.key === 'ContextMenu' || (event.shiftKey && event.key === 'F10')) {
       const bounds = event.currentTarget.getBoundingClientRect();
@@ -2758,6 +2819,7 @@ window.addEventListener('message', (event) => {
       toast('Repository changed during review. Check the selected files again.', 'error');
     }
     const previousRoot = ui.snapshot?.root;
+    const previousBranch = ui.snapshot?.branch;
     const nextRoot = message.payload.root;
     if (previousRoot && previousRoot !== nextRoot) saveRepositoryState(previousRoot);
     if (previousRoot !== nextRoot) {
@@ -2767,6 +2829,8 @@ window.addEventListener('message', (event) => {
     lastSnapshot = fingerprint;
     ui.emptyMessage = undefined;
     ui.snapshot = message.payload;
+    if (previousRoot === nextRoot && previousBranch !== message.payload.branch) clearRecentCommitPreview(true);
+    else if (ui.recentSelectedHash && !recentCommits(message.payload).some((commit) => commit.hash === ui.recentSelectedHash)) clearRecentCommitPreview();
     ui.graphLoadingMore = false;
     ui.historyRefLoading = false;
     if (surface === 'history' && historySearchActive() && ui.historySearch?.key !== historySearchKey()) requestHistorySearch(true, 0);
@@ -2798,6 +2862,7 @@ window.addEventListener('message', (event) => {
   }
   if (message.type === 'empty') {
     persist();
+    clearRecentCommitPreview(true);
     ui.snapshot = undefined;
     ui.emptyMessage = message.message;
     ui.graphLoadingMore = false;
@@ -2823,6 +2888,15 @@ window.addEventListener('message', (event) => {
     ui.syncPhase = message.phase;
     ui.lastFetchedAt = message.lastFetchedAt;
     ui.syncError = message.error;
+    render();
+  }
+  if (message.type === 'recentCommitDetails' || message.type === 'recentCommitDetailsError') {
+    const hash = message.payload?.hash || message.hash;
+    if (message.root !== ui.snapshot?.root || message.requestId !== ui.recentRequestId || hash !== ui.recentSelectedHash) return;
+    ui.recentDetailsLoading = false;
+    ui.recentDetailsError = message.type === 'recentCommitDetailsError' ? message.message || 'Unable to load changed files.' : undefined;
+    ui.recentDetails = message.type === 'recentCommitDetails' ? message.payload : undefined;
+    if (ui.recentDetails) ui.recentDetailsCache.set(hash, ui.recentDetails);
     render();
   }
   if (message.type === 'commitDetails') {

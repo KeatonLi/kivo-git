@@ -34,7 +34,7 @@ describe('Kivo Git two-surface routing', () => {
   });
 
   it('keeps file-specific navigation in the Changes surface', () => {
-    for (const message of ['showFileHistory', 'showBranchHistory', 'revealInExplorer']) {
+    for (const message of ['showFileHistory', 'showBranchHistory', 'revealInExplorer', 'recentCommitDetails', 'openRecentCommitDiff']) {
       expect(isMessageAllowedOnSurface('changes', message)).toBe(true);
       expect(isMessageAllowedOnSurface('history', message)).toBe(false);
     }

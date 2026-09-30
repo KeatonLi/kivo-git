@@ -2,6 +2,13 @@
 
 ## Unreleased
 
+## 0.3.12 - 2026-09-30
+
+- Show the current branch's latest five commits independently of History filters; click a commit to preview its changed files, then open a file diff or full History.
+- Group recent commits by absolute date and show compact times with seconds, keeping the full timestamp on hover.
+- Remove redundant counts for a single changelist or file group; retain counts when they distinguish multiple lists or tracked/untracked groups.
+- Cache recent commit files, support retry, and ignore late responses after selecting another commit or repository.
+
 ## 0.3.11 - 2026-09-30
 
 - Show the selected repository in a compact header above Commit actions, with the full path on hover and a clickable picker in multi-repository workspaces.

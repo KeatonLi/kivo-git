@@ -13,6 +13,8 @@ type WebviewMessage =
   | { type: 'searchHistory'; requestId: number; filters: { query?: string; author?: string; age?: string; path?: string; ref?: string }; limit: number }
   | { type: 'pull'; strategy: PullStrategy }
   | { type: 'commitDetails'; hash: string }
+  | { type: 'recentCommitDetails'; hash: string; root: string; requestId: number }
+  | { type: 'openRecentCommitDiff'; hash: string; root: string; path: string; originalPath?: string; kind?: string }
   | { type: 'showRecentCommit'; hash: string }
   | { type: 'openDiff'; path: string; originalPath?: string; kind?: string; preview?: boolean }
   | { type: 'openStagedDiff' | 'openUnstagedDiff'; path: string }
@@ -570,7 +572,7 @@ export class IdeaGitViewProvider implements vscode.WebviewViewProvider, vscode.T
       return;
     }
     if (message.type === 'showRecentCommit') {
-      if (!this.lastSnapshot?.commits.some((commit) => commit.hash === message.hash)) return;
+      if (![...(this.lastSnapshot?.recentCommits || []), ...(this.lastSnapshot?.commits || [])].some((commit) => commit.hash === message.hash)) return;
       this.pendingHistoryCommitHash = message.hash;
       await this.showLog();
       await this.deliverPendingNavigation('history');
@@ -617,6 +619,27 @@ export class IdeaGitViewProvider implements vscode.WebviewViewProvider, vscode.T
           // A different ref can produce byte-identical commits; still acknowledge the selection.
           this.coordinator.reset();
           await this.refresh(true);
+          return;
+        case 'recentCommitDetails': {
+          if (message.root !== this.lastSnapshot?.root || this.selectedWorkspace()?.uri.fsPath !== client.workspaceRoot ||
+              !this.lastSnapshot?.recentCommits?.some((commit) => commit.hash === message.hash) ||
+              !Number.isSafeInteger(message.requestId) || message.requestId < 0) return;
+          const root = message.root;
+          try {
+            const details = await client.commitDetails(message.hash);
+            if (this.lastSnapshot?.root !== root || this.selectedWorkspace()?.uri.fsPath !== client.workspaceRoot) return;
+            const view = this.views.get(surface);
+            await this.postToView(surface, { type: 'recentCommitDetails', root, requestId: message.requestId,
+              payload: { ...details, fileIcons: view ? this.fileIconTheme.iconsFor(view.webview, details.files.map((file) => file.path)) : {} } });
+          } catch (error) {
+            await this.postToView(surface, { type: 'recentCommitDetailsError', root, requestId: message.requestId, hash: message.hash, message: this.errorText(error) });
+          }
+          return;
+        }
+        case 'openRecentCommitDiff':
+          if (message.root !== this.lastSnapshot?.root || this.selectedWorkspace()?.uri.fsPath !== client.workspaceRoot ||
+              !this.lastSnapshot?.recentCommits?.some((commit) => commit.hash === message.hash)) return;
+          await this.openCommitDiff(client, message.hash, message.path, message.originalPath, message.kind);
           return;
         case 'commitDetails':
           try {
@@ -1201,6 +1224,7 @@ export class IdeaGitViewProvider implements vscode.WebviewViewProvider, vscode.T
 
   private async openCommitDiff(client: GitClient, hash: string, filePath: string, originalPath?: string, kind?: string): Promise<void> {
     const details = await client.commitDetails(hash);
+    if (this.selectedWorkspace()?.uri.fsPath !== client.workspaceRoot) return;
     const parent = details.parents[0];
     const oldUri = kind === 'A' || !parent
       ? this.revisionUri(originalPath ?? filePath, 'empty=1')

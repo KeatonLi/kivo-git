@@ -11,7 +11,8 @@ describe('visual parity fixture', () => {
     expect(fixture).toContain('/media/graph-layout.js');
     expect(fixture).toContain('/media/main.js');
     expect(fixture).toContain("get('surface') === 'changes' ? 'changes' : 'history'");
-    expect(fixture).toContain("type: 'commitDetails'");
+    expect(fixture).toContain("message.type === 'commitDetails' || message.type === 'recentCommitDetails'");
+    expect(fixture).toContain('type: message.type');
   });
 
   it('provides empty-list state and records messages for browser E2E assertions', async () => {
