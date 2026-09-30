@@ -10,7 +10,9 @@ Polish priorities are readable commit titles, predictable layout at narrow/short
 
 Before release, verify the real Git tests, Webview interaction suite, native extension-host entry points, package contents and current screenshots. Screenshots are fixtures, and do not prove operating-system-specific credential or Trash behavior.
 
-## Proposed 0.5: Repository Insights
+The current feature set is sufficient for the user's daily workflow. Upcoming patches focus on interaction quality and stability. Repository Insights remains an optional future scope rather than a scheduled 0.5 feature.
+
+## Deferred option: Repository Insights
 
 Open a separate editor tab. Default to the current branch and the last 30 days, with explicit repository-wide scope and author/date filters.
 

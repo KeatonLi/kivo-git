@@ -116,8 +116,8 @@
       window.__pushReviewId = 0;
       function emit(data) { window.dispatchEvent(new MessageEvent('message', { data })); }
       window.acquireVsCodeApi = () => ({
-        getState: () => ({}),
-        setState: () => {},
+        getState: () => JSON.parse(sessionStorage.getItem('kivo-fixture-state') || '{}'),
+        setState: (state) => { window.__vscodeState = state; },
         postMessage: (message) => {
           window.__vscodeMessages.push(message);
           if (message.type === 'workflowRequest' && !window.__holdWorkflow) {
