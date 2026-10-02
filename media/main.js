@@ -839,7 +839,7 @@ function renderFileContextMenu() {
   const list = ui.snapshot?.changelists.find((candidate) => candidate.id === menu.listId);
   const partialDiff = change.staged && change.kind !== 'conflict' && change.workingTreeStatus !== '.' && change.workingTreeStatus !== 'R';
   const width = 278;
-  const height = (list?.changes.length && list.changes.length > 1 ? 278 : 248) + (partialDiff ? 52 : 0);
+  const height = (list?.changes.length && list.changes.length > 1 ? 278 : 248) + (partialDiff ? 52 : 0) + (change.kind === 'untracked' ? 28 : 0);
   const left = clamp(menu.x, 8, Math.max(8, window.innerWidth - width - 8));
   const top = clamp(menu.y, 8, Math.max(8, window.innerHeight - height - 8));
   const openFileDisabled = change.kind === 'deleted' || ui.busy;
@@ -856,6 +856,7 @@ function renderFileContextMenu() {
     <button role="menuitem" data-file-context-action="history">${icon('history')}<span>Show File History</span></button>
     <button role="menuitem" data-file-context-action="reveal" ${change.kind === 'deleted' ? 'disabled' : ''}>${icon('folder-opened')}<span>Reveal in Explorer</span></button>
     <div class="context-menu-separator" role="separator"></div>
+    ${change.kind === 'untracked' ? `<button role="menuitem" data-file-context-action="track" ${ui.busy ? 'disabled' : ''}>${icon('add')}<span>Track and Stage</span></button>` : ''}
     <button role="menuitem" data-file-context-action="move" ${ui.busy ? 'disabled' : ''}>${icon('arrow-swap')}<span>Move to Changelist…</span></button>
     ${list?.changes.length && list.changes.length > 1 ? `<button role="menuitem" data-file-context-action="select-list" ${ui.busy ? 'disabled' : ''}>${icon('list-selection')}<span>Select All in Changelist</span></button>` : ''}
     <button role="menuitem" data-file-context-action="copy-path">${icon('copy')}<span>Copy Relative Path</span></button>
@@ -1251,6 +1252,7 @@ function runFileContextAction(event) {
   if (action === 'move' && !ui.busy) {
     post('moveFileToChangelist', { path: change.path });
   }
+  if (action === 'track' && !ui.busy && change.kind === 'untracked') post('trackFile', { path: change.path });
   if (action === 'select-list') {
     const list = ui.snapshot?.changelists.find((candidate) => candidate.id === menu.listId);
     if (list) {

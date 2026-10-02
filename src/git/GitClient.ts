@@ -376,6 +376,14 @@ export class GitClient {
     }
   }
 
+  async trackFile(filePath: string): Promise<void> {
+    const status = parsePorcelainV2(await this.run(['status', '--porcelain=v2', '-z', '--untracked-files=all']));
+    if (!status.changes.some((change) => change.path === filePath && change.kind === 'untracked')) {
+      throw new Error('This file is no longer untracked. Refresh and try again.');
+    }
+    await this.run(['add', '--', filePath]);
+  }
+
   private async getCommitIdentity(): Promise<{ name: string; email: string; ready: boolean }> {
     const [author, committer] = await Promise.all([
       this.run(['var', 'GIT_AUTHOR_IDENT']).catch(() => ''),

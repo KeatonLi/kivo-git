@@ -16,6 +16,7 @@ type WebviewMessage =
   | { type: 'openDiff'; path: string; originalPath?: string; kind?: string; preview?: boolean }
   | { type: 'openStagedDiff' | 'openUnstagedDiff'; path: string }
   | { type: 'openFile'; path: string }
+  | { type: 'trackFile'; path: string }
   | { type: 'copyPath'; path: string }
   | { type: 'moveFileToChangelist'; path: string }
   | { type: 'moveSelectedFilesToChangelist'; paths: string[] }
@@ -42,7 +43,7 @@ type WebviewMessage =
   | { type: 'deleteChangelist'; id: string; name: string }
   | { type: 'setActiveChangelist'; id: string }
   | { type: 'moveFiles'; paths: string[]; listId: string };
-type OperationKind = 'commit' | 'checkout' | 'branch' | 'tag' | 'changelist' | 'move' | 'fetch' | 'pull' | 'push';
+type OperationKind = 'commit' | 'checkout' | 'branch' | 'tag' | 'changelist' | 'move' | 'track' | 'fetch' | 'pull' | 'push';
 type WebviewRepositorySnapshot = RepositorySnapshot & { fileIcons: Record<string, WebviewFileIcon> };
 const HISTORY_PAGE_SIZE = 80;
 
@@ -407,6 +408,9 @@ export class IdeaGitViewProvider implements vscode.WebviewViewProvider, vscode.T
           return;
         case 'openFile':
           await this.openFile(message.path);
+          return;
+        case 'trackFile':
+          await this.operation('track', `Tracking ${message.path}…`, () => client.trackFile(message.path), `Tracked and staged ${message.path}`);
           return;
         case 'copyPath':
           await vscode.env.clipboard.writeText(message.path);

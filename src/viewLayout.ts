@@ -33,6 +33,7 @@ const messagesBySurface: Record<KivoSurface, ReadonlySet<string>> = {
     'openStagedDiff',
     'openUnstagedDiff',
     'openFile',
+    'trackFile',
     'copyPath',
     'moveFileToChangelist',
     'moveSelectedFilesToChangelist',

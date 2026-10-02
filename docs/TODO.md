@@ -102,6 +102,7 @@ Goal: reach strong IDE parity for the operations developers perform every day.
   - [x] Filter staged index changes and working-tree edits without changing the index; ignored files remain outside the current status snapshot.
 - [ ] **P1** Show index and working-tree state separately when both exist.
 - [ ] **P1** Add track, ignore, delete, rollback, and compare actions for unversioned files.
+  - [x] Track and stage an unversioned file from its Commit context menu, after confirming it is still untracked. Ignore, delete, rollback, and compare remain open.
 - [ ] **P1** Detect externally staged changes without silently changing their meaning.
 - [ ] **P1** Support an optional staging-area workflow without destroying saved changelists.
 - [ ] **P2** Move individual hunks and lines between changelists.
