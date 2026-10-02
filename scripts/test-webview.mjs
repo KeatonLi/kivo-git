@@ -63,7 +63,10 @@ async function historyReadingPosition(page) {
 
 try {
   await waitForServer();
-  browser = await chromium.launch({ headless: true, args: ['--no-sandbox'] });
+  browser = await chromium.launch({
+    ...(process.env.KIVO_CHROMIUM_EXECUTABLE_PATH ? { executablePath: process.env.KIVO_CHROMIUM_EXECUTABLE_PATH } : {}),
+    headless: true, args: ['--no-sandbox']
+  });
   page = await browser.newPage({ viewport: { width: 360, height: 820 } });
   const pageErrors = [];
   page.on('pageerror', (error) => pageErrors.push(error.message));
@@ -117,7 +120,7 @@ try {
   await page.getByRole('button', { name: 'Show 3', exact: true }).click();
   assert.equal(await page.locator('.commit-recent-row.unpushed .unpushed-badge').count(), 3, 'Exact outgoing commits should have a visible marker in Recent commits.');
   assert.match(await page.locator('.commit-recent-row.unpushed .unpushed-badge').first().getAttribute('title'), /origin\/feature\/keaton\/ACKk8s/);
-  assert.equal(await page.locator('.commit-header-branch span').textContent(), 'feature/keaton/ACKk8s');
+  assert.equal(await page.locator('.commit-header-branch span:last-child').textContent(), 'feature/keaton/ACKk8s');
   assert.match(await page.locator('.commit-recent-row time').first().textContent(), /^(\d{2}:\d{2}|\d{2}-\d{2})$/);
   assert.match(await page.locator('.commit-recent-row time').first().getAttribute('title'), /^\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}$/);
   assert.equal(await page.locator('.commit-changes-heading small').textContent(), '3 files');
@@ -194,10 +197,12 @@ try {
       };
     });
     assert.equal(layout.actionsVisible, true, 'The Commit actions must remain visible in short or narrow sidebars.');
+    assert.equal(await page.locator('.commit-actions').evaluate(element => [...element.querySelectorAll('button')].every(button => button.scrollHeight <= button.clientHeight && button.scrollWidth <= button.clientWidth)), true, 'Commit button labels must fit without wrapping or clipping.');
     assert.equal(layout.horizontalOverflow, false, 'The sidebar must not scroll horizontally.');
     assert.ok(layout.lowerHeight <= 288, 'Tall sidebars must not stretch the recent list into unused space.');
   }
   await page.setViewportSize({ width: 360, height: 820 });
+  await page.waitForFunction(() => Math.round(document.querySelector('#commit-message').getBoundingClientRect().height) === 64);
   assert.equal(Math.round((await page.locator('#commit-message').boundingBox()).height), 64, 'The editor should be compact by default.');
   await page.locator('#commit-message').fill('Preserve draft during resize');
   await page.locator('[data-select]').first().check({ force: true });
@@ -712,7 +717,7 @@ try {
   });
   const afterRefresh = await historyReadingPosition(page);
   assert.equal(afterRefresh.hash, beforeRefresh.hash, 'New commits above the viewport must keep the same visible commit.');
-  assert.ok(Math.abs(afterRefresh.top - beforeRefresh.top) <= 1, 'New commits must retain the visible commit screen position.');
+  assert.ok(Math.abs(afterRefresh.offset - beforeRefresh.offset) <= 1, 'New commits must retain the visible commit screen position.');
 
   await page.setViewportSize({ width: 1200, height: 500 });
   await openSurface(page, 'surface=history');
@@ -907,6 +912,8 @@ try {
     await capture('09-pull-menu');
     await page.keyboard.press('Escape');
     await dragVertical(page, '[data-commit-panel-splitter]', -70);
+    const resizedActions = await page.locator('.commit-actions').boundingBox();
+    assert.ok(resizedActions.y + resizedActions.height <= 820, 'Expanded Message must keep the commit actions inside the view.');
     await capture('10-message-resized');
 
     await page.setViewportSize({ width: 1200, height: 500 });
@@ -917,6 +924,39 @@ try {
     });
     await page.waitForSelector('.commit-file');
     await capture('11-history-light');
+
+    await page.setViewportSize({ width: 360, height: 820 });
+    await openSurface(page, 'surface=changes');
+    await page.evaluate(() => {
+      document.body.classList.add('vscode-light');
+      document.documentElement.style.cssText = '--vscode-sideBar-background:#f3f3f3;--vscode-panel-background:#fff;--vscode-editor-background:#fff;--vscode-foreground:#333;--vscode-descriptionForeground:#616161;--vscode-input-background:#fff;--vscode-input-foreground:#333;--vscode-input-border:#cecece;--vscode-panel-border:#ddd;--vscode-list-hoverBackground:#e8e8e8;--vscode-list-activeSelectionBackground:#cce8ff;--vscode-list-activeSelectionForeground:#111;--vscode-textLink-foreground:#005fb8;--vscode-toolbar-hoverBackground:#e8e8e8;--vscode-gitDecoration-addedResourceForeground:#267f38;--vscode-gitDecoration-modifiedResourceForeground:#895503;--vscode-gitDecoration-deletedResourceForeground:#b52020;--vscode-button-background:#005fb8;--vscode-button-foreground:#fff;';
+    });
+    await capture('12-commit-light');
+    await page.setViewportSize({ width: 240, height: 420 });
+    const shortActions = await page.locator('.commit-actions').boundingBox();
+    assert.ok(shortActions.y + shortActions.height <= 420, 'Short light-theme sidebars must keep commit actions accessible.');
+    await capture('13-commit-short');
+
+    await page.setViewportSize({ width: 360, height: 820 });
+    await openSurface(page, 'surface=changes');
+    await page.evaluate(() => {
+      document.body.classList.add('vscode-high-contrast');
+      document.documentElement.style.cssText = '--vscode-sideBar-background:#000;--vscode-panel-background:#000;--vscode-foreground:#fff;--vscode-descriptionForeground:#eee;--vscode-input-background:#000;--vscode-input-foreground:#fff;--vscode-input-border:#fff;--vscode-panel-border:#fff;--vscode-focusBorder:#f38518;--vscode-list-hoverBackground:#222;--vscode-list-activeSelectionBackground:#000;--vscode-list-activeSelectionForeground:#fff;--vscode-textLink-foreground:#6fc3df;--vscode-button-background:#007acc;--vscode-button-foreground:#fff;';
+    });
+    await page.locator('[data-select]').first().check({ force: true });
+    await page.locator('#commit-message').fill('fix: review the selected files');
+    await capture('14-commit-contrast');
+    await page.emulateMedia({ reducedMotion: 'reduce' });
+    await page.locator('[data-action="pull-menu"]').click();
+    assert.equal(await page.locator('.sync-menu.open').evaluate(element => getComputedStyle(element).transitionDuration), '0s', 'Reduced motion must remove menu transitions.');
+    await page.keyboard.press('Escape');
+    await page.emulateMedia({ reducedMotion: 'no-preference' });
+
+    await page.goto(`${baseUrl}/test/visual-preview.html?surface=changes&state=loading`);
+    await page.waitForSelector('.repository-loading');
+    await capture('15-loading');
+    await openSurface(page, 'surface=changes&state=empty');
+    await capture('16-clean');
   }
 
   assert.deepEqual(pageErrors, [], 'The webview should not throw browser runtime errors.');

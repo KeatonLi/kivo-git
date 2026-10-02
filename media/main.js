@@ -157,6 +157,8 @@ let graphViewportFrame;
 let graphScrollFrame;
 let commitScrollTimer;
 let renderedRoot;
+let commitResizeObserver;
+let observedCommitUpper;
 const reducedMotion = window.matchMedia('(prefers-reduced-motion: reduce)');
 const runningMotion = new Set();
 const elementMotion = new WeakMap();
@@ -862,6 +864,17 @@ function render() {
   bind();
   positionPullMenu();
   updateCommitMessageBudget();
+  bindCommitViewport();
+}
+
+function bindCommitViewport() {
+  const upper = app.querySelector('.commit-upper');
+  if (upper === observedCommitUpper) return;
+  commitResizeObserver?.disconnect();
+  observedCommitUpper = upper;
+  if (!upper) return;
+  commitResizeObserver = new ResizeObserver(updateCommitMessageBudget);
+  commitResizeObserver.observe(upper);
 }
 
 function positionPullMenu() {
@@ -1027,13 +1040,11 @@ function renderChanges(s) {
       <div class="lists commit-changes-tree" id="kivo-commit-changes">${lists}${!filteredTotal ? `<div class="commit-empty-list" role="status">${icon(filtersActive ? 'search' : 'check')}<strong>${filtersActive ? 'No matching files' : 'Working tree clean'}</strong><span>${filtersActive ? 'Try another path or clear your filters.' : 'Your changes will appear here.'}</span>${filtersActive ? '<button class="text-button" data-action="clear-change-filters">Clear filters</button>' : ''}</div>` : ''}</div>
       <div class="commit-panel-splitter" data-commit-panel-splitter role="separator" aria-label="Resize changes and commit message" aria-controls="kivo-commit-changes kivo-commit-message" aria-orientation="horizontal" aria-valuemin="${COMMIT_PANEL_MIN_HEIGHT}" aria-valuenow="${Math.round(ui.commitMessageHeight)}" tabindex="0" title="Drag to resize. Double-click to reset."></div>
       <footer class="commit-panel ${ui.commitMessageHeight === 0 ? 'message-collapsed' : ''}" id="kivo-commit-message" style="--commit-message-height:${Math.round(ui.commitMessageHeight)}px">
-      <div class="commit-message-heading"><button class="commit-message-label" data-action="edit-commit-message" aria-controls="commit-message" title="Write a commit message">Message</button>${renderSelectionStatus()}</div>
+      <div class="commit-message-heading"><button class="commit-message-label" data-action="edit-commit-message" aria-controls="commit-message" title="Write a commit message">Message</button><button class="idea-toolbar-button commit-message-tool" data-action="reuse-commit-message" aria-label="Reuse a recent commit message" title="Reuse a recent commit message" ${ui.busy ? 'disabled' : ''}>${icon('history')}</button><button class="idea-toolbar-button commit-message-tool" data-action="open-settings" aria-label="Kivo Git settings" title="Kivo Git settings">${icon('gear')}</button>${renderSelectionStatus()}</div>
       <textarea id="commit-message" rows="3" placeholder="Commit Message" aria-label="Commit Message" style="height:var(--commit-message-height)" spellcheck="true" ${ui.operationKind === 'commit' ? 'disabled' : ''}>${escapeHtml(ui.commitMessage)}</textarea>
       <div class="commit-actions">
         <button class="primary-button ${ui.operationKind === 'commit' ? 'working' : ''}" data-action="commit" title="${escapeHtml(commitHint)} (${commandKey}+Enter)" ${!canCommit ? 'disabled' : ''}>${ui.operationKind === 'commit' ? `${icon('loading', 'codicon-modifier-spin button-spinner')}<span>Committing…</span>` : '<span>Commit</span>'}</button>
         <button class="commit-push-button ${ui.operationKind === 'push' ? 'working' : ''}" data-action="commit-and-push" title="${escapeHtml(canCommit ? 'Commit selected files and push' : commitHint)}" ${!canCommit ? 'disabled' : ''}>${ui.operationKind === 'push' ? `${icon('loading', 'codicon-modifier-spin button-spinner')}<span>Pushing…</span>` : '<span>Commit and Push…</span>'}</button>
-        <button class="idea-toolbar-button" data-action="reuse-commit-message" aria-label="Reuse a recent commit message" title="Reuse a recent commit message" ${ui.busy ? 'disabled' : ''}>${icon('history')}</button>
-        <button class="idea-toolbar-button commit-settings" data-action="open-settings" aria-label="Kivo Git settings" title="Kivo Git settings">${icon('gear')}</button>
       </div>
       </footer>
     </div>
@@ -2952,7 +2963,7 @@ function commitBlocker() {
 function renderSelectionStatus() {
   const { selectedChanges, hiddenCount } = changeSelection();
   const wholeFiles = ui.changeFilter === 'staged' || selectedChanges.some((change) => change.staged && change.workingTreeStatus !== '.');
-  return `<div class="commit-selection-status" role="status"><span title="${wholeFiles ? 'Commits include all working-tree changes in selected files.' : 'Select files to commit'}">${selectedChanges.length} ${selectedChanges.length === 1 ? 'file' : 'files'} selected${hiddenCount ? ` · ${hiddenCount} hidden by filters` : ''}</span>${selectedChanges.length ? `<div class="commit-selection-actions"><button class="text-button rollback-selection" data-action="rollback-selected" title="Restore tracked changes to HEAD; move new files to Trash" ${ui.busy || hiddenCount ? 'disabled' : ''}>Rollback…</button><button class="text-button" data-action="${hiddenCount ? 'clear-hidden-selection' : 'clear-selection'}" ${ui.busy ? 'disabled' : ''}>${hiddenCount ? 'Remove hidden' : 'Clear'}</button></div>` : ''}</div>${hiddenCount ? '<div class="commit-selection-note warning">Hidden selections must be reviewed or removed.</div>' : ''}`;
+  return `<div class="commit-selection-status" role="status"><span title="${wholeFiles ? 'Commits include all working-tree changes in selected files.' : 'Select files to commit'}">${selectedChanges.length} ${selectedChanges.length === 1 ? 'file' : 'files'} selected${hiddenCount ? ` · ${hiddenCount} hidden by filters` : ''}</span>${selectedChanges.length ? `<div class="commit-selection-actions"><button class="text-button rollback-selection" data-action="rollback-selected" title="Restore tracked changes to HEAD; move new files to Trash" ${ui.busy || hiddenCount ? 'disabled' : ''}>Rollback…</button><button class="text-button" data-action="${hiddenCount ? 'clear-hidden-selection' : 'clear-selection'}" ${ui.busy ? 'disabled' : ''}>${hiddenCount ? 'Remove hidden' : 'Clear'}</button></div>` : ''}</div>${hiddenCount ? '<div class="commit-selection-note warning">Hidden selections must be reviewed or removed.</div>' : wholeFiles ? '<div class="commit-selection-note">Commits include all working-tree changes in selected files.</div>' : ''}`;
 }
 
 function syncCommitActionState() {

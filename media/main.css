@@ -1216,13 +1216,16 @@ body.commit-panel-resizing .commit-panel-splitter::before { opacity: 1; backgrou
   scrollbar-width: thin;
 }
 .parity-mode .commit-panel.message-collapsed textarea { padding-block: 0; border-block-width: 0; }
-.commit-message-heading { display: flex; align-items: center; gap: 8px; min-height: 20px; }
+.commit-message-heading { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 6px; min-height: 24px; }
+.parity-mode .commit-message-tool { width: 22px; height: 22px; flex: 0 0 22px; }
 .commit-message-label { padding: 0; flex: 0 0 auto; background: transparent; color: var(--vscode-foreground); font-size: 11px; font-weight: 600; cursor: text; }
 .commit-message-label:focus-visible { outline: 1px solid var(--accent); outline-offset: 2px; }
-.parity-mode .commit-message-heading .commit-selection-status { flex: 1; min-width: 0; font-size: 10px; justify-content: flex-end; }
+.parity-mode .commit-message-heading .commit-selection-status { flex: 1; min-width: 120px; font-size: 10px; justify-content: flex-end; }
+.parity-mode .commit-actions > button { white-space: nowrap; }
+@media (max-width: 280px) { .parity-mode .commit-message-heading .commit-selection-status { flex-basis: 100%; min-width: 0; justify-content: space-between; } }
 .parity-mode .commit-selection-status > span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .parity-mode .commit-selection-status button { font-size: 10px; }
-.parity-mode .commit-message-heading:has(.warning) { flex-wrap: wrap; }
+.parity-mode .commit-message-heading:has(.commit-selection-note) { flex-wrap: wrap; }
 .parity-mode .commit-selection-note { font-size: 10px; }
 .parity-mode .commit-message-heading .commit-selection-note { flex-basis: 100%; }
 .parity-mode .commit-repository-label { flex: 1; width: auto; }
@@ -1275,7 +1278,7 @@ body.commit-zone-resizing, body.commit-zone-resizing * { cursor: row-resize !imp
 .parity-mode .commit-lower {
   flex: 0 1 auto;
   min-height: 33px;
-  max-height: min(160px, 24%, max(33px, calc(100% - 350px)));
+  max-height: min(148px, 24%, max(33px, calc(100% - 350px)));
   display: flex;
   flex-direction: column;
   overflow: hidden;
@@ -1289,9 +1292,9 @@ body.commit-zone-resizing, body.commit-zone-resizing * { cursor: row-resize !imp
 .parity-mode .commit-lower-heading {
   display: flex;
   align-items: center;
-  flex: 0 0 33px;
+  flex: 0 0 30px;
   gap: 6px;
-  height: 33px;
+  height: 30px;
   padding: 0 11px;
   color: var(--vscode-foreground);
   font-size: 10px;
@@ -1306,7 +1309,7 @@ body.commit-zone-resizing, body.commit-zone-resizing * { cursor: row-resize !imp
 .parity-mode .commit-recent-view-all { flex: 0 0 auto; margin-left: auto; color: var(--vscode-textLink-foreground, var(--accent)); font-weight: 500; }
 .parity-mode .commit-recent-view-all:hover { text-decoration: underline; }
 .parity-mode .commit-lower-heading button:focus-visible { outline: 1px solid var(--vscode-focusBorder, var(--accent)); outline-offset: 2px; }
-.parity-mode .commit-recent-list { min-height: 0; overflow-y: auto; padding: 0 8px 6px; scrollbar-width: thin; }
+.parity-mode .commit-recent-list { min-height: 0; overflow-y: auto; padding: 0 8px 4px; scrollbar-width: thin; }
 .parity-mode .commit-recent-list[hidden] { display: none; }
 .parity-mode .commit-recent-row {
   width: 100%;
@@ -1315,7 +1318,7 @@ body.commit-zone-resizing, body.commit-zone-resizing * { cursor: row-resize !imp
   grid-template-columns: 14px minmax(0, 1fr);
   align-items: center;
   gap: 5px;
-  padding: 2px 5px;
+  padding: 1px 5px;
   border: 0;
   border-radius: 3px;
   background: transparent;
@@ -1329,7 +1332,7 @@ body.commit-zone-resizing, body.commit-zone-resizing * { cursor: row-resize !imp
 .parity-mode .commit-recent-entry:nth-child(2) .commit-recent-node { background: var(--vscode-textLink-foreground, var(--accent)); }
 .parity-mode .commit-recent-row[aria-expanded="true"] { background: var(--vscode-list-hoverBackground, var(--idea-hover)); }
 .parity-mode .commit-recent-copy { min-width: 0; display: flex; flex-direction: column; gap: 0; }
-.parity-mode .commit-recent-copy strong { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 12px; line-height: 17px; font-weight: 550; }
+.parity-mode .commit-recent-copy strong { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 12px; line-height: 16px; font-weight: 550; }
 .parity-mode .commit-recent-meta { min-width: 0; display: flex; align-items: baseline; gap: 6px; color: var(--vscode-descriptionForeground, var(--muted)); font-size: 10px; line-height: 1.3; }
 .parity-mode .commit-recent-meta code { display: none; flex: 0 0 auto; padding: 0; border: 0; background: transparent; color: inherit; font: 10px var(--vscode-editor-font-family, Consolas, monospace); }
 .parity-mode .commit-recent-author { min-width: 0; flex: 1 1 auto; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
@@ -1536,11 +1539,8 @@ body.commit-zone-resizing, body.commit-zone-resizing * { cursor: row-resize !imp
 }
 
 /* Keep unresolved files ahead of the recent-commit preview in short sidebars. */
-.parity-mode .changes-content:has(.conflict-state):not(.recent-collapsed) .commit-lower { max-height: min(288px, 26%, max(33px, calc(100% - 440px))); }
+.parity-mode .changes-content:has(.conflict-state):not(.recent-collapsed) .commit-lower { max-height: min(100px, 26%, max(33px, calc(100% - 440px))); }
 .parity-mode .changes-content:has(.conflict-state) .commit-changes-tree { min-height: clamp(40px, calc(100vh - 440px), 72px); }
-@media (max-height: 580px) {
-  .parity-mode .changes-content:has(.conflict-state) .commit-panel { flex-basis: var(--commit-panel-height, 148px); }
-}
 .conflict-state button:focus-visible, .workflow-dialog input:focus-visible { outline: 1px solid var(--vscode-focusBorder, var(--accent)); outline-offset: 1px; }
 .push-review-cancel:hover, .push-review-dialog header button:hover { background: var(--vscode-toolbar-hoverBackground, var(--surface-soft)); }
 .push-review-dialog button:focus-visible { outline: 1px solid var(--vscode-focusBorder, var(--accent)); outline-offset: 2px; }

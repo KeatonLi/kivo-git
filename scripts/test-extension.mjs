@@ -20,6 +20,7 @@ await runTests({
     '--user-data-dir', path.join(isolatedProfile, 'user-data'),
     '--extensions-dir', path.join(isolatedProfile, 'extensions'),
     '--disable-extensions',
+    ...(process.getuid?.() === 0 ? ['--no-sandbox'] : []),
     '--disable-gpu'
   ]
 });
