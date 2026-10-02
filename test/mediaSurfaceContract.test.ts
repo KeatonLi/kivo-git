@@ -86,7 +86,7 @@ describe('webview surface composition', () => {
     expect(main).toContain('saveRepositoryState(previousRoot)');
     expect(main).toContain('restoreRepositoryState(nextRoot, nextState)');
     expect(main).toContain('graphScrollTop: ui.graphScrollTop');
-    expect(main).toContain('commitPanelHeight: ui.commitPanelHeight');
+    expect(main).toContain('commitMessageHeight: ui.commitMessageHeight');
   });
 
   it('renders branch search results in batches and navigates to History from the branch popup', async () => {

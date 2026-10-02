@@ -4,6 +4,16 @@
 
 - Added Track and Stage to untracked files' Commit context menu, with a fresh Git status check before staging so the action cannot silently target a file whose state changed.
 
+## 0.5.0 - 2026-10-02
+
+- Give changed files the main sidebar space; show the current branch in the repository header and three recent commits by default, with a compact option to show five.
+- Resize only the commit message editor, defaulting to 64px. Allow full collapse without shrinking commit actions; keep drafts, selection and per-repository sizes. Migrate old whole-form sizes to the new default.
+- Make message dragging respond immediately after reaching either boundary, preserve fractional pointer movement, support cancellation, keyboard adjustment and double-click reset. Constrain large editors to the available file-review budget.
+- Preserve file and History reading anchors when changes or new commits arrive above the visible rows. Retain native scrolling and fixed-height pagination feedback.
+- Distinguish initial repository loading, no repository, clean working tree, filtered-empty results and failures. Add a clear-filter action and keep errors available until dismissed.
+- Unify compact spacing, theme tokens, focus and restrained panel motion; respect reduced-motion preferences. Keep existing branch comparison, stash, conflict and review workflows.
+- Document the complete experience checklist and release criteria in docs/0.5-experience.md.
+
 ## 0.4.3 - 2026-10-01
 
 - Keep the Pull strategy menu anchored to its toolbar button and inside narrow sidebars, including after resizing.

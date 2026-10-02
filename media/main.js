@@ -20,9 +20,9 @@ const LOG_DETAIL_MIN_HEIGHT = 112;
 const LOG_DETAIL_DEFAULT_HEIGHT = 190;
 const COMMIT_METADATA_MIN_HEIGHT = 96;
 const COMMIT_METADATA_DEFAULT_HEIGHT = 180;
-const COMMIT_PANEL_MIN_HEIGHT = 132;
-const COMMIT_PANEL_MAX_HEIGHT = 360;
-const COMMIT_PANEL_DEFAULT_HEIGHT = 148;
+const COMMIT_PANEL_MIN_HEIGHT = 0;
+const COMMIT_PANEL_MAX_HEIGHT = 320;
+const COMMIT_PANEL_DEFAULT_HEIGHT = 64;
 // Recent commits fit their contents until the user explicitly resizes the split.
 const COMMIT_ZONE_DEFAULT_PERCENT = 65;
 const BRANCH_PAGE_SIZE = 36;
@@ -36,17 +36,19 @@ const restoredBranchWidth = Number(initialRepositoryState.logBranchWidth);
 const restoredDetailWidth = Number(initialRepositoryState.logDetailWidth);
 const restoredDetailHeight = Number(initialRepositoryState.logDetailHeight);
 const restoredCommitMetadataHeight = Number(initialRepositoryState.commitMetadataHeight);
-const restoredCommitPanelHeight = initialRepositoryState.commitPanelLayoutVersion === 1
-  ? Number(initialRepositoryState.commitPanelHeight) : NaN;
-const hasCustomCommitSplit = (state) => state.commitZoneResized === true
+const restoredCommitPanelHeight = initialRepositoryState.commitPanelLayoutVersion === 2
+  ? Number(initialRepositoryState.commitMessageHeight) : NaN;
+const hasCustomCommitSplit = (state) => state.commitPanelLayoutVersion === 2 && (state.commitZoneResized === true
   || (state.commitZoneResized === undefined && Number.isFinite(Number(state.commitZonePercent))
-    && Number(state.commitZonePercent) !== COMMIT_ZONE_DEFAULT_PERCENT);
+    && Number(state.commitZonePercent) !== COMMIT_ZONE_DEFAULT_PERCENT));
 
 const ui = {
   workflow: undefined,
   workflowRequestId: 0,
   stashMessage: '',
   snapshot: undefined,
+  repositoryLoading: true,
+  repositoryUnavailable: false,
   emptyMessage: undefined,
   selected: new Set(initialRepositoryState.selected || []),
   collapsed: new Set(initialRepositoryState.collapsed || []),
@@ -70,12 +72,15 @@ const ui = {
   commitMetadataHeight: Number.isFinite(restoredCommitMetadataHeight)
     ? Math.max(COMMIT_METADATA_MIN_HEIGHT, restoredCommitMetadataHeight)
     : COMMIT_METADATA_DEFAULT_HEIGHT,
-  commitPanelHeight: Number.isFinite(restoredCommitPanelHeight)
+  commitMessageHeight: Number.isFinite(restoredCommitPanelHeight)
     ? clamp(restoredCommitPanelHeight, COMMIT_PANEL_MIN_HEIGHT, COMMIT_PANEL_MAX_HEIGHT)
     : COMMIT_PANEL_DEFAULT_HEIGHT,
-  commitZonePercent: clamp(Number(initialRepositoryState.commitZonePercent) || COMMIT_ZONE_DEFAULT_PERCENT, 35, 75),
+  commitZonePercent: clamp(Number(initialRepositoryState.commitZonePercent) || COMMIT_ZONE_DEFAULT_PERCENT, 50, 90),
   commitZoneResized: hasCustomCommitSplit(initialRepositoryState),
   recentCommitsCollapsed: initialRepositoryState.recentCommitsCollapsed === true,
+  recentCommitsExpanded: initialRepositoryState.recentCommitsExpanded === true,
+  changesScrollTop: Number(initialRepositoryState.changesScrollTop) || 0,
+  recentScrollTop: Number(initialRepositoryState.recentScrollTop) || 0,
   recentSelectedHash: undefined,
   recentDetails: undefined,
   recentDetailsLoading: false,
@@ -150,6 +155,10 @@ let graphResizeObserver;
 let observedGraphList;
 let graphViewportFrame;
 let graphScrollFrame;
+let commitScrollTimer;
+let renderedRoot;
+let commitResizeObserver;
+let observedCommitUpper;
 const reducedMotion = window.matchMedia('(prefers-reduced-motion: reduce)');
 const runningMotion = new Set();
 const elementMotion = new WeakMap();
@@ -242,11 +251,14 @@ function serializeRepositoryState() {
     logDetailWidth: ui.logDetailWidth,
     logDetailHeight: ui.logDetailHeight,
     commitMetadataHeight: ui.commitMetadataHeight,
-    commitPanelHeight: ui.commitPanelHeight,
-    commitPanelLayoutVersion: 1,
+    commitMessageHeight: ui.commitMessageHeight,
+    commitPanelLayoutVersion: 2,
     commitZonePercent: ui.commitZonePercent,
     commitZoneResized: ui.commitZoneResized,
     recentCommitsCollapsed: ui.recentCommitsCollapsed,
+    recentCommitsExpanded: ui.recentCommitsExpanded,
+    changesScrollTop: ui.changesScrollTop,
+    recentScrollTop: ui.recentScrollTop,
     branchGroupsExpanded: ui.branchGroupsExpanded,
     collapsedLogBranchFolders: [...ui.collapsedLogBranchFolders],
     graphScrollTop: ui.graphScrollTop,
@@ -272,7 +284,7 @@ function restoreRepositoryState(root, state = {}) {
   const detailWidth = Number(state.logDetailWidth);
   const detailHeight = Number(state.logDetailHeight);
   const metadataHeight = Number(state.commitMetadataHeight);
-  const panelHeight = state.commitPanelLayoutVersion === 1 ? Number(state.commitPanelHeight) : NaN;
+  const panelHeight = state.commitPanelLayoutVersion === 2 ? Number(state.commitMessageHeight) : NaN;
   ui.selected = new Set(state.selected || []);
   ui.collapsed = new Set(state.collapsed || []);
   ui.focusedPath = state.focusedPath;
@@ -299,12 +311,15 @@ function restoreRepositoryState(root, state = {}) {
   ui.logDetailWidth = Number.isFinite(detailWidth) ? clamp(detailWidth, LOG_DETAIL_MIN_WIDTH, LOG_DETAIL_MAX_WIDTH) : LOG_DETAIL_DEFAULT_WIDTH;
   ui.logDetailHeight = Number.isFinite(detailHeight) ? Math.max(LOG_DETAIL_MIN_HEIGHT, detailHeight) : LOG_DETAIL_DEFAULT_HEIGHT;
   ui.commitMetadataHeight = Number.isFinite(metadataHeight) ? Math.max(COMMIT_METADATA_MIN_HEIGHT, metadataHeight) : COMMIT_METADATA_DEFAULT_HEIGHT;
-  ui.commitPanelHeight = Number.isFinite(panelHeight)
+  ui.commitMessageHeight = Number.isFinite(panelHeight)
     ? clamp(panelHeight, COMMIT_PANEL_MIN_HEIGHT, COMMIT_PANEL_MAX_HEIGHT)
     : COMMIT_PANEL_DEFAULT_HEIGHT;
-  ui.commitZonePercent = clamp(Number(state.commitZonePercent) || COMMIT_ZONE_DEFAULT_PERCENT, 35, 75);
+  ui.commitZonePercent = clamp(Number(state.commitZonePercent) || COMMIT_ZONE_DEFAULT_PERCENT, 50, 90);
   ui.commitZoneResized = hasCustomCommitSplit(state);
   ui.recentCommitsCollapsed = state.recentCommitsCollapsed === true;
+  ui.recentCommitsExpanded = state.recentCommitsExpanded === true;
+  ui.changesScrollTop = Number(state.changesScrollTop) || 0;
+  ui.recentScrollTop = Number(state.recentScrollTop) || 0;
   clearRecentCommitPreview(true);
   ui.branchGroupsExpanded = {
     local: state.branchGroupsExpanded?.local !== false,
@@ -745,7 +760,11 @@ function patchApp(html) {
   target.id = 'app';
   target.innerHTML = html;
   const graphList = app.querySelector('[data-graph-list]');
-  const graphScrollTop = graphList?.scrollTop;
+  const sameRepository = app.querySelector('[data-root]')?.dataset.root === ui.snapshot?.root;
+  const reading = sameRepository ? ['#kivo-commit-changes', '#kivo-recent-list'].map(selector => {
+    const list = app.querySelector(selector);
+    return { list, top: list?.scrollTop || 0, anchor: captureReadingAnchor(list, '[data-path], [data-hash]') };
+  }) : [];
   const pool = new Map([...app.querySelectorAll('[id], [data-path], [data-list-id], [data-checkout], [data-hash]')].map((node) => [keyFor(node), node]));
   const before = new Map();
   if (motionEnabled()) {
@@ -759,7 +778,18 @@ function patchApp(html) {
   }
   patchNode(app, target, pool);
   // DOM changes must not rewind a newer wheel/trackpad position on a later frame.
-  if (graphList?.isConnected && Math.abs(graphList.scrollTop - graphScrollTop) > .5) graphList.scrollTop = graphScrollTop;
+  if (graphList?.isConnected && Math.abs(graphList.scrollTop - ui.graphScrollTop) > .5) graphList.scrollTop = ui.graphScrollTop;
+  for (const { list, top, anchor } of reading) {
+    if (!list?.isConnected) continue;
+    list.scrollTop = top;
+    restoreReadingAnchor(list, anchor);
+  }
+  if (!sameRepository) {
+    const changes = app.querySelector('#kivo-commit-changes');
+    const recent = app.querySelector('#kivo-recent-list');
+    if (changes) changes.scrollTop = ui.changesScrollTop;
+    if (recent) recent.scrollTop = ui.recentScrollTop;
+  }
   if (before.size && motionEnabled()) {
     for (const row of app.querySelectorAll('.file-row')) {
       const old = before.get(row.dataset.path);
@@ -773,16 +803,41 @@ function patchApp(html) {
   }
 }
 
+function captureReadingAnchor(list, selector) {
+  if (!list || list.scrollTop <= 0) return undefined;
+  const top = list.getBoundingClientRect().top;
+  const row = [...list.querySelectorAll(selector)].find(row => row.getBoundingClientRect().bottom > top + 1);
+  return row ? { key: row.dataset.path || row.dataset.hash, offset: row.getBoundingClientRect().top - top } : undefined;
+}
+
+function restoreReadingAnchor(list, anchor) {
+  if (!anchor) return;
+  const row = [...list.querySelectorAll('[data-path], [data-hash]')].find(row => (row.dataset.path || row.dataset.hash) === anchor.key);
+  if (row) list.scrollTop += row.getBoundingClientRect().top - list.getBoundingClientRect().top - anchor.offset;
+}
+
+function renderRepositoryLoading() {
+  return `<section class="repository-loading" aria-busy="true" role="status"><span class="repository-loading-label">${icon('loading', 'codicon-modifier-spin')} Reading repository…</span><div class="skeleton-heading" aria-hidden="true"></div><div class="skeleton-list" aria-hidden="true">${Array.from({ length: 8 }, () => '<div class="skeleton-row"><span></span><i></i></div>').join('')}</div><div class="skeleton-message" aria-hidden="true"></div></section>`;
+}
+
+function recentCommitTime(date) {
+  const value = new Date(date);
+  const today = new Date();
+  return value.toDateString() === today.toDateString()
+    ? absoluteTime(date).split(' ')[1]?.slice(0, 5) || '—'
+    : absoluteTime(date).slice(5, 10);
+}
+
 function render() {
   const s = ui.snapshot;
   if (!s) {
-    const hasError = Boolean(ui.emptyMessage);
-    app.innerHTML = `<section class="empty-state"><div class="empty-mark">${icon(hasError ? 'error' : 'source-control')}</div><h2>${hasError ? 'Kivo Git needs attention' : 'Open a Git repository'}</h2><p>${escapeHtml(ui.emptyMessage || 'Kivo Git will appear here when the workspace is ready.')}</p><button data-action="refresh">${icon('refresh')} ${hasError ? 'Retry' : 'Refresh'}</button></section>`;
+    const hasError = Boolean(ui.emptyMessage) && !ui.repositoryUnavailable;
+    app.innerHTML = ui.repositoryLoading ? renderRepositoryLoading() : `<section class="empty-state" role="${hasError ? 'alert' : 'status'}"><div class="empty-mark">${icon(hasError ? 'error' : 'repo')}</div><h2>${hasError ? 'Could not read repository' : 'Open a Git repository'}</h2><p>${escapeHtml(ui.emptyMessage || 'Open a folder containing a Git repository to review changes here.')}</p><button data-action="refresh">${icon('refresh')} ${hasError ? 'Retry' : 'Refresh'}</button></section>`;
     bind();
     return;
   }
   patchApp(`
-    <section class="content ${surface}-content ${surface === 'changes' && ui.commitZoneResized && !ui.recentCommitsCollapsed ? 'recent-resized' : ''} ${surface === 'changes' && ui.recentCommitsCollapsed ? 'recent-collapsed' : ''}" aria-busy="${ui.busy}" ${ui.commitReviewOpen || ui.pushReview || ui.workflow ? 'inert' : ''}>
+    <section class="content ${surface}-content ${surface === 'changes' && ui.commitZoneResized && !ui.recentCommitsCollapsed ? 'recent-resized' : ''} ${surface === 'changes' && ui.recentCommitsCollapsed ? 'recent-collapsed' : ''}" data-root="${escapeHtml(s.root)}" aria-busy="${ui.busy}" ${ui.commitReviewOpen || ui.pushReview || ui.workflow ? 'inert' : ''}>
       ${surface === 'changes' ? renderChanges(s) : renderGraph(s)}
     </section>
     ${surface === 'changes' && ui.branchOpen ? renderBranchPopup(s) : ''}
@@ -792,7 +847,8 @@ function render() {
     ${ui.workflow ? renderWorkflow(s) : ''}
   `);
   const textarea = app.querySelector('#commit-message');
-  if (textarea && document.activeElement !== textarea && textarea.value !== ui.commitMessage) textarea.value = ui.commitMessage;
+  if (textarea && (renderedRoot !== s.root || document.activeElement !== textarea) && textarea.value !== ui.commitMessage) textarea.value = ui.commitMessage;
+  renderedRoot = s.root;
   const search = app.querySelector('#branch-search');
   if (search && (!ui.branchOpen || document.activeElement !== search) && search.value !== ui.branchQuery) search.value = ui.branchQuery;
   const logBranchSearch = app.querySelector('#log-branch-search');
@@ -807,6 +863,18 @@ function render() {
   });
   bind();
   positionPullMenu();
+  updateCommitMessageBudget();
+  bindCommitViewport();
+}
+
+function bindCommitViewport() {
+  const upper = app.querySelector('.commit-upper');
+  if (upper === observedCommitUpper) return;
+  commitResizeObserver?.disconnect();
+  observedCommitUpper = upper;
+  if (!upper) return;
+  commitResizeObserver = new ResizeObserver(updateCommitMessageBudget);
+  commitResizeObserver.observe(upper);
 }
 
 function positionPullMenu() {
@@ -889,13 +957,11 @@ function renderCommitRepository(s) {
   const label = `${icon('repo')}<span class="commit-repository-name">${escapeHtml(name)}</span>`;
   return `<div class="commit-repository-header">${s.repositoryCount > 1
     ? `<button class="commit-repository-label commit-repository-picker" data-action="choose-repository" aria-label="Choose repository, current ${escapeHtml(name)}" aria-haspopup="dialog" title="${escapeHtml(title)}\nChoose repository" ${ui.busy ? 'disabled' : ''}>${label}${icon('chevron-down')}</button>`
-    : `<div class="commit-repository-label" aria-label="Current repository ${escapeHtml(name)}" title="${escapeHtml(title)}">${label}</div>`}</div>`;
+    : `<div class="commit-repository-label" aria-label="Current repository ${escapeHtml(name)}" title="${escapeHtml(title)}">${label}</div>`}<button class="commit-header-branch" data-action="branches" aria-haspopup="dialog" aria-expanded="${ui.branchOpen}" title="${escapeHtml(s.branch)}" aria-label="Current branch ${escapeHtml(s.branch)}; open branches" ${ui.busy ? 'disabled' : ''}>${icon('git-branch')}<span>${escapeHtml(s.branch === '(detached)' ? 'Detached HEAD' : s.branch)}</span></button></div>`;
 }
 
 function renderCommitToolbar(s) {
   const syncing = ui.syncPhase === 'fetching';
-  const branchLabel = s.branch === '(detached)' ? 'Detached HEAD' : s.branch;
-  const branchActionLabel = s.branch === '(detached)' ? 'Git branches, detached HEAD' : `Git branches, current branch ${s.branch}`;
   const fetchIcon = syncing || ui.operationKind === 'fetch' ? 'loading' : 'refresh';
   const hasUpstream = Boolean(s.upstream);
   const pullTitle = hasUpstream
@@ -904,7 +970,6 @@ function renderCommitToolbar(s) {
   const pushTitle = s.ahead ? `Push ${s.ahead} outgoing commit${s.ahead === 1 ? '' : 's'}` : 'No commits to push';
   return `<header class="commit-toolbar" aria-label="Commit tool window actions" aria-busy="${syncing}">
     <button class="idea-toolbar-button" data-action="refresh" aria-label="Refresh changes" title="Refresh changes" ${ui.busy ? 'disabled' : ''}>${icon('refresh')}</button>
-    <button class="idea-toolbar-button commit-branch-picker" data-action="branches" aria-label="${escapeHtml(branchActionLabel)}" title="Branches: ${escapeHtml(branchLabel)}" aria-haspopup="dialog" aria-expanded="${ui.branchOpen}">${icon('git-branch')}<span class="commit-branch-name">${escapeHtml(branchLabel)}</span></button>
     <div class="sync-action-wrap compact-sync-action">
     <button class="idea-toolbar-button ${s.behind ? 'has-count incoming-count' : ''}" data-action="pull-menu" aria-label="${escapeHtml(pullTitle)}" title="${escapeHtml(pullTitle)}" aria-haspopup="menu" aria-expanded="${ui.pullMenuOpen}" ${!hasUpstream || ui.busy || syncing ? 'disabled' : ''}>${icon('arrow-down')}${s.behind ? `<span class="tool-count">${s.behind}</span>` : ''}</button>
       ${renderPullMenu()}
@@ -972,20 +1037,18 @@ function renderChanges(s) {
       ${renderConflictState(s)}
       <div class="commit-changes-heading" role="heading" aria-level="2"><span class="changes-heading-label">${kivoIcon('changes', 'changes-heading-icon')}<span>Changes</span></span><small>${filtersActive ? `${filteredTotal}/${s.changes.length}` : s.changes.length} ${s.changes.length === 1 ? 'file' : 'files'}</small></div>
       ${ui.changeSearchOpen ? `<div class="commit-change-search"><input id="change-search" type="search" aria-label="Search changed files by path or status" placeholder="Path or status…" value="${escapeHtml(ui.changeQuery)}"><select id="change-filter" aria-label="Filter changed files by type or Git state"><option value="all" ${ui.changeFilter === 'all' ? 'selected' : ''}>All changes</option><option value="staged" ${ui.changeFilter === 'staged' ? 'selected' : ''}>Staged</option><option value="worktree" ${ui.changeFilter === 'worktree' ? 'selected' : ''}>Working tree</option><option value="modified" ${ui.changeFilter === 'modified' ? 'selected' : ''}>Modified</option><option value="added" ${ui.changeFilter === 'added' ? 'selected' : ''}>Added</option><option value="deleted" ${ui.changeFilter === 'deleted' ? 'selected' : ''}>Deleted</option><option value="renamed" ${ui.changeFilter === 'renamed' ? 'selected' : ''}>Renamed</option><option value="untracked" ${ui.changeFilter === 'untracked' ? 'selected' : ''}>Untracked</option><option value="conflict" ${ui.changeFilter === 'conflict' ? 'selected' : ''}>Conflicts</option></select><kbd>Esc</kbd></div>` : ''}
-      <div class="lists commit-changes-tree" id="kivo-commit-changes">${lists || `<div class="commit-empty-list">${filtersActive ? 'No changed files match the current filters' : 'No changes'}</div>`}</div>
-      <div class="commit-panel-splitter" data-commit-panel-splitter role="separator" aria-label="Resize changes and commit message" aria-controls="kivo-commit-changes kivo-commit-message" aria-orientation="horizontal" aria-valuemin="${COMMIT_PANEL_MIN_HEIGHT}" aria-valuenow="${Math.round(ui.commitPanelHeight)}" tabindex="0" title="Drag to resize. Double-click to reset."></div>
-      <footer class="commit-panel" id="kivo-commit-message" style="--commit-panel-height:${Math.round(ui.commitPanelHeight)}px">
-      ${renderSelectionStatus()}
-      <textarea id="commit-message" rows="3" placeholder="Commit Message" aria-label="Commit Message" spellcheck="true" ${ui.operationKind === 'commit' ? 'disabled' : ''}>${escapeHtml(ui.commitMessage)}</textarea>
+      <div class="lists commit-changes-tree" id="kivo-commit-changes">${lists}${!filteredTotal ? `<div class="commit-empty-list" role="status">${icon(filtersActive ? 'search' : 'check')}<strong>${filtersActive ? 'No matching files' : 'Working tree clean'}</strong><span>${filtersActive ? 'Try another path or clear your filters.' : 'Your changes will appear here.'}</span>${filtersActive ? '<button class="text-button" data-action="clear-change-filters">Clear filters</button>' : ''}</div>` : ''}</div>
+      <div class="commit-panel-splitter" data-commit-panel-splitter role="separator" aria-label="Resize changes and commit message" aria-controls="kivo-commit-changes kivo-commit-message" aria-orientation="horizontal" aria-valuemin="${COMMIT_PANEL_MIN_HEIGHT}" aria-valuenow="${Math.round(ui.commitMessageHeight)}" tabindex="0" title="Drag to resize. Double-click to reset."></div>
+      <footer class="commit-panel ${ui.commitMessageHeight === 0 ? 'message-collapsed' : ''}" id="kivo-commit-message" style="--commit-message-height:${Math.round(ui.commitMessageHeight)}px">
+      <div class="commit-message-heading"><button class="commit-message-label" data-action="edit-commit-message" aria-controls="commit-message" title="Write a commit message">Message</button><button class="idea-toolbar-button commit-message-tool" data-action="reuse-commit-message" aria-label="Reuse a recent commit message" title="Reuse a recent commit message" ${ui.busy ? 'disabled' : ''}>${icon('history')}</button><button class="idea-toolbar-button commit-message-tool" data-action="open-settings" aria-label="Kivo Git settings" title="Kivo Git settings">${icon('gear')}</button>${renderSelectionStatus()}</div>
+      <textarea id="commit-message" rows="3" placeholder="Commit Message" aria-label="Commit Message" style="height:var(--commit-message-height)" spellcheck="true" ${ui.operationKind === 'commit' ? 'disabled' : ''}>${escapeHtml(ui.commitMessage)}</textarea>
       <div class="commit-actions">
         <button class="primary-button ${ui.operationKind === 'commit' ? 'working' : ''}" data-action="commit" title="${escapeHtml(commitHint)} (${commandKey}+Enter)" ${!canCommit ? 'disabled' : ''}>${ui.operationKind === 'commit' ? `${icon('loading', 'codicon-modifier-spin button-spinner')}<span>Committing…</span>` : '<span>Commit</span>'}</button>
         <button class="commit-push-button ${ui.operationKind === 'push' ? 'working' : ''}" data-action="commit-and-push" title="${escapeHtml(canCommit ? 'Commit selected files and push' : commitHint)}" ${!canCommit ? 'disabled' : ''}>${ui.operationKind === 'push' ? `${icon('loading', 'codicon-modifier-spin button-spinner')}<span>Pushing…</span>` : '<span>Commit and Push…</span>'}</button>
-        <button class="idea-toolbar-button" data-action="reuse-commit-message" aria-label="Reuse a recent commit message" title="Reuse a recent commit message" ${ui.busy ? 'disabled' : ''}>${icon('history')}</button>
-        <button class="idea-toolbar-button commit-settings" data-action="open-settings" aria-label="Kivo Git settings" title="Kivo Git settings">${icon('gear')}</button>
       </div>
       </footer>
     </div>
-    ${ui.recentCommitsCollapsed ? '' : `<div class="commit-zone-splitter" data-commit-zone-splitter role="separator" aria-label="Resize changes and recent commits" aria-controls="kivo-commit-upper kivo-commit-lower" aria-orientation="horizontal" aria-valuenow="${ui.commitZonePercent}" aria-valuemin="35" aria-valuemax="75" tabindex="0" title="Drag to resize. Double-click to fit recent commits to content."></div>`}
+    ${ui.recentCommitsCollapsed ? '' : `<div class="commit-zone-splitter" data-commit-zone-splitter role="separator" aria-label="Resize changes and recent commits" aria-controls="kivo-commit-upper kivo-commit-lower" aria-orientation="horizontal" aria-valuenow="${ui.commitZonePercent}" aria-valuemin="50" aria-valuemax="90" tabindex="0" title="Drag to resize. Double-click to fit recent commits to content."></div>`}
     <div class="commit-lower" id="kivo-commit-lower">
       ${renderRecentCommits(s)}
     </div>
@@ -1131,20 +1194,18 @@ function renderRecentCommitPreview(commit) {
 }
 
 function renderRecentCommits(s) {
-  const commits = recentCommits(s);
-  let previousDate;
+  const all = recentCommits(s);
+  const commits = all.slice(0, ui.recentCommitsExpanded ? 5 : 3);
   return `<section class="commit-recent" aria-label="Recent commits">
     <div class="commit-lower-heading"><button class="commit-recent-toggle" data-action="toggle-recent-commits" aria-label="${ui.recentCommitsCollapsed ? 'Expand' : 'Collapse'} recent commits" aria-expanded="${!ui.recentCommitsCollapsed}" aria-controls="kivo-recent-list">${icon(ui.recentCommitsCollapsed ? 'chevron-right' : 'chevron-down')}<span>Recent commits</span></button><button class="commit-recent-view-all" data-action="show-log" aria-label="Show all commit history">View all</button></div>
-    <div class="commit-recent-list" id="kivo-recent-list" ${ui.recentCommitsCollapsed ? 'hidden' : ''}><div class="commit-recent-branch" title="Recent commits on ${escapeHtml(s.branch)}">${icon('git-branch')}<span>${escapeHtml(s.branch || 'HEAD')}</span></div>${commits.length ? commits.map((commit) => {
+    <div class="commit-recent-list" id="kivo-recent-list" ${ui.recentCommitsCollapsed ? 'hidden' : ''}>${commits.length ? commits.map((commit) => {
       const timestamp = absoluteTime(commit.date);
-      const date = timestamp.split(' ')[0];
-      const heading = previousDate !== date ? `<div class="commit-recent-date">${date}</div>` : '';
-      previousDate = date;
+      const time = recentCommitTime(commit.date);
       const expanded = ui.recentSelectedHash === commit.hash;
-      return `<div class="commit-recent-entry" data-hash="${escapeHtml(commit.hash)}">${heading}<button class="commit-recent-row ${commit.unpushedTo ? 'unpushed' : ''}" data-recent-commit="${escapeHtml(commit.hash)}" aria-expanded="${expanded}" ${expanded ? `aria-controls="recent-${escapeHtml(commit.hash)}"` : ''} title="${expanded ? 'Hide' : 'Show'} changed files · ${escapeHtml(commit.subject)}">
-        <span class="commit-recent-node" aria-hidden="true"></span><span class="commit-recent-copy"><strong title="${escapeHtml(commit.subject)}">${escapeHtml(commit.subject)}</strong><span class="commit-recent-meta"><code>${escapeHtml(commit.shortHash)}</code>${renderUnpushedBadge(commit)}<span class="commit-recent-author" title="${escapeHtml(commit.author)}">${escapeHtml(commit.author)}</span><time datetime="${escapeHtml(commit.date)}" title="${timestamp}">${timestamp.split(' ')[1] || '—'}</time></span></span>
+      return `<div class="commit-recent-entry" data-hash="${escapeHtml(commit.hash)}"><button class="commit-recent-row ${commit.unpushedTo ? 'unpushed' : ''}" data-recent-commit="${escapeHtml(commit.hash)}" aria-expanded="${expanded}" ${expanded ? `aria-controls="recent-${escapeHtml(commit.hash)}"` : ''} title="${expanded ? 'Hide' : 'Show'} changed files · ${escapeHtml(commit.subject)}">
+        <span class="commit-recent-node" aria-hidden="true"></span><span class="commit-recent-copy"><strong title="${escapeHtml(commit.subject)}">${escapeHtml(commit.subject)}</strong><span class="commit-recent-meta"><code>${escapeHtml(commit.shortHash)}</code>${renderUnpushedBadge(commit)}<span class="commit-recent-author" title="${escapeHtml(commit.author)}">${escapeHtml(commit.author)}</span><time datetime="${escapeHtml(commit.date)}" title="${timestamp}">${escapeHtml(time)}</time></span></span>
       </button>${expanded ? renderRecentCommitPreview(commit) : ''}</div>`;
-    }).join('') : '<div class="commit-recent-empty">No commits yet</div>'}</div>
+    }).join('') : '<div class="commit-recent-empty" role="status">No commits yet. Your first commit will appear here.</div>'}</div>${all.length > 3 && !ui.recentCommitsCollapsed ? `<button class="commit-recent-count-toggle text-button" data-action="toggle-recent-count">${ui.recentCommitsExpanded ? 'Show 3' : 'Show 5'}</button>` : ''}
   </section>`;
 }
 
@@ -1986,27 +2047,39 @@ function resetCommitMetadataHeight(event) {
 }
 
 function commitPanelBounds(splitter) {
-  const content = splitter.closest('.commit-upper') || splitter.closest('.changes-content');
+  const content = splitter?.closest('.commit-upper');
   const panel = content?.querySelector('.commit-panel');
-  const minimum = Math.max(COMMIT_PANEL_MIN_HEIGHT, Number.parseFloat(panel && getComputedStyle(panel).minHeight) || 0);
-  const repositoryHeight = content?.querySelector('.commit-repository-header')?.getBoundingClientRect().height || 34;
-  const toolbarHeight = content?.querySelector('.commit-toolbar')?.getBoundingClientRect().height || 31;
-  const headingHeight = content?.querySelector('.commit-changes-heading')?.getBoundingClientRect().height || 26;
-  const conflictHeight = content?.querySelector('.conflict-state')?.getBoundingClientRect().height || 0;
-  const searchHeight = content?.querySelector('.commit-change-search')?.getBoundingClientRect().height || 0;
-  const available = content?.clientHeight || 0;
-  const maximum = Math.min(COMMIT_PANEL_MAX_HEIGHT, available
-    ? Math.max(minimum, available - repositoryHeight - toolbarHeight - headingHeight - conflictHeight - searchHeight - 82)
-    : COMMIT_PANEL_MAX_HEIGHT);
-  return { minimum, maximum };
+  const editor = panel?.querySelector('#commit-message');
+  const tree = content?.querySelector('.commit-changes-tree');
+  const chrome = [...(content?.children || [])].filter(child => child !== panel && child !== tree).reduce((height, child) => {
+    const style = getComputedStyle(child);
+    return height + child.getBoundingClientRect().height + (Number.parseFloat(style.marginTop) || 0) + (Number.parseFloat(style.marginBottom) || 0);
+  }, 0);
+  const form = (panel?.getBoundingClientRect().height || 0) - (editor?.getBoundingClientRect().height || 0);
+  const available = (content?.clientHeight || 0) - chrome - form;
+  // Only the editor consumes this budget. Labels and action buttons never shrink.
+  const maximum = content ? Math.min(COMMIT_PANEL_MAX_HEIGHT, Math.max(0, available - 112)) : COMMIT_PANEL_MAX_HEIGHT;
+  return { minimum: COMMIT_PANEL_MIN_HEIGHT, maximum };
+}
+
+function updateCommitMessageBudget() {
+  const splitter = app.querySelector('[data-commit-panel-splitter]');
+  if (!splitter) return;
+  const { maximum } = commitPanelBounds(splitter);
+  const panel = splitter.closest('.commit-upper')?.querySelector('.commit-panel');
+  panel?.style.setProperty('--commit-message-max-height', `${maximum}px`);
+  splitter.setAttribute('aria-valuemax', String(maximum));
+  splitter.setAttribute('aria-valuenow', String(Math.round(panel?.querySelector('#commit-message')?.getBoundingClientRect().height || 0)));
 }
 
 function applyCommitPanelHeight(splitter, height) {
-  const panel = splitter.parentElement?.querySelector('.commit-panel');
+  if (!splitter) return 0;
+  const panel = splitter.closest('.commit-upper')?.querySelector('.commit-panel');
   const { minimum, maximum } = commitPanelBounds(splitter);
-  const next = Math.round(clamp(height, minimum, maximum));
-  ui.commitPanelHeight = next;
-  panel?.style.setProperty('--commit-panel-height', `${next}px`);
+  const next = clamp(height, minimum, maximum);
+  ui.commitMessageHeight = next;
+  panel?.style.setProperty('--commit-message-height', `${next}px`);
+  panel?.classList.toggle('message-collapsed', next === 0);
   splitter.setAttribute('aria-valuemin', String(minimum));
   splitter.setAttribute('aria-valuemax', String(maximum));
   splitter.setAttribute('aria-valuenow', String(next));
@@ -2019,9 +2092,10 @@ function finishCommitPanelResize(commit = true) {
   resize.splitter.removeEventListener('pointermove', resize.move);
   resize.splitter.removeEventListener('pointerup', resize.complete);
   resize.splitter.removeEventListener('pointercancel', resize.cancel);
+  resize.splitter.removeEventListener('lostpointercapture', resize.complete);
+  activeCommitPanelResize = undefined;
   if (resize.splitter.hasPointerCapture?.(resize.pointerId)) resize.splitter.releasePointerCapture?.(resize.pointerId);
   document.body.classList.remove('commit-panel-resizing');
-  activeCommitPanelResize = undefined;
   if (commit) persist();
   else applyCommitPanelHeight(resize.splitter, resize.initialHeight);
 }
@@ -2032,13 +2106,15 @@ function startCommitPanelResize(event) {
   const content = splitter.closest('.changes-content');
   if (!content) return;
   event.preventDefault();
-  const panel = splitter.parentElement?.querySelector('.commit-panel');
-  const initialHeight = applyCommitPanelHeight(splitter, panel?.getBoundingClientRect().height || ui.commitPanelHeight);
-  const startY = event.clientY;
+  const editor = content.querySelector('#commit-message');
+  const initialHeight = editor?.getBoundingClientRect().height ?? ui.commitMessageHeight;
+  let previousY = event.clientY;
+  let height = initialHeight;
   const pointerId = event.pointerId;
   const move = (pointerEvent) => {
     if (pointerEvent.pointerId !== pointerId) return;
-    applyCommitPanelHeight(splitter, initialHeight + startY - pointerEvent.clientY);
+    height = applyCommitPanelHeight(splitter, height + previousY - pointerEvent.clientY);
+    previousY = pointerEvent.clientY;
   };
   const complete = (pointerEvent) => {
     if (pointerEvent.pointerId === pointerId) finishCommitPanelResize(true);
@@ -2051,6 +2127,7 @@ function startCommitPanelResize(event) {
   splitter.addEventListener('pointermove', move);
   splitter.addEventListener('pointerup', complete);
   splitter.addEventListener('pointercancel', cancel);
+  splitter.addEventListener('lostpointercapture', complete);
   document.body.classList.add('commit-panel-resizing');
 }
 
@@ -2062,7 +2139,7 @@ function adjustCommitPanelHeight(event) {
     ? minimum
     : event.key === 'End'
       ? maximum
-      : ui.commitPanelHeight + (event.key === 'ArrowUp' ? step : -step);
+      : ui.commitMessageHeight + (event.key === 'ArrowUp' ? step : -step);
   event.preventDefault();
   applyCommitPanelHeight(event.currentTarget, height);
   persist();
@@ -2074,11 +2151,12 @@ function resetCommitPanelHeight(event) {
 }
 
 function applyCommitZonePercent(splitter, percent) {
-  const next = Math.round(clamp(percent, 35, 75));
+  const next = Math.round(clamp(percent, 50, 90));
   ui.commitZonePercent = next;
   ui.commitZoneResized = true;
   splitter.parentElement?.classList.add('recent-resized');
   splitter.parentElement?.querySelector('.commit-upper')?.style.setProperty('flex-basis', `${next}%`);
+  updateCommitMessageBudget();
   splitter.setAttribute('aria-valuenow', String(next));
   return next;
 }
@@ -2437,9 +2515,18 @@ function bind() {
   once('[data-commit-detail-splitter]', 'pointerdown', startCommitDetailResize);
   once('[data-commit-detail-splitter]', 'dblclick', resetCommitMetadataHeight);
   once('[data-commit-detail-splitter]', 'keydown', adjustCommitMetadataHeight);
+  once('#commit-message', 'focus', () => {
+    if (ui.commitMessageHeight === 0) { applyCommitPanelHeight(app.querySelector('[data-commit-panel-splitter]'), COMMIT_PANEL_DEFAULT_HEIGHT); persist(); }
+  });
   once('[data-commit-panel-splitter]', 'pointerdown', startCommitPanelResize);
   once('[data-commit-panel-splitter]', 'dblclick', resetCommitPanelHeight);
   once('[data-commit-panel-splitter]', 'keydown', adjustCommitPanelHeight);
+  once('#kivo-commit-changes, #kivo-recent-list', 'scroll', event => {
+    if (event.currentTarget.id === 'kivo-commit-changes') ui.changesScrollTop = event.currentTarget.scrollTop;
+    else ui.recentScrollTop = event.currentTarget.scrollTop;
+    clearTimeout(commitScrollTimer);
+    commitScrollTimer = setTimeout(persist, 120);
+  });
   once('[data-commit-zone-splitter]', 'pointerdown', startCommitZoneResize);
   once('[data-commit-zone-splitter]', 'dblclick', resetCommitZoneSize);
   once('[data-commit-zone-splitter]', 'keydown', adjustCommitZonePercent);
@@ -2707,6 +2794,24 @@ function handleAction(action) {
   if (action === 'cancel-push-review') { respondPushReview('cancel'); return; }
   if (action === 'confirm-push-review') { respondPushReview('push'); return; }
   if (action === 'fetch-push-review') { respondPushReview('fetch'); return; }
+  if (action === 'edit-commit-message') {
+    if (ui.commitMessageHeight < 28) applyCommitPanelHeight(app.querySelector('[data-commit-panel-splitter]'), COMMIT_PANEL_DEFAULT_HEIGHT);
+    persist();
+    app.querySelector('#commit-message')?.focus();
+    return;
+  }
+  if (action === 'toggle-recent-count') {
+    ui.recentCommitsExpanded = !ui.recentCommitsExpanded;
+    if (!ui.recentCommitsExpanded && !recentCommits(ui.snapshot).slice(0, 3).some(commit => commit.hash === ui.recentSelectedHash)) clearRecentCommitPreview();
+    persist(); render();
+    app.querySelector('[data-action="toggle-recent-count"]')?.focus();
+    return;
+  }
+  if (action === 'clear-change-filters') {
+    ui.changeQuery = ''; ui.changeFilter = 'all'; persist(); render();
+    app.querySelector('#change-search')?.focus();
+    return;
+  }
   if (action === 'toggle-recent-commits') {
     ui.recentCommitsCollapsed = !ui.recentCommitsCollapsed;
     persist();
@@ -2860,7 +2965,7 @@ function commitBlocker() {
 function renderSelectionStatus() {
   const { selectedChanges, hiddenCount } = changeSelection();
   const wholeFiles = ui.changeFilter === 'staged' || selectedChanges.some((change) => change.staged && change.workingTreeStatus !== '.');
-  return `<div class="commit-selection-status" role="status"><span>${selectedChanges.length} ${selectedChanges.length === 1 ? 'file' : 'files'} selected${hiddenCount ? ` · ${hiddenCount} hidden by filters` : ''}</span>${selectedChanges.length ? `<div class="commit-selection-actions"><button class="text-button rollback-selection" data-action="rollback-selected" title="Restore tracked changes to HEAD; move new files to Trash" ${ui.busy || hiddenCount ? 'disabled' : ''}>Rollback…</button><button class="text-button" data-action="${hiddenCount ? 'clear-hidden-selection' : 'clear-selection'}" ${ui.busy ? 'disabled' : ''}>${hiddenCount ? 'Remove hidden' : 'Clear'}</button></div>` : ''}</div>${hiddenCount ? '<div class="commit-selection-note warning">Hidden selections must be reviewed or removed.</div>' : wholeFiles ? '<div class="commit-selection-note">Commits include all working-tree changes in selected files.</div>' : ''}`;
+  return `<div class="commit-selection-status" role="status"><span title="${wholeFiles ? 'Commits include all working-tree changes in selected files.' : 'Select files to commit'}">${selectedChanges.length} ${selectedChanges.length === 1 ? 'file' : 'files'} selected${hiddenCount ? ` · ${hiddenCount} hidden by filters` : ''}</span>${selectedChanges.length ? `<div class="commit-selection-actions"><button class="text-button rollback-selection" data-action="rollback-selected" title="Restore tracked changes to HEAD; move new files to Trash" ${ui.busy || hiddenCount ? 'disabled' : ''}>Rollback…</button><button class="text-button" data-action="${hiddenCount ? 'clear-hidden-selection' : 'clear-selection'}" ${ui.busy ? 'disabled' : ''}>${hiddenCount ? 'Remove hidden' : 'Clear'}</button></div>` : ''}</div>${hiddenCount ? '<div class="commit-selection-note warning">Hidden selections must be reviewed or removed.</div>' : wholeFiles ? '<div class="commit-selection-note">Commits include all working-tree changes in selected files.</div>' : ''}`;
 }
 
 function syncCommitActionState() {
@@ -2914,7 +3019,7 @@ function toast(message, phase = 'success') {
   toastRegion.replaceChildren(element);
   const scheduleDismiss = () => {
     clearTimeout(element.dismissTimer);
-    if (phase !== 'loading' && !element.matches(':hover, :focus-within')) element.dismissTimer = setTimeout(() => dismissToast(element), phase === 'error' ? 8000 : 2800);
+    if (phase === 'success' && !element.matches(':hover, :focus-within')) element.dismissTimer = setTimeout(() => dismissToast(element), phase === 'error' ? 8000 : 2800);
   };
   element.querySelector('button').addEventListener('click', () => dismissToast(element));
   element.addEventListener('mouseenter', () => clearTimeout(element.dismissTimer));
@@ -3076,12 +3181,16 @@ window.addEventListener('message', (event) => {
     if (style) style.textContent = typeof message.css === 'string' ? message.css : '';
   }
   if (message.type === 'snapshot') {
+    ui.repositoryLoading = false;
+    ui.repositoryUnavailable = false;
     const fingerprint = JSON.stringify(message.payload);
     if (fingerprint === lastSnapshot && !ui.historyRefLoading && !ui.graphLoadingMore) return;
     if (ui.commitReviewOpen && lastSnapshot && fingerprint !== lastSnapshot) {
       ui.commitReviewOpen = false;
       toast('Repository changed during review. Check the selected files again.', 'error');
     }
+    const readingList = app.querySelector('[data-graph-list]');
+    const historyAnchor = !ui.historyRefLoading ? captureReadingAnchor(readingList, '[data-hash]') : undefined;
     const previousRoot = ui.snapshot?.root;
     const previousBranch = ui.snapshot?.branch;
     const nextRoot = message.payload.root;
@@ -3095,6 +3204,10 @@ window.addEventListener('message', (event) => {
     lastSnapshot = fingerprint;
     ui.emptyMessage = undefined;
     ui.snapshot = message.payload;
+    if (historyAnchor && previousRoot === nextRoot && previousBranch === message.payload.branch) {
+      const index = graphCommits().findIndex(commit => commit.hash === historyAnchor.key);
+      if (index >= 0) ui.graphScrollTop = Math.max(0, index * GRAPH_ROW_HEIGHT - historyAnchor.offset);
+    }
     if (ui.pushReview) {
       const p = ui.pushReview.preview;
       const branch = message.payload.branches.find((candidate) => candidate.name === p.branch && !candidate.remote);
@@ -3135,13 +3248,15 @@ window.addEventListener('message', (event) => {
     }
     if (ui.pendingRevealHash && !historySearchActive()) requestOlderHistoryForHash();
   }
-  if (message.type === 'empty') {
+  if (message.type === 'empty' || message.type === 'repositoryLoading') {
     persist();
     ui.pushReview = undefined;
     clearPushCommitPreview(true);
     clearRecentCommitPreview(true);
     ui.snapshot = undefined;
-    ui.emptyMessage = message.message;
+    ui.repositoryLoading = message.type === 'repositoryLoading';
+    ui.repositoryUnavailable = message.reason === 'no-repository';
+    ui.emptyMessage = ui.repositoryLoading ? undefined : message.message;
     ui.graphLoadingMore = false;
     lastSnapshot = '';
     render();
@@ -3362,7 +3477,8 @@ setInterval(() => {
   if (ui.snapshot && ui.lastFetchedAt && ui.syncPhase !== 'fetching') render();
 }, 60000);
 
-window.addEventListener('resize', positionPullMenu);
+window.addEventListener('resize', () => { positionPullMenu(); updateCommitMessageBudget(); });
+window.addEventListener('beforeunload', persist);
 
 post('ready', { historyRef: surface === 'history' ? ui.graphBranchFilter : undefined });
 render();

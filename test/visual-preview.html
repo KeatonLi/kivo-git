@@ -183,6 +183,12 @@
     <script src="/media/graph-layout.js"></script>
     <script src="/media/change-selection.js"></script>
     <script src="/media/main.js"></script>
-    <script>emit({ type: 'snapshot', payload: fixture });</script>
+    <script>
+      const initialState = new URLSearchParams(location.search).get('state');
+      if (initialState === 'loading') emit({ type: 'repositoryLoading' });
+      else if (initialState === 'no-repository') emit({ type: 'empty', reason: 'no-repository', message: 'Open a folder containing a Git repository.' });
+      else if (initialState === 'error') emit({ type: 'empty', message: 'Git could not read this repository.' });
+      else emit({ type: 'snapshot', payload: fixture });
+    </script>
   </body>
 </html>
