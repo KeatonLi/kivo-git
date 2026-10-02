@@ -136,7 +136,7 @@ export class IdeaGitViewProvider implements vscode.WebviewViewProvider, vscode.T
       vscode.workspace.onDidChangeWorkspaceFolders(() => {
         void this.discoverRepositories();
         this.resetRepository();
-        void this.postToReadyViews({ type: 'empty', message: 'Loading selected repository…' });
+        void this.postToReadyViews({ type: 'repositoryLoading' });
         this.configurePolling();
         void this.preloadSnapshot();
         this.scheduleBadgeRefresh();
@@ -326,7 +326,8 @@ export class IdeaGitViewProvider implements vscode.WebviewViewProvider, vscode.T
     this.client = undefined;
     this.lastSnapshot = undefined;
     this.coordinator.reset();
-    await this.postToReadyViews({ type: 'empty', message: this.errorText(error) });
+    await this.postToReadyViews({ type: 'empty', message: this.errorText(error),
+      reason: !this.selectedWorkspace() || /not a git repository/i.test(this.errorText(error)) ? 'no-repository' : 'error' });
   }
 
   private hasVisibleView(): boolean {
@@ -491,7 +492,7 @@ export class IdeaGitViewProvider implements vscode.WebviewViewProvider, vscode.T
     if (this.operationRunning) throw new Error('Finish the current Git operation before switching repositories.');
     this.selectedWorkspaceRoot = workspace.uri.fsPath;
     this.resetRepository();
-    void this.postToReadyViews({ type: 'empty', message: 'Loading selected repository…' });
+    void this.postToReadyViews({ type: 'repositoryLoading' });
     this.configurePolling();
     if (!this.hasVisibleView()) void this.refresh(true);
   }

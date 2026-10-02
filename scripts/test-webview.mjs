@@ -21,6 +21,7 @@ const server = spawn(process.execPath, [path.join(root, 'scripts', 'visual-serve
   stdio: 'ignore'
 });
 let browser;
+let page;
 
 async function waitForServer() {
   const deadline = Date.now() + 10000;
@@ -63,13 +64,25 @@ async function historyReadingPosition(page) {
 try {
   await waitForServer();
   browser = await chromium.launch({ headless: true, args: ['--no-sandbox'] });
-  const page = await browser.newPage({ viewport: { width: 360, height: 820 } });
+  page = await browser.newPage({ viewport: { width: 360, height: 820 } });
   const pageErrors = [];
   page.on('pageerror', (error) => pageErrors.push(error.message));
+
+  await page.goto(`${baseUrl}/test/visual-preview.html?surface=changes&state=loading`);
+  await page.waitForSelector('.repository-loading');
+  assert.equal(await page.locator('.empty-state').count(), 0, 'Loading must not masquerade as a failure or no repository.');
+  await page.goto(`${baseUrl}/test/visual-preview.html?surface=changes&state=no-repository`);
+  await page.waitForSelector('.empty-state');
+  assert.match(await page.locator('.empty-state h2').textContent(), /Open a Git repository/);
+  await page.goto(`${baseUrl}/test/visual-preview.html?surface=changes&state=error`);
+  await page.waitForSelector('.empty-state');
+  assert.match(await page.locator('.empty-state h2').textContent(), /Could not read repository/);
+  assert.equal(await page.getByRole('button', { name: 'Retry', exact: true }).count(), 1);
 
   await openSurface(page, 'surface=changes&state=empty');
   assert.deepEqual(pageErrors, [], 'The initial Commit view must render and bind interactions without runtime errors.');
   const emptyList = page.locator('.file-list.empty');
+  assert.match(await page.locator('.commit-empty-list').textContent(), /Working tree clean/);
   assert.equal(await emptyList.count(), 1, 'The empty changelist should remain a valid drop target.');
   assert.ok((await emptyList.evaluate((element) => element.getBoundingClientRect().height)) <= 4, 'An idle empty changelist should not reserve visible blank space.');
   const idleHint = await emptyList.evaluate((element) => getComputedStyle(element, '::after').content);
@@ -98,12 +111,14 @@ try {
   assert.equal(await page.locator('.workspace-brief').count(), 0, 'The Commit view should leave repository status to History.');
   assert.equal(await page.locator('.commit-repository-context').count(), 0, 'The lower area should show recent commits without redundant status cards.');
   assert.match(await page.locator('.commit-recent').textContent(), /Recent commits/);
-  assert.equal(await page.locator('[data-recent-commit]').count(), 5, 'The sidebar must show exactly five recent commits.');
+  assert.equal(await page.locator('[data-recent-commit]').count(), 3, 'Recent context should show three commits by default.');
+  await page.getByRole('button', { name: 'Show 5', exact: true }).click();
+  assert.equal(await page.locator('[data-recent-commit]').count(), 5);
+  await page.getByRole('button', { name: 'Show 3', exact: true }).click();
   assert.equal(await page.locator('.commit-recent-row.unpushed .unpushed-badge').count(), 3, 'Exact outgoing commits should have a visible marker in Recent commits.');
   assert.match(await page.locator('.commit-recent-row.unpushed .unpushed-badge').first().getAttribute('title'), /origin\/feature\/keaton\/ACKk8s/);
-  assert.equal(await page.locator('.commit-recent-branch span:last-child').textContent(), 'feature/keaton/ACKk8s');
-  assert.match(await page.locator('.commit-recent-date').first().textContent(), /^\d{4}-\d{2}-\d{2}$/);
-  assert.match(await page.locator('.commit-recent-row time').first().textContent(), /^\d{2}:\d{2}:\d{2}$/);
+  assert.equal(await page.locator('.commit-header-branch span').textContent(), 'feature/keaton/ACKk8s');
+  assert.match(await page.locator('.commit-recent-row time').first().textContent(), /^(\d{2}:\d{2}|\d{2}-\d{2})$/);
   assert.match(await page.locator('.commit-recent-row time').first().getAttribute('title'), /^\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}$/);
   assert.equal(await page.locator('.commit-changes-heading small').textContent(), '3 files');
   assert.equal(await page.locator('.list-heading .count').count(), 0, 'One changelist should not repeat the total count.');
@@ -158,7 +173,7 @@ try {
   assert.equal(await page.locator('[data-recent-commit]').nth(1).getAttribute('aria-expanded'), 'true');
   await page.locator('[data-recent-commit]').nth(1).click();
   const historyIconColor = await page.locator('.commit-toolbar [data-action="show-log"] svg').evaluate((element) => getComputedStyle(element).color);
-  const branchIconColor = await page.locator('.commit-toolbar [data-action="branches"]').evaluate((element) => getComputedStyle(element).color);
+  const branchIconColor = await page.locator('.commit-header-branch .codicon').evaluate((element) => getComputedStyle(element).color);
   assert.equal(historyIconColor, branchIconColor, 'The History shortcut should use the same normal accent as Branches.');
 
   await page.locator('[data-commit-zone-splitter]').focus();
@@ -183,29 +198,85 @@ try {
     assert.ok(layout.lowerHeight <= 288, 'Tall sidebars must not stretch the recent list into unused space.');
   }
   await page.setViewportSize({ width: 360, height: 820 });
-  assert.equal(await page.locator('.commit-panel').evaluate((element) => getComputedStyle(element).flexBasis), '148px', 'The Commit form should be compact by default.');
+  assert.equal(Math.round((await page.locator('#commit-message').boundingBox()).height), 64, 'The editor should be compact by default.');
   await page.locator('#commit-message').fill('Preserve draft during resize');
   await page.locator('[data-select]').first().check({ force: true });
-  const compactHeight = (await page.locator('.commit-panel').boundingBox()).height;
+  const compactHeight = (await page.locator('#commit-message').boundingBox()).height;
   await dragVertical(page, '[data-commit-panel-splitter]', -54);
-  const expandedHeight = (await page.locator('.commit-panel').boundingBox()).height;
+  const expandedHeight = (await page.locator('#commit-message').boundingBox()).height;
   assert.ok(Math.abs(expandedHeight - compactHeight - 54) <= 2, 'Dragging the message divider must follow pointer displacement without jumping to the sidebar bottom.');
   await dragVertical(page, '[data-commit-panel-splitter]', 38);
-  const resizedHeight = (await page.locator('.commit-panel').boundingBox()).height;
+  const resizedHeight = (await page.locator('#commit-message').boundingBox()).height;
   assert.ok(Math.abs(expandedHeight - resizedHeight - 38) <= 2, 'The message area must shrink when its divider moves down.');
   assert.equal(await page.locator('#commit-message').inputValue(), 'Preserve draft during resize');
   assert.equal(await page.locator('[data-select]:checked').count(), 1);
   await page.evaluate(() => sessionStorage.setItem('kivo-fixture-state', JSON.stringify(window.__vscodeState)));
   await page.reload();
   await page.waitForSelector('.commit-panel');
-  assert.ok(Math.abs((await page.locator('.commit-panel').boundingBox()).height - resizedHeight) <= 2, 'A resized message area must survive Webview reloads.');
+  assert.ok(Math.abs((await page.locator('#commit-message').boundingBox()).height - resizedHeight) <= 2, 'A resized message area must survive Webview reloads.');
   assert.equal(await page.locator('#commit-message').inputValue(), 'Preserve draft during resize');
   await page.evaluate(() => sessionStorage.setItem('kivo-fixture-state', JSON.stringify({ commitPanelHeight: 260, commitMessage: 'Legacy draft' })));
   await page.reload();
   await page.waitForSelector('.commit-panel');
-  assert.ok((await page.locator('.commit-panel').boundingBox()).height <= 150, 'Upgrade must recover oversized message heights from the old drag behavior.');
+  assert.equal(Math.round((await page.locator('#commit-message').boundingBox()).height), 64, 'Upgrade must reset the old panel height while keeping the draft.');
   assert.equal(await page.locator('#commit-message').inputValue(), 'Legacy draft');
   await page.evaluate(() => sessionStorage.removeItem('kivo-fixture-state'));
+  await openSurface(page, 'surface=changes');
+  assert.ok(await page.locator('.commit-changes-tree').evaluate(element => element.clientHeight > innerHeight / 2), 'Changed files must own the majority of the default sidebar.');
+  const draft = 'fix: keep this draft\n\nA longer explanation.';
+  await page.locator('#commit-message').fill(draft);
+  await dragVertical(page, '[data-commit-panel-splitter]', 36);
+  assert.ok(Math.abs((await page.locator('#commit-message').boundingBox()).height - 28) <= 1, 'Message must shrink to one line without the old form minimum.');
+  await dragVertical(page, '[data-commit-panel-splitter]', 100);
+  assert.equal((await page.locator('#commit-message').boundingBox()).height, 0, 'Users must be able to fully collapse the editor.');
+  assert.equal(await page.locator('[data-action="commit"]').isVisible(), true, 'Collapsing Message must retain commit actions.');
+  assert.equal(await page.locator('#commit-message').inputValue(), draft);
+  await page.locator('[data-action="edit-commit-message"]').click();
+  assert.equal((await page.locator('#commit-message').boundingBox()).height, 64);
+  assert.equal(await page.locator('#commit-message').evaluate(element => document.activeElement === element), true);
+  const grip = await page.locator('[data-commit-panel-splitter]').boundingBox();
+  const gx = grip.x + grip.width / 2, gy = grip.y + grip.height / 2;
+  await page.mouse.move(gx, gy);
+  await page.mouse.down();
+  await page.mouse.move(gx, gy + 160);
+  assert.equal((await page.locator('#commit-message').boundingBox()).height, 0);
+  await page.mouse.move(gx, gy + 140);
+  assert.ok(Math.abs((await page.locator('#commit-message').boundingBox()).height - 20) <= 1, 'Reversing after the boundary must respond immediately, without a dead zone.');
+  await page.keyboard.press('Escape');
+  await page.mouse.up();
+  assert.equal((await page.locator('#commit-message').boundingBox()).height, 64, 'Cancelling a gesture must restore its starting height.');
+  assert.equal(await page.locator('#commit-message').inputValue(), draft);
+  await page.locator('[data-commit-panel-splitter]').focus();
+  await page.keyboard.press('Home');
+  assert.equal((await page.locator('#commit-message').boundingBox()).height, 0);
+  await page.keyboard.press('ArrowUp');
+  assert.equal((await page.locator('#commit-message').boundingBox()).height, 12, 'Keyboard resizing must allow sizes below one line.');
+  await page.locator('[data-commit-panel-splitter]').dblclick();
+  assert.equal((await page.locator('#commit-message').boundingBox()).height, 64);
+
+  await page.evaluate(() => {
+    fixture.changes = Array.from({ length: 60 }, (_, i) => ({ ...fixture.changes[0], path: `src/files/File${i}.ts` }));
+    fixture.changelists[0].changes = fixture.changes;
+    emit({ type: 'snapshot', payload: fixture });
+    document.querySelector('#kivo-commit-changes').scrollTop = 420;
+    window.__changesList = document.querySelector('#kivo-commit-changes');
+  });
+  const beforeFiles = await page.locator('#kivo-commit-changes').evaluate(list => {
+    const top = list.getBoundingClientRect().top;
+    const row = [...list.querySelectorAll('[data-path]')].find(row => row.getBoundingClientRect().bottom > top + 1);
+    return { path: row.dataset.path, offset: row.getBoundingClientRect().top - top };
+  });
+  await page.evaluate(() => {
+    fixture.changes.unshift({ ...fixture.changes[0], path: 'src/files/NewFile.ts' });
+    emit({ type: 'snapshot', payload: fixture });
+  });
+  const afterFiles = await page.locator('#kivo-commit-changes').evaluate((list, before) => {
+    const row = [...list.querySelectorAll('[data-path]')].find(row => row.dataset.path === before.path);
+    return { same: list === window.__changesList, offset: row.getBoundingClientRect().top - list.getBoundingClientRect().top };
+  }, beforeFiles);
+  assert.equal(afterFiles.same, true, 'Refresh must retain the native file scroll container.');
+  assert.ok(Math.abs(afterFiles.offset - beforeFiles.offset) <= 1, 'Inserting files above the visible area must preserve the reading anchor.');
+  assert.equal(await page.locator('#commit-message').inputValue(), draft);
   await openSurface(page, 'surface=changes');
   await page.locator('[data-action="pull-menu"]').click();
   for (const viewport of [{ width: 360, height: 820 }, { width: 240, height: 420 }, { width: 520, height: 900 }]) {
@@ -225,7 +296,7 @@ try {
   assert.equal(await page.locator('.commit-toolbar [data-action="show-log"]').count(), 1, 'History should have a visible bottom-Panel shortcut.');
   await page.locator('.commit-toolbar [data-action="show-log"]').click();
   assert.ok(await page.evaluate(() => window.__vscodeMessages.some((message) => message.type === 'showLog')), 'The shortcut should focus History through VS Code.');
-  await page.locator('.commit-toolbar [data-action="branches"]').click();
+  await page.locator('.commit-header-branch').click();
   assert.equal(await page.locator('.branch-popup').count(), 1, 'The branch shortcut should open the existing branch picker.');
   const popupFont = await page.locator('.branch-popup').evaluate((element) => getComputedStyle(element).fontFamily);
   const picker = await page.locator('.branch-popup').boundingBox();
@@ -634,6 +705,14 @@ try {
   }
   assert.equal(await page.evaluate(() => window.__historyList === document.querySelector('[data-graph-list]')), true, 'Scrolling and pagination must preserve the native scroll container.');
   assert.ok(await page.locator('.graph-row').count() < 80, 'Long history must retain bounded virtual rendering.');
+  const beforeRefresh = await historyReadingPosition(page);
+  await page.evaluate(() => {
+    fixture.commits.unshift({ ...fixture.commits[0], hash: 'f'.repeat(40), shortHash: 'fffffff', subject: 'A newly arrived commit', refs: [], parents: [fixture.commits[0].hash] });
+    emit({ type: 'snapshot', payload: fixture });
+  });
+  const afterRefresh = await historyReadingPosition(page);
+  assert.equal(afterRefresh.hash, beforeRefresh.hash, 'New commits above the viewport must keep the same visible commit.');
+  assert.ok(Math.abs(afterRefresh.top - beforeRefresh.top) <= 1, 'New commits must retain the visible commit screen position.');
 
   await page.setViewportSize({ width: 1200, height: 500 });
   await openSurface(page, 'surface=history');
@@ -842,6 +921,13 @@ try {
 
   assert.deepEqual(pageErrors, [], 'The webview should not throw browser runtime errors.');
   console.log('Webview E2E passed: reviewed commit, toolbar menu, file states, History focus and Blame reveal, search and filters, branch menus, commit details/diffs, and pagination.');
+} catch (error) {
+  if (page && process.env.KIVO_CAPTURE_DIR) {
+    const directory = path.resolve(process.env.KIVO_CAPTURE_DIR);
+    await mkdir(directory, { recursive: true });
+    await page.screenshot({ path: path.join(directory, '00-failure.png') }).catch(() => {});
+  }
+  throw error;
 } finally {
   await browser?.close();
   server.kill('SIGTERM');
