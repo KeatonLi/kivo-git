@@ -11,10 +11,13 @@ export interface GitChange {
 
 export interface BranchSummary {
   name: string;
+  oid?: string;
   current: boolean;
   remote: boolean;
   upstream?: string;
   tracking?: string;
+  ahead?: number;
+  behind?: number;
 }
 
 export interface CommitSummary {
@@ -27,6 +30,8 @@ export interface CommitSummary {
   /** Paths touched by this commit, used by the IDEA-style Log path filter. */
   paths: string[];
   refs: GitRef[];
+  /** This commit is ahead of the displayed local branch's tracking ref. */
+  unpushedTo?: string;
   lane: number;
   incomingLanes: number[];
   parentLanes: number[];
@@ -77,6 +82,19 @@ export interface LineBlame {
   uncommitted: boolean;
 }
 
+export interface PushPreview {
+  branch: string;
+  upstream: string;
+  remote: string;
+  targetBranch: string;
+  head: string;
+  upstreamOid: string;
+  ahead: number;
+  behind: number;
+  commits: Array<{ hash: string; subject: string }>;
+  fileCount: number;
+}
+
 export interface ChangeList {
   id: string;
   name: string;
@@ -85,6 +103,7 @@ export interface ChangeList {
 }
 
 export interface RepositorySnapshot {
+  operation?: GitOperationState;
   repositoryName: string;
   root: string;
   branch: string;
@@ -98,8 +117,21 @@ export interface RepositorySnapshot {
   branches: BranchSummary[];
   tags?: GitRef[];
   commits: CommitSummary[];
+  /** Latest five commits reachable from HEAD, independent of the History ref filter. */
+  recentCommits?: CommitSummary[];
   /** True when the repository has more history than the current graph window. */
   commitsHasMore: boolean;
 }
 
 export type PullStrategy = 'merge' | 'rebase' | 'ff-only';
+
+export interface WorkflowFile extends CommitFile { oldRevision: string; newRevision: string }
+export interface BranchComparison {
+  currentName: string; targetName: string; currentOid: string; targetOid: string;
+  current: { count: number; commits: Array<{ hash: string; subject: string }> };
+  target: { count: number; commits: Array<{ hash: string; subject: string }> };
+  files: WorkflowFile[];
+}
+export interface StashEntry { hash: string; ref: string; date: string; subject: string }
+export interface StashDetails extends StashEntry { files: WorkflowFile[] }
+export interface GitOperationState { kind: 'merge' | 'rebase' | 'cherry-pick' | 'revert' | 'conflicts'; token: string; files: string[] }

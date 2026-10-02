@@ -2,16 +2,30 @@ import * as vscode from 'vscode';
 import path from 'node:path';
 import { FileIconThemeResolver, type WebviewFileIcon } from './FileIconThemeResolver';
 import { GitClient } from './git/GitClient';
-import type { PullStrategy, RepositorySnapshot } from './git/types';
+import type { CommitDetails, PullStrategy, RepositorySnapshot, WorkflowFile } from './git/types';
 import { SnapshotCoordinator } from './SnapshotCoordinator';
+import { PushReviewSession } from './PushReviewSession';
 import { isMessageAllowedOnSurface, KivoViewTypes, type KivoSurface, surfaceForViewType } from './viewLayout';
 
 type WebviewMessage =
+  | { type: 'workflowRequest'; root: string; requestId: number; kind: 'compare' | 'stashes' | 'stashDetails'; branch?: string; remote?: boolean; hash?: string }
+  | { type: 'closeWorkflow'; requestId: number }
+  | { type: 'openWorkflowDiff'; root: string; requestId: number; path: string }
+  | { type: 'stashCreate'; root: string; message: string }
+  | { type: 'stashApply' | 'stashDrop'; root: string; hash: string }
+  | { type: 'openConflict' | 'resolveConflict'; root: string; path: string }
+  | { type: 'continueOperation' | 'abortOperation'; root: string; token: string }
   | { type: 'ready'; historyRef?: string }
   | { type: 'refresh' | 'fetch' | 'push' | 'loadMoreCommits' | 'showLog' | 'showChanges' | 'openSettings' }
   | { type: 'setHistoryRef'; branch: string }
+  | { type: 'searchHistory'; requestId: number; filters: { query?: string; author?: string; age?: string; path?: string; ref?: string }; limit: number }
   | { type: 'pull'; strategy: PullStrategy }
+  | { type: 'respondPushReview'; id: number; root: string; choice: 'push' | 'cancel' | 'fetch' }
+  | { type: 'pushCommitDetails'; id: number; root: string; hash: string; requestId: number }
+  | { type: 'openPushCommitDiff'; id: number; root: string; hash: string; path: string }
   | { type: 'commitDetails'; hash: string }
+  | { type: 'recentCommitDetails'; hash: string; root: string; requestId: number }
+  | { type: 'openRecentCommitDiff'; hash: string; root: string; path: string; originalPath?: string; kind?: string }
   | { type: 'showRecentCommit'; hash: string }
   | { type: 'openDiff'; path: string; originalPath?: string; kind?: string; preview?: boolean }
   | { type: 'openStagedDiff' | 'openUnstagedDiff'; path: string }
@@ -20,6 +34,7 @@ type WebviewMessage =
   | { type: 'copyPath'; path: string }
   | { type: 'moveFileToChangelist'; path: string }
   | { type: 'moveSelectedFilesToChangelist'; paths: string[] }
+  | { type: 'rollbackFiles'; paths: string[] }
   | { type: 'showFileHistory'; path: string }
   | { type: 'showBranchHistory'; branch: string }
   | { type: 'revealInExplorer'; path: string }
@@ -27,10 +42,13 @@ type WebviewMessage =
   | { type: 'commit'; message: string; paths: string[] }
   | { type: 'commitAndPush'; message: string; paths: string[] }
   | { type: 'reuseCommitMessage'; draft: string }
-  | { type: 'configureGitIdentity' }
+  | { type: 'configureGitIdentity' | 'configureUpstream' }
+  | { type: 'chooseRepository' }
   | { type: 'checkout'; branch: string; remote: boolean }
   | { type: 'createBranch'; startPoint: string }
   | { type: 'mergeBranch'; branch: string }
+  | { type: 'updateBranch'; branch: string }
+  | { type: 'pushBranch'; branch: string }
   | { type: 'renameBranch'; branch: string }
   | { type: 'deleteBranch'; branch: string; remote: boolean }
   | { type: 'copyBranchName'; branch: string }
@@ -43,8 +61,8 @@ type WebviewMessage =
   | { type: 'deleteChangelist'; id: string; name: string }
   | { type: 'setActiveChangelist'; id: string }
   | { type: 'moveFiles'; paths: string[]; listId: string };
-type OperationKind = 'commit' | 'checkout' | 'branch' | 'tag' | 'changelist' | 'move' | 'track' | 'fetch' | 'pull' | 'push';
-type WebviewRepositorySnapshot = RepositorySnapshot & { fileIcons: Record<string, WebviewFileIcon> };
+type OperationKind = 'commit' | 'checkout' | 'branch' | 'tag' | 'changelist' | 'move' | 'track' | 'rollback' | 'fetch' | 'pull' | 'push' | 'identity' | 'stash' | 'conflict';
+type WebviewRepositorySnapshot = RepositorySnapshot & { fileIcons: Record<string, WebviewFileIcon>; repositoryCount: number; allRepositoryChanges: number };
 const HISTORY_PAGE_SIZE = 80;
 
 export class IdeaGitViewProvider implements vscode.WebviewViewProvider, vscode.TextDocumentContentProvider, vscode.Disposable {
@@ -55,6 +73,16 @@ export class IdeaGitViewProvider implements vscode.WebviewViewProvider, vscode.T
   private readonly views = new Map<KivoSurface, vscode.WebviewView>();
   private readonly readyViews = new Set<KivoSurface>();
   private client?: GitClient;
+  private selectedWorkspaceRoot?: string;
+  private repositories: vscode.WorkspaceFolder[] = [];
+  private repositoriesLoading?: Promise<void>;
+  private readonly gitStateListeners = new Map<string, vscode.Disposable>();
+  private badgeCount = 0;
+  private badgeCounts = new Map<string, number>();
+  private badgeRefreshPromise?: Promise<void>;
+  private badgeRefreshQueued = false;
+  private badgeRefreshTimer?: NodeJS.Timeout;
+  private readonly badgePollTimer: NodeJS.Timeout;
   private refreshTimer?: NodeJS.Timeout;
   private autoFetchTimer?: NodeJS.Timeout;
   private autoFetchPromise?: Promise<void>;
@@ -63,6 +91,9 @@ export class IdeaGitViewProvider implements vscode.WebviewViewProvider, vscode.T
   private watchedRoot?: string;
   private operationId = 0;
   private operationRunning = false;
+  private readonly pushReview = new PushReviewSession();
+  private readonly workflowSessions = new Map<KivoSurface, { root: string; id: number; files: WorkflowFile[] }>();
+  private pushPreviewRequestId = 0;
   private lastFetchAttemptAt = 0;
   private lastFetchedAt?: number;
   private syncError?: string;
@@ -83,47 +114,49 @@ export class IdeaGitViewProvider implements vscode.WebviewViewProvider, vscode.T
       this.updateViewTitles(snapshot);
       await this.postSnapshotToReadyViews(snapshot);
       await this.deliverPendingNavigation('history');
+      if (this.hasVisibleView() && vscode.workspace.getConfiguration('ideaGit').get<boolean>('autoFetch', true)) void this.autoFetchIfDue();
     },
     (error) => { void this.showEmpty(error); }
   );
   private readonly emitter = new vscode.EventEmitter<vscode.Uri>();
   readonly onDidChange = this.emitter.event;
+  private readonly repositoryEmitter = new vscode.EventEmitter<void>();
+  readonly onDidChangeRepository = this.repositoryEmitter.event;
 
   constructor(private readonly context: vscode.ExtensionContext) {
     this.context.subscriptions.push(
-      vscode.workspace.onDidSaveTextDocument(() => this.scheduleRefresh(40)),
-      vscode.workspace.onDidCreateFiles(() => this.scheduleRefresh()),
-      vscode.workspace.onDidDeleteFiles(() => this.scheduleRefresh()),
-      vscode.workspace.onDidRenameFiles(() => this.scheduleRefresh()),
+      vscode.workspace.onDidSaveTextDocument(() => { this.scheduleRefresh(40); this.scheduleBadgeRefresh(); }),
+      vscode.workspace.onDidCreateFiles(() => { this.scheduleRefresh(); this.scheduleBadgeRefresh(); }),
+      vscode.workspace.onDidDeleteFiles(() => { this.scheduleRefresh(); this.scheduleBadgeRefresh(); }),
+      vscode.workspace.onDidRenameFiles(() => { this.scheduleRefresh(); this.scheduleBadgeRefresh(); }),
       vscode.workspace.onDidChangeConfiguration((event) => {
         if (event.affectsConfiguration('ideaGit')) this.configurePolling();
         if (event.affectsConfiguration('workbench.iconTheme')) void this.refreshFileIconTheme();
       }),
       vscode.window.onDidChangeActiveColorTheme(() => void this.refreshFileIconTheme()),
       vscode.workspace.onDidChangeWorkspaceFolders(() => {
-        this.client = undefined;
-        this.watchedRoot = undefined;
-        this.lastFetchAttemptAt = 0;
-        this.lastFetchedAt = undefined;
-        this.syncError = undefined;
-        this.syncGeneration += 1;
-        this.commitLimit = HISTORY_PAGE_SIZE;
-        this.historyRef = undefined;
-        this.lastSnapshot = undefined;
-        this.watcher?.dispose();
-        this.coordinator.reset();
+        void this.discoverRepositories();
+        this.resetRepository();
+        void this.postToReadyViews({ type: 'empty', message: 'Loading selected repository…' });
         this.configurePolling();
+        void this.preloadSnapshot();
+        this.scheduleBadgeRefresh();
       })
     );
+    this.badgePollTimer = setInterval(() => void this.refreshBadge(), 30000);
+    void this.refreshBadge();
+    void this.preloadSnapshot();
+    void this.refreshFileIconTheme();
   }
 
   async resolveWebviewView(view: vscode.WebviewView): Promise<void> {
+    await Promise.all([this.discoverRepositories(), this.refreshFileIconTheme()]);
     const surface = surfaceForViewType(view.viewType);
     if (!surface) throw new Error(`Unsupported Kivo Git view type: ${view.viewType}`);
     this.views.set(surface, view);
     view.title = surface === 'changes' ? 'Commit' : 'History';
+    if (surface === 'changes') this.updateBadge();
     this.readyViews.delete(surface);
-    await this.refreshFileIconTheme();
     this.configureWebviewResources(view);
     view.webview.html = this.html(view.webview, surface);
     view.webview.onDidReceiveMessage((message: WebviewMessage) => void this.handle(surface, message));
@@ -132,6 +165,8 @@ export class IdeaGitViewProvider implements vscode.WebviewViewProvider, vscode.T
       if (this.views.get(surface) === view) {
         this.views.delete(surface);
         this.readyViews.delete(surface);
+        this.workflowSessions.delete(surface);
+        if (this.pushReview.current?.surface === surface) this.pushReview.clear();
       }
       this.configurePolling();
     });
@@ -139,11 +174,17 @@ export class IdeaGitViewProvider implements vscode.WebviewViewProvider, vscode.T
   }
 
   async provideTextDocumentContent(uri: vscode.Uri): Promise<string> {
+    await this.discoverRepositories();
     const parameters = new URLSearchParams(uri.query);
     if (parameters.get('empty') === '1') return '';
-    const workspace = vscode.workspace.workspaceFolders?.[0];
+    const root = parameters.get('repo');
+    const workspace = root
+      ? this.availableRepositories().find((folder) => folder.uri.fsPath === root)
+      : this.selectedWorkspace();
     if (!workspace) return '';
-    const client = await this.getClient();
+    const client = workspace.uri.fsPath === this.selectedWorkspace()?.uri.fsPath
+      ? await this.getClient()
+      : new GitClient(workspace.uri.fsPath);
     if (parameters.get('index') === '1') return client.showIndexFile(uri.path.replace(/^\//, ''));
     const revision = parameters.get('commit');
     return revision
@@ -152,9 +193,14 @@ export class IdeaGitViewProvider implements vscode.WebviewViewProvider, vscode.T
   }
 
   async refresh(silent = false): Promise<void> {
-    if (!this.hasVisibleView()) return;
+    if (!silent) await this.autoFetchIfDue(true);
     this.coordinator.request();
-    if (!silent && !vscode.workspace.workspaceFolders?.length) void vscode.window.showInformationMessage(`${IdeaGitViewProvider.productName}: Open a Git repository to start.`);
+    if (!silent && !this.availableRepositories().length) void vscode.window.showInformationMessage(`${IdeaGitViewProvider.productName}: Open a Git repository to start.`);
+  }
+
+  private async preloadSnapshot(): Promise<void> {
+    await this.discoverRepositories();
+    if (this.availableRepositories().length) this.coordinator.request();
   }
 
   async showChanges(): Promise<void> {
@@ -167,7 +213,7 @@ export class IdeaGitViewProvider implements vscode.WebviewViewProvider, vscode.T
 
   async openResourceDiff(uri?: vscode.Uri): Promise<void> {
     try {
-      const filePath = this.workspaceRelativePath(uri);
+      const filePath = await this.workspaceRelativePath(uri);
       const client = await this.getClient();
       const snapshot = await client.snapshot(this.commitLimit);
       const change = snapshot.changes.find((candidate) => candidate.path === filePath);
@@ -183,7 +229,7 @@ export class IdeaGitViewProvider implements vscode.WebviewViewProvider, vscode.T
 
   async showFileHistory(uri?: vscode.Uri): Promise<void> {
     try {
-      const filePath = this.workspaceRelativePath(uri);
+      const filePath = await this.workspaceRelativePath(uri);
       this.historyRef = undefined;
       this.pendingHistoryBranchFilter = undefined;
       this.pendingHistoryPathFilter = filePath;
@@ -194,9 +240,28 @@ export class IdeaGitViewProvider implements vscode.WebviewViewProvider, vscode.T
     }
   }
 
+  async showCommitInHistory(hash: string, uri?: vscode.Uri): Promise<void> {
+    try {
+      if (!/^[0-9a-f]{40}$/i.test(hash)) throw new Error('The Blame commit hash is invalid.');
+      if (uri) await this.workspaceRelativePath(uri);
+      this.historyRef = undefined;
+      this.commitLimit = HISTORY_PAGE_SIZE;
+      this.lastSnapshot = undefined;
+      this.coordinator.reset();
+      this.pendingHistoryBranchFilter = undefined;
+      this.pendingHistoryPathFilter = undefined;
+      this.pendingHistoryCommitHash = hash;
+      await this.showLog();
+      await this.refresh(true);
+      await this.deliverPendingNavigation('history');
+    } catch (error) {
+      void vscode.window.showErrorMessage(`${IdeaGitViewProvider.productName}: ${this.errorText(error)}`);
+    }
+  }
+
   async showResourceInChanges(uri?: vscode.Uri): Promise<void> {
     try {
-      const filePath = this.workspaceRelativePath(uri);
+      const filePath = await this.workspaceRelativePath(uri);
       const snapshot = await (await this.getClient()).snapshot(this.commitLimit);
       if (!snapshot.changes.some((change) => change.path === filePath)) {
         void vscode.window.showInformationMessage(`${IdeaGitViewProvider.productName}: ${filePath} has no working tree changes.`);
@@ -212,26 +277,30 @@ export class IdeaGitViewProvider implements vscode.WebviewViewProvider, vscode.T
 
   async moveResourceToChangelist(uri?: vscode.Uri): Promise<void> {
     try {
-      const filePath = this.workspaceRelativePath(uri);
+      const filePath = await this.workspaceRelativePath(uri);
       await this.moveFileToChangelist(await this.getClient(), filePath);
     } catch (error) {
       void vscode.window.showErrorMessage(`${IdeaGitViewProvider.productName}: ${this.errorText(error)}`);
     }
   }
 
-  private workspaceRelativePath(uri?: vscode.Uri): string {
+  private async workspaceRelativePath(uri?: vscode.Uri): Promise<string> {
+    await this.discoverRepositories();
     const resource = uri ?? vscode.window.activeTextEditor?.document.uri;
-    const workspace = vscode.workspace.workspaceFolders?.[0];
-    if (!workspace) throw new Error('Open a folder containing a Git repository.');
     if (!resource || resource.scheme !== 'file') throw new Error('Choose a file in the current workspace.');
-    const root = path.resolve(workspace.uri.fsPath);
     const resolved = path.resolve(resource.fsPath);
+    const workspace = this.availableRepositories()
+      .filter((candidate) => resolved.startsWith(`${path.resolve(candidate.uri.fsPath)}${path.sep}`))
+      .sort((left, right) => right.uri.fsPath.length - left.uri.fsPath.length)[0];
+    if (!workspace) throw new Error('The selected file is outside the open workspaces.');
+    this.selectWorkspace(workspace);
+    const root = path.resolve(workspace.uri.fsPath);
     if (resolved === root || !resolved.startsWith(`${root}${path.sep}`)) throw new Error('The selected file is outside the current workspace.');
     return path.relative(root, resolved).split(path.sep).join('/');
   }
 
   private async deliverPendingNavigation(surface: KivoSurface): Promise<void> {
-    if (!this.readyViews.has(surface)) return;
+    if (!this.readyViews.has(surface) || !this.lastSnapshot) return;
     if (surface === 'history' && this.pendingHistoryPathFilter) {
       const filePath = this.pendingHistoryPathFilter;
       this.pendingHistoryPathFilter = undefined;
@@ -242,7 +311,7 @@ export class IdeaGitViewProvider implements vscode.WebviewViewProvider, vscode.T
       this.pendingHistoryBranchFilter = undefined;
       await this.postToView(surface, { type: 'applyBranchFilter', branch });
     }
-    if (surface === 'history' && this.pendingHistoryCommitHash && this.lastSnapshot?.commits.some((commit) => commit.hash === this.pendingHistoryCommitHash)) {
+    if (surface === 'history' && this.pendingHistoryCommitHash) {
       const hash = this.pendingHistoryCommitHash;
       this.pendingHistoryCommitHash = undefined;
       await this.postToView(surface, { type: 'revealCommit', hash });
@@ -278,7 +347,63 @@ export class IdeaGitViewProvider implements vscode.WebviewViewProvider, vscode.T
   }
 
   private async postSnapshotToReadyViews(snapshot: RepositorySnapshot): Promise<void> {
+    this.badgeCounts.set(snapshot.root, snapshot.changes.length);
+    this.badgeCount = [...this.badgeCounts.values()].reduce((total, count) => total + count, 0);
+    this.updateBadge();
     await Promise.all([...this.readyViews].map((surface) => this.postSnapshotToView(surface, snapshot)));
+  }
+
+  private updateBadge(): void {
+    const view = this.views.get('changes');
+    if (view) view.badge = this.badgeCount ? {
+      value: this.badgeCount,
+      tooltip: `${this.badgeCount} uncommitted ${this.badgeCount === 1 ? 'file' : 'files'} across all Git repositories. The Commit view shows the selected repository.`
+    } : undefined;
+  }
+
+  private scheduleBadgeRefresh(): void {
+    if (this.badgeRefreshTimer) clearTimeout(this.badgeRefreshTimer);
+    this.badgeRefreshTimer = setTimeout(() => {
+      this.badgeRefreshTimer = undefined;
+      void this.refreshBadge();
+    }, 180);
+  }
+
+  private async refreshBadge(): Promise<void> {
+    if (this.badgeRefreshPromise) {
+      this.badgeRefreshQueued = true;
+      return this.badgeRefreshPromise;
+    }
+    const task = (async () => {
+      await this.discoverRepositories();
+      const roots = [...new Set(this.availableRepositories().map((repository) => repository.uri.fsPath))];
+      if (!roots.length) {
+        this.badgeCount = 0;
+        this.badgeCounts.clear();
+        this.updateBadge();
+        return;
+      }
+      const counts = await Promise.allSettled(roots.map((root) => new GitClient(root).changedFilesCount()));
+      // Keep the last complete count if a repository is temporarily unavailable.
+      if (counts.some((result) => result.status === 'rejected')) return;
+      const previousCount = this.badgeCount;
+      this.badgeCounts = new Map(roots.map((root, index) => [root, counts[index]?.status === 'fulfilled' ? counts[index].value : 0]));
+      this.badgeCount = counts.reduce((total, result) => total + (result.status === 'fulfilled' ? result.value : 0), 0);
+      this.updateBadge();
+      if (this.lastSnapshot && this.badgeCount !== previousCount) {
+        await Promise.all([...this.readyViews].map((surface) => this.postSnapshotToView(surface, this.lastSnapshot!)));
+      }
+    })();
+    this.badgeRefreshPromise = task;
+    try {
+      await task;
+    } finally {
+      this.badgeRefreshPromise = undefined;
+      if (this.badgeRefreshQueued) {
+        this.badgeRefreshQueued = false;
+        this.scheduleBadgeRefresh();
+      }
+    }
   }
 
   private async postSnapshotToView(surface: KivoSurface, snapshot: RepositorySnapshot): Promise<void> {
@@ -287,6 +412,8 @@ export class IdeaGitViewProvider implements vscode.WebviewViewProvider, vscode.T
     if (!view) return;
     const payload: WebviewRepositorySnapshot = {
       ...snapshot,
+      repositoryCount: this.availableRepositories().length,
+      allRepositoryChanges: this.badgeCount,
       fileIcons: surface === 'changes'
         ? this.fileIconTheme.iconsFor(view.webview, snapshot.changes.map((change) => change.path))
         : {}
@@ -295,7 +422,8 @@ export class IdeaGitViewProvider implements vscode.WebviewViewProvider, vscode.T
   }
 
   private async getClient(): Promise<GitClient> {
-    const workspace = vscode.workspace.workspaceFolders?.[0];
+    await this.discoverRepositories();
+    const workspace = this.selectedWorkspace();
     if (!workspace) throw new Error('Open a folder containing a Git repository.');
     if (!this.client || this.client.workspaceRoot !== workspace.uri.fsPath) {
       this.client = new GitClient(workspace.uri.fsPath);
@@ -305,19 +433,129 @@ export class IdeaGitViewProvider implements vscode.WebviewViewProvider, vscode.T
     return this.client;
   }
 
+  private selectedWorkspace(): vscode.WorkspaceFolder | undefined {
+    return this.availableRepositories().find((folder) => folder.uri.fsPath === this.selectedWorkspaceRoot)
+      || this.availableRepositories()[0];
+  }
+
+  private availableRepositories(): vscode.WorkspaceFolder[] {
+    return this.repositories.length ? this.repositories : [...(vscode.workspace.workspaceFolders || [])];
+  }
+
+  private async discoverRepositories(): Promise<void> {
+    if (this.repositoriesLoading) return this.repositoriesLoading;
+    this.repositoriesLoading = (async () => {
+      type GitRepository = { rootUri: vscode.Uri; state?: { onDidChange: vscode.Event<void> } };
+      type GitApi = {
+        repositories: GitRepository[];
+        onDidOpenRepository: vscode.Event<GitRepository>;
+        onDidCloseRepository: vscode.Event<GitRepository>;
+      };
+      const extension = vscode.extensions.getExtension<{ getAPI(version: 1): GitApi }>('vscode.git');
+      if (!extension) return;
+      const api = (await extension.activate()).getAPI(1);
+      const update = () => {
+        const previous = this.repositories.map((repository) => repository.uri.fsPath).join('\0');
+        const gitRepositories = api.repositories.filter((repository) => repository.rootUri.scheme === 'file');
+        const roots = new Set(gitRepositories.map((repository) => repository.rootUri.fsPath));
+        for (const [root, listener] of this.gitStateListeners) {
+          if (!roots.has(root)) {
+            listener.dispose();
+            this.gitStateListeners.delete(root);
+          }
+        }
+        for (const repository of gitRepositories) {
+          const root = repository.rootUri.fsPath;
+          if (this.gitStateListeners.has(root) || !repository.state?.onDidChange) continue;
+          this.gitStateListeners.set(root, repository.state.onDidChange(() => {
+            if (this.selectedWorkspace()?.uri.fsPath === root) this.scheduleRefresh(80);
+          }));
+        }
+        this.repositories = gitRepositories
+          .map((repository, index) => ({ uri: repository.rootUri, name: path.basename(repository.rootUri.fsPath), index }));
+        if (previous === this.repositories.map((repository) => repository.uri.fsPath).join('\0')) return;
+        if (this.selectedWorkspaceRoot && !this.availableRepositories().some((repository) => repository.uri.fsPath === this.selectedWorkspaceRoot)) {
+          this.selectedWorkspaceRoot = undefined;
+          this.resetRepository();
+        }
+        void this.refresh(true);
+        this.scheduleBadgeRefresh();
+      };
+      this.context.subscriptions.push(api.onDidOpenRepository(update), api.onDidCloseRepository(update));
+      update();
+    })().catch(() => { /* Fall back to the workspace folders when Git is unavailable. */ });
+    return this.repositoriesLoading;
+  }
+
+  private selectWorkspace(workspace: vscode.WorkspaceFolder): void {
+    if (workspace.uri.fsPath === this.selectedWorkspace()?.uri.fsPath) return;
+    if (this.operationRunning) throw new Error('Finish the current Git operation before switching repositories.');
+    this.selectedWorkspaceRoot = workspace.uri.fsPath;
+    this.resetRepository();
+    void this.postToReadyViews({ type: 'empty', message: 'Loading selected repository…' });
+    this.configurePolling();
+    if (!this.hasVisibleView()) void this.refresh(true);
+  }
+
+  private resetRepository(): void {
+    this.workflowSessions.clear();
+    this.pushReview.clear();
+    this.pushPreviewRequestId++;
+    this.client = undefined;
+    this.watcher?.dispose();
+    this.watchedRoot = undefined;
+    this.lastSnapshot = undefined;
+    this.lastFetchAttemptAt = 0;
+    this.lastFetchedAt = undefined;
+    this.syncError = undefined;
+    this.syncGeneration += 1;
+    this.commitLimit = HISTORY_PAGE_SIZE;
+    this.historyRef = undefined;
+    this.pendingHistoryPathFilter = undefined;
+    this.pendingHistoryBranchFilter = undefined;
+    this.pendingHistoryCommitHash = undefined;
+    this.pendingChangesReveal = undefined;
+    this.coordinator.reset();
+  }
+
+  private async chooseRepository(): Promise<void> {
+    await this.discoverRepositories();
+    const folders = this.availableRepositories();
+    if (folders.length < 2) return;
+    const selected = await vscode.window.showQuickPick(folders.map((folder) => ({
+      label: folder.name,
+      description: `${this.badgeCounts.get(folder.uri.fsPath) ?? '—'} changed files`,
+      detail: folder.uri.fsPath,
+      folder
+    })), { title: 'Choose Kivo Git Repository', placeHolder: 'Select a detected Git repository' });
+    if (!selected) return;
+    try {
+      this.selectWorkspace(selected.folder);
+    } catch (error) {
+      await this.postToReadyViews({ type: 'notice', phase: 'error', message: this.errorText(error) });
+    }
+  }
+
   private watch(workspace: vscode.WorkspaceFolder): void {
     this.watcher?.dispose();
     this.watchedRoot = workspace.uri.fsPath;
     this.watcher = vscode.workspace.createFileSystemWatcher(new vscode.RelativePattern(workspace, '**/*'));
-    this.watcher.onDidChange(() => this.scheduleRefresh());
-    this.watcher.onDidCreate(() => this.scheduleRefresh());
-    this.watcher.onDidDelete(() => this.scheduleRefresh());
+    const onChange = (uri: vscode.Uri) => {
+      // Snapshot reads acquire a changelist lock. Watching that lock would make
+      // every snapshot trigger another snapshot indefinitely.
+      if (!this.client?.isChangelistStorageFile(uri.fsPath)) {
+        this.scheduleRefresh();
+        this.scheduleBadgeRefresh();
+      }
+    };
+    this.watcher.onDidChange(onChange);
+    this.watcher.onDidCreate(onChange);
+    this.watcher.onDidDelete(onChange);
   }
 
   private refreshDueAt?: number;
 
   private scheduleRefresh(delay = 140): void {
-    if (!this.hasVisibleView()) return;
     const dueAt = Date.now() + delay;
     if (this.debounceTimer && this.refreshDueAt !== undefined && this.refreshDueAt <= dueAt) return;
     if (this.debounceTimer) clearTimeout(this.debounceTimer);
@@ -354,7 +592,7 @@ export class IdeaGitViewProvider implements vscode.WebviewViewProvider, vscode.T
       return;
     }
     if (message.type === 'showRecentCommit') {
-      if (!this.lastSnapshot?.commits.some((commit) => commit.hash === message.hash)) return;
+      if (![...(this.lastSnapshot?.recentCommits || []), ...(this.lastSnapshot?.commits || [])].some((commit) => commit.hash === message.hash)) return;
       this.pendingHistoryCommitHash = message.hash;
       await this.showLog();
       await this.deliverPendingNavigation('history');
@@ -364,13 +602,33 @@ export class IdeaGitViewProvider implements vscode.WebviewViewProvider, vscode.T
       await this.showChanges();
       return;
     }
+    if (message.type === 'chooseRepository') {
+      await this.chooseRepository();
+      return;
+    }
     if (message.type === 'openSettings') {
-      await vscode.commands.executeCommand('workbench.action.openSettings', '@ext:keatonli.idea-git');
+      await vscode.commands.executeCommand('workbench.action.openSettings', '@ext:KeatonLi.kivo-git');
       return;
     }
     try {
       const client = await this.getClient();
       switch (message.type) {
+        case 'searchHistory': {
+          const requestId = Number(message.requestId);
+          if (!Number.isSafeInteger(requestId) || requestId < 0) return;
+          const root = client.workspaceRoot;
+          const filters = message.filters || {};
+          try {
+            const result = await client.searchCommits({
+              query: String(filters.query || '').slice(0, 300), author: String(filters.author || '').slice(0, 200),
+              age: String(filters.age || ''), path: String(filters.path || '').slice(0, 300), ref: String(filters.ref || '')
+            }, Math.max(1, Number(message.limit) || HISTORY_PAGE_SIZE));
+            if (this.selectedWorkspace()?.uri.fsPath === root) await this.postToView(surface, { type: 'historySearchResults', requestId, root, ...result });
+          } catch (error) {
+            await this.postToView(surface, { type: 'historySearchError', requestId, root, message: this.errorText(error) });
+          }
+          return;
+        }
         case 'loadMoreCommits':
           this.commitLimit += HISTORY_PAGE_SIZE;
           await this.refresh(true);
@@ -381,6 +639,52 @@ export class IdeaGitViewProvider implements vscode.WebviewViewProvider, vscode.T
           // A different ref can produce byte-identical commits; still acknowledge the selection.
           this.coordinator.reset();
           await this.refresh(true);
+          return;
+        case 'pushCommitDetails': {
+          if (message.root !== client.workspaceRoot || this.selectedWorkspace()?.uri.fsPath !== client.workspaceRoot ||
+              !this.pushReview.allowsCommit(message.id, surface, message.root, message.hash) ||
+              !Number.isSafeInteger(message.requestId) || message.requestId < 0) return;
+          try {
+            const details = await client.commitDetails(message.hash);
+            if (this.selectedWorkspace()?.uri.fsPath !== client.workspaceRoot ||
+                !this.pushReview.allowsCommit(message.id, surface, message.root, message.hash)) return;
+            const view = this.views.get(surface);
+            await this.postToView(surface, { type: 'pushCommitDetails', id: message.id, root: message.root, requestId: message.requestId,
+              payload: { ...details, fileIcons: view ? this.fileIconTheme.iconsFor(view.webview, details.files.map((file) => file.path)) : {} } });
+          } catch (error) {
+            await this.postToView(surface, { type: 'pushCommitDetailsError', id: message.id, root: message.root, requestId: message.requestId, hash: message.hash, message: this.errorText(error) });
+          }
+          return;
+        }
+        case 'openPushCommitDiff': {
+          if (message.root !== client.workspaceRoot || this.selectedWorkspace()?.uri.fsPath !== client.workspaceRoot ||
+              !this.pushReview.allowsCommit(message.id, surface, message.root, message.hash)) return;
+          const details = await client.commitDetails(message.hash);
+          const file = details.files.find((candidate) => candidate.path === message.path);
+          if (!file || !this.pushReview.allowsCommit(message.id, surface, message.root, message.hash)) return;
+          await this.openCommitDiff(client, message.hash, file.path, file.originalPath, file.status, details, true);
+          return;
+        }
+        case 'recentCommitDetails': {
+          if (message.root !== this.lastSnapshot?.root || this.selectedWorkspace()?.uri.fsPath !== client.workspaceRoot ||
+              !this.lastSnapshot?.recentCommits?.some((commit) => commit.hash === message.hash) ||
+              !Number.isSafeInteger(message.requestId) || message.requestId < 0) return;
+          const root = message.root;
+          try {
+            const details = await client.commitDetails(message.hash);
+            if (this.lastSnapshot?.root !== root || this.selectedWorkspace()?.uri.fsPath !== client.workspaceRoot) return;
+            const view = this.views.get(surface);
+            await this.postToView(surface, { type: 'recentCommitDetails', root, requestId: message.requestId,
+              payload: { ...details, fileIcons: view ? this.fileIconTheme.iconsFor(view.webview, details.files.map((file) => file.path)) : {} } });
+          } catch (error) {
+            await this.postToView(surface, { type: 'recentCommitDetailsError', root, requestId: message.requestId, hash: message.hash, message: this.errorText(error) });
+          }
+          return;
+        }
+        case 'openRecentCommitDiff':
+          if (message.root !== this.lastSnapshot?.root || this.selectedWorkspace()?.uri.fsPath !== client.workspaceRoot ||
+              !this.lastSnapshot?.recentCommits?.some((commit) => commit.hash === message.hash)) return;
+          await this.openCommitDiff(client, message.hash, message.path, message.originalPath, message.kind);
           return;
         case 'commitDetails':
           try {
@@ -422,6 +726,9 @@ export class IdeaGitViewProvider implements vscode.WebviewViewProvider, vscode.T
         case 'moveSelectedFilesToChangelist':
           await this.chooseChangelistForFiles(client, message.paths);
           return;
+        case 'rollbackFiles':
+          await this.rollbackFiles(client, message.paths);
+          return;
         case 'showFileHistory':
           this.workspaceFileUri(message.path);
           this.historyRef = undefined;
@@ -448,11 +755,86 @@ export class IdeaGitViewProvider implements vscode.WebviewViewProvider, vscode.T
         case 'openCommitDiff':
           await this.openCommitDiff(client, message.hash, message.path, message.originalPath, message.kind);
           return;
+        case 'workflowRequest': {
+          if (message.root !== client.workspaceRoot || !Number.isSafeInteger(message.requestId) || message.requestId < 0) return;
+          const session = { root: client.workspaceRoot, id: message.requestId, files: [] as WorkflowFile[] };
+          this.workflowSessions.set(surface, session);
+          try {
+            let payload;
+            if (message.kind === 'compare' && typeof message.branch === 'string') {
+              payload = await client.workflows.compare(`refs/${message.remote ? 'remotes' : 'heads'}/${message.branch}`);
+              session.files = payload.files;
+            } else if (message.kind === 'stashDetails' && typeof message.hash === 'string') {
+              payload = await client.workflows.stashDetails(message.hash);
+              session.files = payload.files;
+            } else if (message.kind === 'stashes') payload = await client.workflows.stashes();
+            else throw new Error('Choose a valid Git workflow.');
+            if (this.workflowSessions.get(surface) !== session || this.selectedWorkspace()?.uri.fsPath !== session.root) return;
+            await this.postToView(surface, { type: 'workflowResult', root: session.root, requestId: session.id, payload });
+          } catch (error) {
+            if (this.workflowSessions.get(surface) === session) await this.postToView(surface, { type: 'workflowResult', root: session.root, requestId: session.id, error: this.errorText(error) });
+          }
+          return;
+        }
+        case 'closeWorkflow':
+          if (this.workflowSessions.get(surface)?.id === message.requestId) this.workflowSessions.delete(surface);
+          return;
+        case 'openWorkflowDiff': {
+          const session = this.workflowSessions.get(surface);
+          if (!session || session.root !== client.workspaceRoot || message.root !== session.root || message.requestId !== session.id) return;
+          const file = session.files.find(file => file.path === message.path);
+          if (!file) return;
+          const oldUri = this.revisionUri(file.originalPath || file.path, file.status === 'A' ? 'empty=1' : `commit=${file.oldRevision}`);
+          const newUri = this.revisionUri(file.path, file.status === 'D' ? 'empty=1' : `commit=${file.newRevision}`);
+          await vscode.commands.executeCommand('vscode.diff', oldUri, newUri, `${file.path} (${file.oldRevision.slice(0, 7)} ↔ ${file.newRevision.slice(0, 7)})`, { preview: false, preserveFocus: true });
+          return;
+        }
+        case 'stashCreate':
+          if (message.root !== client.workspaceRoot || typeof message.message !== 'string') return;
+          await this.operation('stash', 'Saving changes…', async () => { await client.workflows.saveStash(message.message); }, 'Changes saved in Stashes', false, surface);
+          return;
+        case 'stashApply':
+          if (message.root !== client.workspaceRoot) return;
+          await this.operation('stash', 'Restoring stash…', () => client.workflows.applyStash(message.hash), 'Stash restored; saved copy kept', false, surface);
+          return;
+        case 'stashDrop': {
+          if (message.root !== client.workspaceRoot) return;
+          const stash = (await client.workflows.stashes()).find(stash => stash.hash === message.hash);
+          if (!stash) return;
+          const answer = await vscode.window.showWarningMessage(`Delete saved stash ${stash.hash.slice(0, 8)}?`, { modal: true, detail: `${stash.subject}\nThis deletes the saved copy. Files already restored to the working tree remain.` }, 'Delete Stash');
+          if (answer === 'Delete Stash' && this.selectedWorkspace()?.uri.fsPath === client.workspaceRoot) await this.operation('stash', 'Deleting stash…', () => client.workflows.dropStash(stash.hash), 'Saved stash deleted', false, surface);
+          return;
+        }
+        case 'openConflict': {
+          if (message.root !== client.workspaceRoot || !(await client.workflows.operationState())?.files.includes(message.path)) return;
+          const uri = vscode.Uri.file(path.join(client.workspaceRoot, message.path));
+          const extension = vscode.extensions.getExtension('vscode.git');
+          if (extension && !extension.isActive) await extension.activate();
+          if (!(await vscode.commands.getCommands(true)).includes('git.openMergeEditor')) throw new Error('Enable the built-in Git extension to open the Merge Editor.');
+          await vscode.commands.executeCommand('git.openMergeEditor', uri);
+          return;
+        }
+        case 'resolveConflict':
+          if (message.root !== client.workspaceRoot) return;
+          await this.operation('conflict', 'Marking file resolved…', () => client.workflows.resolveConflict(message.path), 'File staged as resolved', false, surface);
+          return;
+        case 'continueOperation':
+          if (message.root !== client.workspaceRoot) return;
+          await this.operation('conflict', 'Continuing Git operation…', () => client.workflows.finishOperation(message.token, 'continue'), 'Git operation continued', false, surface);
+          return;
+        case 'abortOperation': {
+          if (message.root !== client.workspaceRoot) return;
+          const state = await client.workflows.operationState();
+          if (!state || state.token !== message.token || state.kind === 'conflicts') return;
+          const answer = await vscode.window.showWarningMessage(`Abort ${state.kind}?`, { modal: true, detail: 'Git will return to the state before this operation. Resolution edits made during it may be discarded.' }, 'Abort Operation');
+          if (answer === 'Abort Operation' && this.selectedWorkspace()?.uri.fsPath === client.workspaceRoot) await this.operation('conflict', 'Aborting Git operation…', () => client.workflows.finishOperation(message.token, 'abort'), 'Git operation aborted', false, surface);
+          return;
+        }
         case 'commit':
           await this.operation('commit', 'Creating commit…', async () => client.commit(message.message, message.paths), 'Commit created', true);
           return;
         case 'commitAndPush':
-          await this.commitAndPush(client, message.message, message.paths);
+          await this.commitAndPush(client, message.message, message.paths, surface);
           return;
         case 'reuseCommitMessage':
           await this.reuseCommitMessage(client, message.draft);
@@ -460,14 +842,34 @@ export class IdeaGitViewProvider implements vscode.WebviewViewProvider, vscode.T
         case 'configureGitIdentity':
           await this.configureGitIdentity(client);
           return;
+        case 'configureUpstream': {
+          const remoteBranches = (this.lastSnapshot?.branches || []).filter((branch) => branch.remote);
+          if (!remoteBranches.length) {
+            void vscode.window.showInformationMessage('No remote branches found. Add a remote or Fetch, then try again.');
+            return;
+          }
+          const current = this.lastSnapshot?.branch || '';
+          const choice = await vscode.window.showQuickPick(remoteBranches.map((branch) => ({
+            label: branch.name,
+            description: branch.name.endsWith(`/${current}`) ? 'Same branch name' : undefined
+          })), { title: `Track a remote branch from ${current}`, placeHolder: 'Choose the remote branch to pull from and push to' });
+          if (choice) await this.operation('branch', 'Setting tracking branch…', () => client.setUpstream(choice.label), `Tracking ${choice.label}`);
+          return;
+        }
         case 'checkout':
-          await this.operation('checkout', `Switching to ${message.branch}…`, async () => client.checkout(message.branch, message.remote), `Switched to ${message.branch}`);
+          await this.checkoutWithReview(client, surface, message.branch, message.remote);
           return;
         case 'createBranch':
           await this.createBranch(client, message.startPoint);
           return;
         case 'mergeBranch':
           await this.mergeBranch(client, message.branch);
+          return;
+        case 'updateBranch':
+          await this.operation('branch', `Updating ${message.branch}…`, () => client.updateLocalBranch(message.branch), `${message.branch} updated from its remote`);
+          return;
+        case 'pushBranch':
+          await this.pushWithPreview(client, surface, false, message.branch);
           return;
         case 'renameBranch':
           await this.renameBranch(client, message.branch);
@@ -518,13 +920,32 @@ export class IdeaGitViewProvider implements vscode.WebviewViewProvider, vscode.T
           await this.operation('pull', `Pulling with ${message.strategy === 'ff-only' ? 'fast-forward only' : message.strategy}…`, () => client.pull(message.strategy), 'Repository updated');
           return;
         case 'push':
-          await this.operation('push', 'Pushing…', () => client.push(), 'Push complete');
+          await this.pushWithPreview(client, surface);
+          return;
+        case 'respondPushReview':
+          await this.respondPushReview(client, surface, message);
+          return;
       }
     } catch (error) {
       const detail = this.errorText(error);
       await this.postToView(surface, { type: 'notice', phase: 'error', message: detail });
       void vscode.window.showErrorMessage(`${IdeaGitViewProvider.productName}: ${detail}`);
     }
+  }
+
+  private async checkoutWithReview(client: GitClient, surface: KivoSurface, branch: string, remote: boolean): Promise<void> {
+    const snapshot = await client.snapshot(5);
+    if (snapshot.operation) throw new Error('Finish the current Git operation or conflicts before switching branches.');
+    let stashFirst = false;
+    if (snapshot.changes.length) {
+      const choice = await vscode.window.showQuickPick([
+        { label: 'Stash and Switch', description: `Save ${snapshot.changes.length} changed files, including untracked files; keep ignored files` },
+        { label: 'Switch with Changes', description: 'Carry changes over; Git refuses if they would be overwritten' }
+      ], { title: `Switch to ${branch}`, placeHolder: 'Keep your current work before switching branches' });
+      if (!choice || this.selectedWorkspace()?.uri.fsPath !== client.workspaceRoot) return;
+      stashFirst = choice.label === 'Stash and Switch';
+    }
+    await this.operation('checkout', `Switching to ${branch}…`, () => stashFirst ? client.stashAndCheckout(branch, remote) : client.checkout(branch, remote), `Switched to ${branch}${stashFirst ? '; changes saved in Stashes' : ''}`, false, surface);
   }
 
   private async createChangelist(client: GitClient): Promise<void> {
@@ -633,10 +1054,58 @@ export class IdeaGitViewProvider implements vscode.WebviewViewProvider, vscode.T
     await this.operation('changelist', 'Deleting changelist…', () => client.deleteChangelist(id), 'Changelist deleted');
   }
 
-  private async commitAndPush(client: GitClient, message: string, paths: string[]): Promise<void> {
+  private async commitAndPush(client: GitClient, message: string, paths: string[], surface: KivoSurface): Promise<void> {
     const committed = await this.operation('commit', 'Creating commit…', () => client.commit(message, paths), 'Commit created', true);
     if (!committed) return;
-    await this.operation('push', 'Pushing new commit…', () => client.push(), 'Commit pushed');
+    try {
+      if (!await this.pushWithPreview(client, surface, true)) {
+        void vscode.window.showInformationMessage('The commit is saved locally. You can push it later from Kivo Git.');
+      }
+    } catch (error) {
+      void vscode.window.showWarningMessage(`The commit is saved locally, but push could not start: ${this.errorText(error)}`);
+    }
+  }
+
+  private async pushWithPreview(client: GitClient, surface: KivoSurface, afterCommit = false, branch?: string): Promise<boolean> {
+    if (this.operationRunning) return false;
+    const requestId = ++this.pushPreviewRequestId;
+    const generation = this.syncGeneration;
+    const previous = this.pushReview.current;
+    this.pushReview.clear();
+    if (previous) await this.postToView(previous.surface, { type: 'pushReviewClosed', id: previous.id });
+    const preview = branch ? await client.pushBranchPreview(branch) : await client.pushPreview();
+    if (requestId !== this.pushPreviewRequestId || generation !== this.syncGeneration || this.selectedWorkspace()?.uri.fsPath !== client.workspaceRoot) return false;
+    if (!preview.ahead) {
+      void vscode.window.showInformationMessage('There are no outgoing commits to push.');
+      return false;
+    }
+    const review = this.pushReview.open({ surface, root: client.workspaceRoot, preview, afterCommit, branch });
+    await this.postToView(surface, { type: 'pushReview', ...review });
+    return true;
+  }
+
+  private async respondPushReview(client: GitClient, surface: KivoSurface, message: Extract<WebviewMessage, { type: 'respondPushReview' }>): Promise<void> {
+    if (!['push', 'cancel', 'fetch'].includes(message.choice) || message.root !== client.workspaceRoot) return;
+    const review = this.pushReview.take(message.id, surface, client.workspaceRoot);
+    if (!review) return;
+    await this.postToView(surface, { type: 'pushReviewClosed', id: review.id });
+    if (message.choice === 'cancel') return;
+    if (this.selectedWorkspace()?.uri.fsPath !== client.workspaceRoot) return;
+    if (message.choice === 'fetch') { await this.fetchAndReview(client, surface); return; }
+    if (review.preview.behind || review.rejection) return;
+    const { preview, branch } = review;
+    const pushed = await this.operation('push', 'Pushing…', () => branch ? client.pushBranch(branch, preview) : client.push(preview), 'Push complete', false, surface);
+    if (!pushed && /rejected|non-fast-forward|fetch first|failed to push/i.test(this.syncError || '')) {
+      if (this.selectedWorkspace()?.uri.fsPath !== client.workspaceRoot) return;
+      const rejected = this.pushReview.open({ ...review, rejection: 'The remote rejected this push. Fetch the latest commits and review the branch before pushing again.' });
+      await this.postToView(surface, { type: 'pushReview', ...rejected });
+    }
+  }
+
+  private async fetchAndReview(client: GitClient, surface: KivoSurface): Promise<void> {
+    if (await this.operation('fetch', 'Fetching remote updates…', () => client.fetch(), 'Remote updates fetched', false, surface)) {
+      await this.showLog();
+    }
   }
 
   private async moveFileToChangelist(client: GitClient, filePath: string): Promise<void> {
@@ -663,6 +1132,73 @@ export class IdeaGitViewProvider implements vscode.WebviewViewProvider, vscode.T
     await this.postToView('changes', { type: 'reuseCommitMessage', body: details.body, expectedDraft: draft });
   }
 
+  private async rollbackFiles(client: GitClient, paths: string[]): Promise<void> {
+    const uniquePaths = Array.isArray(paths) ? [...new Set(paths)] : [];
+    if (!uniquePaths.length || uniquePaths.some((filePath) => typeof filePath !== 'string' || !filePath || filePath.includes('\0'))) {
+      throw new Error('Select changed files to roll back.');
+    }
+    const root = path.resolve(client.workspaceRoot);
+    const snapshot = await client.snapshot(this.commitLimit);
+    const changesByPath = new Map(snapshot.changes.map((change) => [change.path, change]));
+    const selected = uniquePaths.map((filePath) => {
+      const change = changesByPath.get(filePath);
+      if (!change) throw new Error(`The selected file is no longer changed: ${filePath}. Refresh and try again.`);
+      return change;
+    });
+    const fileUris = selected.map((change) => {
+      const resolved = path.resolve(root, change.path);
+      if (!resolved.startsWith(`${root}${path.sep}`)) throw new Error('The selected file is outside the repository.');
+      return vscode.Uri.file(resolved);
+    });
+    const fileState = async (uri: vscode.Uri): Promise<string> => {
+      try {
+        const stat = await vscode.workspace.fs.stat(uri);
+        return `${stat.type}:${stat.size}:${stat.mtime}`;
+      } catch (error) {
+        if (error instanceof vscode.FileSystemError && error.code === 'FileNotFound') return 'missing';
+        throw error;
+      }
+    };
+    const expectedFileStates = await Promise.all(fileUris.map(fileState));
+    const newFiles = selected.filter((change) => change.kind === 'untracked' || change.indexStatus === 'A' && change.kind !== 'conflict');
+    const existing = selected.filter((change) => !newFiles.includes(change));
+    const detail = [
+      ...(existing.length ? [`Restore ${existing.length} tracked ${existing.length === 1 ? 'file' : 'files'} to HEAD, including staged changes:`, ...existing.map((change) => `  ${change.path}`)] : []),
+      ...(newFiles.length ? [`Move ${newFiles.length} new ${newFiles.length === 1 ? 'file' : 'files'} to Trash:`, ...newFiles.map((change) => `  ${change.path}`)] : []),
+      '', 'This will discard the selected working changes. Other files stay untouched.'
+    ].join('\n');
+    const choice = await vscode.window.showWarningMessage(
+      `Rollback ${selected.length} selected ${selected.length === 1 ? 'file' : 'files'}?`,
+      { modal: true, detail }, 'Rollback Files'
+    );
+    if (choice !== 'Rollback Files') return;
+    await this.operation('rollback', `Rolling back ${selected.length} ${selected.length === 1 ? 'file' : 'files'}…`, async () => {
+      if (this.selectedWorkspace()?.uri.fsPath !== client.workspaceRoot) throw new Error('The selected repository changed. Select the files again.');
+      const current = await client.snapshot(this.commitLimit);
+      const currentByPath = new Map(current.changes.map((change) => [change.path, change]));
+      for (const change of selected) {
+        const latest = currentByPath.get(change.path);
+        if (!latest || latest.kind !== change.kind || latest.indexStatus !== change.indexStatus ||
+            latest.workingTreeStatus !== change.workingTreeStatus || latest.originalPath !== change.originalPath) {
+          throw new Error(`The state of ${change.path} changed. Review the files before rolling back.`);
+        }
+      }
+      const currentFileStates = await Promise.all(fileUris.map(fileState));
+      if (currentFileStates.some((state, index) => state !== expectedFileStates[index])) {
+        throw new Error('A selected file changed during confirmation. Review the files before rolling back.');
+      }
+      const restorePaths = [...new Set(existing.flatMap((change) => change.originalPath
+        ? [change.originalPath, change.path] : [change.path]))];
+      if (restorePaths.length) await client.restoreFilesToHead(restorePaths);
+      const stagedNew = newFiles.filter((change) => change.indexStatus === 'A').map((change) => change.path);
+      if (stagedNew.length) await client.unstageNewFiles(stagedNew);
+      for (const change of newFiles) {
+        const index = selected.indexOf(change);
+        if (expectedFileStates[index] !== 'missing') await vscode.workspace.fs.delete(fileUris[index]!, { useTrash: true });
+      }
+    }, `Rolled back ${selected.length} ${selected.length === 1 ? 'file' : 'files'}`);
+  }
+
   private async configureGitIdentity(client: GitClient): Promise<void> {
     const current = this.lastSnapshot?.identity;
     const name = await vscode.window.showInputBox({
@@ -679,9 +1215,7 @@ export class IdeaGitViewProvider implements vscode.WebviewViewProvider, vscode.T
       validateInput: (value) => /^[^\s@<>]+@[^\s@<>]+$/.test(value.trim()) ? undefined : 'Enter a Git author email.'
     });
     if (email === undefined) return;
-    await client.setLocalCommitIdentity(name, email);
-    await this.refresh(true);
-    await this.postToView('changes', { type: 'notice', phase: 'success', message: 'Repository Git identity configuration saved' });
+    await this.operation('identity', 'Saving Git identity…', () => client.setLocalCommitIdentity(name, email), 'Repository Git identity configuration saved');
   }
 
   async showLineBlame(): Promise<void> {
@@ -691,7 +1225,15 @@ export class IdeaGitViewProvider implements vscode.WebviewViewProvider, vscode.T
       return;
     }
     try {
-      const filePath = this.workspaceRelativePath(editor.document.uri);
+      if (editor.document.isDirty) {
+        const choice = await vscode.window.showWarningMessage(
+          'Save this file before checking line history? Unsaved edits can shift the line number.',
+          'Save and Blame'
+        );
+        if (choice !== 'Save and Blame') return;
+        if (!await editor.document.save()) throw new Error('The file could not be saved. Line history was not checked.');
+      }
+      const filePath = await this.workspaceRelativePath(editor.document.uri);
       const line = editor.selection.active.line + 1;
       const blame = await (await this.getClient()).blameLine(filePath, line);
       const shortHash = blame.hash.slice(0, 8);
@@ -700,9 +1242,11 @@ export class IdeaGitViewProvider implements vscode.WebviewViewProvider, vscode.T
       const message = blame.uncommitted
         ? `${path.basename(filePath)}:${line} · Uncommitted line · no commit author yet`
         : `${path.basename(filePath)}:${line} · ${blame.author} · ${authoredAt}\n${summary} (${shortHash})`;
-      const actions = blame.uncommitted ? ['Show File History'] : ['Copy Commit Hash', 'Show File History'];
+      const actions = blame.uncommitted ? ['Show File History'] : ['Show Commit in History', 'Copy Commit Hash', 'Show File History'];
       const action = await vscode.window.showInformationMessage(message, ...actions);
-      if (action === 'Copy Commit Hash' && !blame.uncommitted) {
+      if (action === 'Show Commit in History' && !blame.uncommitted) {
+        await this.showCommitInHistory(blame.hash, editor.document.uri);
+      } else if (action === 'Copy Commit Hash' && !blame.uncommitted) {
         await vscode.env.clipboard.writeText(blame.hash);
         void vscode.window.showInformationMessage('Commit hash copied.');
       } else if (action === 'Show File History') {
@@ -745,25 +1289,26 @@ export class IdeaGitViewProvider implements vscode.WebviewViewProvider, vscode.T
     await this.operation('move', uniquePaths.length === 1 ? `Moving ${uniquePaths[0]}…` : `Moving ${uniquePaths.length} files…`, () => client.moveToChangelist(uniquePaths, target.id), `Moved to ${target.label}`);
   }
 
-  private async operation(kind: OperationKind, label: string, action: () => Promise<void>, success: string, clearsCommit = false): Promise<boolean> {
+  private async operation(kind: OperationKind, label: string, action: () => Promise<void>, success: string, clearsCommit = false, feedbackSurface?: KivoSurface): Promise<boolean> {
     if (this.operationRunning) throw new Error('Another Git operation is already running.');
     this.operationRunning = true;
     const id = ++this.operationId;
     let writeStarted = false;
-    await this.postToReadyViews({ type: 'operation', id, kind, phase: 'loading', message: label });
     try {
+      await this.postToReadyViews({ type: 'operation', id, kind, phase: 'loading', message: label, feedbackSurface });
       if (this.autoFetchPromise) await this.autoFetchPromise;
       this.coordinator.beginWrite();
       writeStarted = true;
       await vscode.window.withProgress({ location: vscode.ProgressLocation.SourceControl, title: `${IdeaGitViewProvider.productName}: ${label}` }, action);
+      if (kind === 'commit' || kind === 'checkout' || kind === 'pull' || kind === 'branch') this.repositoryEmitter.fire();
       if (kind === 'fetch') await this.setSyncState('idle', Date.now());
-      else if (kind === 'pull' || kind === 'push') await this.setSyncState('idle');
-      await this.postToReadyViews({ type: 'operation', id, kind, phase: 'success', message: success, clearsCommit });
+      else if (kind === 'pull' || kind === 'push') await this.setSyncState('idle', Date.now());
+      await this.postToReadyViews({ type: 'operation', id, kind, phase: 'success', message: success, clearsCommit, feedbackSurface });
       return true;
     } catch (error) {
       this.coordinator.reset();
       if (kind === 'fetch' || kind === 'pull' || kind === 'push') await this.setSyncState('error', undefined, this.errorText(error));
-      await this.postToReadyViews({ type: 'operation', id, kind, phase: 'error', message: this.errorText(error) });
+      await this.postToReadyViews({ type: 'operation', id, kind, phase: 'error', message: this.errorText(error), feedbackSurface });
       return false;
     } finally {
       this.operationRunning = false;
@@ -772,11 +1317,11 @@ export class IdeaGitViewProvider implements vscode.WebviewViewProvider, vscode.T
   }
 
   private async openDiff(filePath: string, originalPath?: string, kind?: string, preview = false): Promise<void> {
-    const workspace = vscode.workspace.workspaceFolders?.[0];
+    const workspace = this.selectedWorkspace();
     if (!workspace) return;
-    const oldUri = vscode.Uri.from({ scheme: IdeaGitViewProvider.revisionScheme, path: `/${originalPath ?? filePath}` });
+    const oldUri = this.revisionUri(originalPath ?? filePath);
     const currentUri = kind === 'deleted'
-      ? vscode.Uri.from({ scheme: IdeaGitViewProvider.revisionScheme, path: `/${filePath}`, query: 'empty=1' })
+      ? this.revisionUri(filePath, 'empty=1')
       : vscode.Uri.file(path.join(workspace.uri.fsPath, filePath));
     await vscode.commands.executeCommand('vscode.diff', oldUri, currentUri, `${filePath} (HEAD ↔ Working Tree)`, { preview, preserveFocus: preview });
   }
@@ -788,11 +1333,7 @@ export class IdeaGitViewProvider implements vscode.WebviewViewProvider, vscode.T
     }
     const file = this.workspaceFileUri(filePath);
     const nonce = Date.now();
-    const revisionUri = (revisionPath: string, query: string) => vscode.Uri.from({
-      scheme: IdeaGitViewProvider.revisionScheme,
-      path: `/${revisionPath}`,
-      query: `${query}&view=${nonce}`
-    });
+    const revisionUri = (revisionPath: string, query: string) => this.revisionUri(revisionPath, `${query}&view=${nonce}`);
     const indexUri = revisionUri(filePath, 'index=1');
     if (layer === 'staged') {
       const headPath = change.indexStatus === 'R' ? change.originalPath || filePath : filePath;
@@ -812,7 +1353,7 @@ export class IdeaGitViewProvider implements vscode.WebviewViewProvider, vscode.T
   }
 
   private workspaceFileUri(filePath: string): vscode.Uri {
-    const workspace = vscode.workspace.workspaceFolders?.[0];
+    const workspace = this.selectedWorkspace();
     if (!workspace) throw new Error('Open a folder containing a Git repository.');
     const root = path.resolve(workspace.uri.fsPath);
     const resolved = path.resolve(root, filePath);
@@ -820,16 +1361,24 @@ export class IdeaGitViewProvider implements vscode.WebviewViewProvider, vscode.T
     return vscode.Uri.file(resolved);
   }
 
-  private async openCommitDiff(client: GitClient, hash: string, filePath: string, originalPath?: string, kind?: string): Promise<void> {
-    const details = await client.commitDetails(hash);
+  private revisionUri(filePath: string, query = ''): vscode.Uri {
+    const parameters = new URLSearchParams(query);
+    const root = this.selectedWorkspace()?.uri.fsPath;
+    if (root) parameters.set('repo', root);
+    return vscode.Uri.from({ scheme: IdeaGitViewProvider.revisionScheme, path: `/${filePath}`, query: parameters.toString() });
+  }
+
+  private async openCommitDiff(client: GitClient, hash: string, filePath: string, originalPath?: string, kind?: string, loadedDetails?: CommitDetails, preserveFocus = false): Promise<void> {
+    const details = loadedDetails || await client.commitDetails(hash);
+    if (this.selectedWorkspace()?.uri.fsPath !== client.workspaceRoot) return;
     const parent = details.parents[0];
     const oldUri = kind === 'A' || !parent
-      ? vscode.Uri.from({ scheme: IdeaGitViewProvider.revisionScheme, path: `/${originalPath ?? filePath}`, query: 'empty=1' })
-      : vscode.Uri.from({ scheme: IdeaGitViewProvider.revisionScheme, path: `/${originalPath ?? filePath}`, query: `commit=${encodeURIComponent(parent)}` });
+      ? this.revisionUri(originalPath ?? filePath, 'empty=1')
+      : this.revisionUri(originalPath ?? filePath, `commit=${encodeURIComponent(parent)}`);
     const currentUri = kind === 'D'
-      ? vscode.Uri.from({ scheme: IdeaGitViewProvider.revisionScheme, path: `/${filePath}`, query: 'empty=1' })
-      : vscode.Uri.from({ scheme: IdeaGitViewProvider.revisionScheme, path: `/${filePath}`, query: `commit=${encodeURIComponent(hash)}` });
-    await vscode.commands.executeCommand('vscode.diff', oldUri, currentUri, `${filePath} (${hash.slice(0, 8)} · ${details.subject})`, { preview: false });
+      ? this.revisionUri(filePath, 'empty=1')
+      : this.revisionUri(filePath, `commit=${encodeURIComponent(hash)}`);
+    await vscode.commands.executeCommand('vscode.diff', oldUri, currentUri, `${filePath} (${hash.slice(0, 8)} · ${details.subject})`, { preview: false, preserveFocus });
   }
 
   private configurePolling(): void {
@@ -839,18 +1388,18 @@ export class IdeaGitViewProvider implements vscode.WebviewViewProvider, vscode.T
     const configuration = vscode.workspace.getConfiguration('ideaGit');
     const interval = configuration.get<number>('autoRefreshInterval', 30000);
     this.refreshTimer = setInterval(() => void this.refresh(true), interval);
-    if (configuration.get<boolean>('autoFetch', true)) {
-      const autoFetchInterval = configuration.get<number>('autoFetchInterval', 300000);
-      this.autoFetchTimer = setInterval(() => void this.autoFetchIfDue(), autoFetchInterval);
-      void this.autoFetchIfDue();
-    }
     void this.refresh(true);
+    if (configuration.get<boolean>('autoFetch', true)) {
+      const autoFetchInterval = configuration.get<number>('autoFetchInterval', 60000);
+      this.autoFetchTimer = setInterval(() => void this.autoFetchIfDue(), autoFetchInterval);
+      if (this.lastSnapshot) void this.autoFetchIfDue();
+    }
   }
 
-  private async autoFetchIfDue(): Promise<void> {
+  private async autoFetchIfDue(force = false): Promise<void> {
     if (this.autoFetchPromise || this.operationRunning || !this.hasVisibleView()) return this.autoFetchPromise;
-    const interval = vscode.workspace.getConfiguration('ideaGit').get<number>('autoFetchInterval', 300000);
-    if (Date.now() - this.lastFetchAttemptAt < interval) return;
+    const interval = vscode.workspace.getConfiguration('ideaGit').get<number>('autoFetchInterval', 60000);
+    if (!force && Date.now() - this.lastFetchAttemptAt < interval) return;
     this.lastFetchAttemptAt = Date.now();
     const generation = this.syncGeneration;
     const task = (async () => {
@@ -868,7 +1417,10 @@ export class IdeaGitViewProvider implements vscode.WebviewViewProvider, vscode.T
         this.coordinator.endWrite();
       }
     })();
-    this.autoFetchPromise = task.finally(() => { this.autoFetchPromise = undefined; });
+    this.autoFetchPromise = task.finally(() => {
+      this.autoFetchPromise = undefined;
+      if (generation !== this.syncGeneration) void this.autoFetchIfDue();
+    });
     return this.autoFetchPromise;
   }
 
@@ -881,7 +1433,7 @@ export class IdeaGitViewProvider implements vscode.WebviewViewProvider, vscode.T
   private updateViewTitles(snapshot: RepositorySnapshot): void {
     const changes = this.views.get('changes');
     if (changes) {
-      changes.title = 'Commit';
+      changes.title = `${snapshot.repositoryName} · Commit`;
       changes.description = undefined;
     }
     const history = this.views.get('history');
@@ -928,6 +1480,7 @@ export class IdeaGitViewProvider implements vscode.WebviewViewProvider, vscode.T
     const cssUri = webview.asWebviewUri(vscode.Uri.joinPath(this.context.extensionUri, 'media', 'main.css'));
     const codiconUri = webview.asWebviewUri(vscode.Uri.joinPath(this.context.extensionUri, 'media', 'codicons', 'codicon.css'));
     const graphLayoutUri = webview.asWebviewUri(vscode.Uri.joinPath(this.context.extensionUri, 'media', 'graph-layout.js'));
+    const selectionUri = webview.asWebviewUri(vscode.Uri.joinPath(this.context.extensionUri, 'media', 'change-selection.js'));
     const jsUri = webview.asWebviewUri(vscode.Uri.joinPath(this.context.extensionUri, 'media', 'main.js'));
     const nonce = Math.random().toString(36).slice(2);
     return `<!doctype html>
@@ -950,19 +1503,26 @@ export class IdeaGitViewProvider implements vscode.WebviewViewProvider, vscode.T
           <symbol id="kivo-conflict" viewBox="0 0 24 24"><path d="m12 4 8 15H4z"/><path d="M12 9v4m0 3h.01"/></symbol>
         </svg>
         <main id="app"></main>
-        <div id="toast-region" aria-live="assertive"></div>
+        <div id="toast-region"></div>
         <script nonce="${nonce}" src="${graphLayoutUri}"></script>
+        <script nonce="${nonce}" src="${selectionUri}"></script>
         <script nonce="${nonce}" src="${jsUri}"></script>
       </body>
       </html>`;
   }
 
   dispose(): void {
+    this.pushReview.clear();
+    for (const listener of this.gitStateListeners.values()) listener.dispose();
+    this.gitStateListeners.clear();
+    clearInterval(this.badgePollTimer);
+    if (this.badgeRefreshTimer) clearTimeout(this.badgeRefreshTimer);
     if (this.refreshTimer) clearInterval(this.refreshTimer);
     if (this.autoFetchTimer) clearInterval(this.autoFetchTimer);
     if (this.debounceTimer) clearTimeout(this.debounceTimer);
     this.refreshDueAt = undefined;
     this.watcher?.dispose();
     this.emitter.dispose();
+    this.repositoryEmitter.dispose();
   }
 }

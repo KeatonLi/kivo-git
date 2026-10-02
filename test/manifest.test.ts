@@ -22,6 +22,7 @@ describe('extension contribution model', () => {
     ]));
     expect(JSON.stringify(manifest.contributes.views)).not.toContain('ideaGit.panel');
     expect(manifest.activationEvents).toEqual(expect.arrayContaining([
+      'onStartupFinished',
       `onView:${KivoViewTypes.changes}`,
       `onView:${KivoViewTypes.history}`
     ]));
@@ -32,11 +33,18 @@ describe('extension contribution model', () => {
     expect(manifest.contributes.commands).toEqual(expect.arrayContaining([
       expect.objectContaining({ command: 'ideaGit.showChanges', title: 'Kivo Git: Show Changes' }),
       expect.objectContaining({ command: 'ideaGit.showLog', title: 'Kivo Git: Show History', icon: '$(history)' }),
-      expect.objectContaining({ command: 'ideaGit.showLineBlame', title: 'Kivo Git: Show Line Blame', icon: '$(git-commit)' })
+      expect.objectContaining({ command: 'ideaGit.showLineBlame', title: 'Kivo Git: Show Line Blame', icon: '$(git-commit)' }),
+      expect.objectContaining({ command: 'ideaGit.toggleInlineBlame', title: 'Kivo Git: Toggle Inline Blame' })
     ]));
     expect(manifest.contributes.menus['editor/context']).toEqual(expect.arrayContaining([
       expect.objectContaining({ command: 'ideaGit.showLineBlame', when: 'editorTextFocus && resourceScheme == file' })
     ]));
+  });
+
+  it('enables current-line blame by default and lets users disable it in settings', async () => {
+    const manifest = JSON.parse(await readFile(path.join(root, 'package.json'), 'utf8'));
+    expect(manifest.activationEvents).toContain('onCommand:ideaGit.toggleInlineBlame');
+    expect(manifest.contributes.configuration.properties['ideaGit.inlineBlame.enabled']).toMatchObject({ type: 'boolean', default: true });
   });
 
   it('adds focused Kivo Git actions to the Explorer file context menu', async () => {

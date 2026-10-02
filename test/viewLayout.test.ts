@@ -13,9 +13,11 @@ describe('Kivo Git two-surface routing', () => {
     expect(isMessageAllowedOnSurface('changes', 'commitAndPush')).toBe(true);
     expect(isMessageAllowedOnSurface('changes', 'showLog')).toBe(true);
     expect(isMessageAllowedOnSurface('changes', 'openDiff')).toBe(true);
+    expect(isMessageAllowedOnSurface('changes', 'rollbackFiles')).toBe(true);
     expect(isMessageAllowedOnSurface('history', 'commit')).toBe(false);
     expect(isMessageAllowedOnSurface('history', 'commitAndPush')).toBe(false);
     expect(isMessageAllowedOnSurface('history', 'openDiff')).toBe(false);
+    expect(isMessageAllowedOnSurface('history', 'rollbackFiles')).toBe(false);
   });
 
   it('keeps graph/history operations out of the Changes sidebar', () => {
@@ -25,21 +27,21 @@ describe('Kivo Git two-surface routing', () => {
     expect(isMessageAllowedOnSurface('changes', 'loadMoreCommits')).toBe(false);
     expect(isMessageAllowedOnSurface('history', 'showChanges')).toBe(true);
     expect(isMessageAllowedOnSurface('changes', 'showChanges')).toBe(false);
-    for (const message of ['mergeBranch', 'renameBranch', 'deleteBranch', 'copyBranchName', 'createTag', 'checkoutRevision', 'copyCommitHash', 'copyCommitSubject']) {
+    for (const message of ['mergeBranch', 'updateBranch', 'renameBranch', 'deleteBranch', 'copyBranchName', 'createTag', 'checkoutRevision', 'copyCommitHash', 'copyCommitSubject']) {
       expect(isMessageAllowedOnSurface('history', message)).toBe(true);
       expect(isMessageAllowedOnSurface('changes', message)).toBe(false);
     }
   });
 
   it('keeps file-specific navigation in the Changes surface', () => {
-    for (const message of ['showFileHistory', 'showBranchHistory', 'revealInExplorer']) {
+    for (const message of ['showFileHistory', 'showBranchHistory', 'revealInExplorer', 'recentCommitDetails', 'openRecentCommitDiff']) {
       expect(isMessageAllowedOnSurface('changes', message)).toBe(true);
       expect(isMessageAllowedOnSurface('history', message)).toBe(false);
     }
   });
 
   it('allows synchronisation and branch operations from either surface', () => {
-    for (const message of ['ready', 'refresh', 'fetch', 'pull', 'push', 'checkout', 'createBranch']) {
+    for (const message of ['ready', 'refresh', 'fetch', 'pull', 'push', 'respondPushReview', 'pushCommitDetails', 'openPushCommitDiff', 'checkout', 'createBranch', 'workflowRequest', 'closeWorkflow', 'openWorkflowDiff', 'stashCreate', 'stashApply', 'stashDrop', 'openConflict', 'resolveConflict', 'continueOperation', 'abortOperation']) {
       expect(isMessageAllowedOnSurface('changes', message)).toBe(true);
       expect(isMessageAllowedOnSurface('history', message)).toBe(true);
     }

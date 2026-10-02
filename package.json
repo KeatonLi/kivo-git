@@ -1,9 +1,9 @@
 {
-  "name": "idea-git",
+  "name": "kivo-git",
   "displayName": "Kivo Git",
   "description": "An IDEA-style Git workflow for VS Code: commit changes on the left, inspect history in the bottom Panel.",
-  "version": "0.3.0-beta.25",
-  "publisher": "keatonli",
+  "version": "0.4.3",
+  "publisher": "KeatonLi",
   "license": "MIT",
   "repository": {
     "type": "git",
@@ -14,7 +14,7 @@
     "vscode": "^1.95.0"
   },
   "categories": [
-    "Source Control",
+    "SCM Providers",
     "Other"
   ],
   "keywords": [
@@ -26,9 +26,11 @@
     "source-control"
   ],
   "activationEvents": [
+    "onStartupFinished",
     "onView:ideaGit.changes",
     "onView:ideaGit.history",
-    "onCommand:ideaGit.showLineBlame"
+    "onCommand:ideaGit.showLineBlame",
+    "onCommand:ideaGit.toggleInlineBlame"
   ],
   "main": "./dist/extension.js",
   "files": [
@@ -40,7 +42,7 @@
     "LICENSE"
   ],
   "scripts": {
-    "check": "tsc --noEmit && node --check media/graph-layout.js && node --check media/main.js && node --check scripts/release.mjs && node --check scripts/sync-assets.mjs && node --check scripts/verify-vsix.mjs && node --check scripts/test-extension.mjs && node --check scripts/test-webview.mjs && node --check scripts/visual-server.mjs",
+    "check": "tsc --noEmit && node --check media/graph-layout.js && node --check media/change-selection.js && node --check media/main.js && node --check scripts/release.mjs && node --check scripts/sync-assets.mjs && node --check scripts/verify-vsix.mjs && node --check scripts/test-extension.mjs && node --check scripts/test-webview.mjs && node --check scripts/visual-server.mjs",
     "sync-assets": "node scripts/sync-assets.mjs",
     "compile": "npm run sync-assets && node esbuild.mjs",
     "watch": "node esbuild.mjs --watch",
@@ -117,6 +119,11 @@
         "command": "ideaGit.showLineBlame",
         "title": "Kivo Git: Show Line Blame",
         "icon": "$(git-commit)"
+      },
+      {
+        "command": "ideaGit.toggleInlineBlame",
+        "title": "Kivo Git: Toggle Inline Blame",
+        "icon": "$(eye)"
       },
       {
         "command": "ideaGit.moveResourceToChangelist",
@@ -197,9 +204,14 @@
         },
         "ideaGit.autoFetchInterval": {
           "type": "number",
-          "default": 300000,
+          "default": 60000,
           "minimum": 60000,
           "description": "Minimum interval in milliseconds between automatic background fetches."
+        },
+        "ideaGit.inlineBlame.enabled": {
+          "type": "boolean",
+          "default": true,
+          "description": "Show a subtle Git blame annotation after the current line when the file is saved. Disable to use only the manual Show Line Blame command."
         }
       }
     }

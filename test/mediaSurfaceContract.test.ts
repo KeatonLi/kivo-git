@@ -20,9 +20,9 @@ describe('webview surface composition', () => {
     expect(main).toContain('function renderCommitToolbar(s)');
     expect(main).toContain('class="commit-changes-heading"');
     expect(main).toContain('Commit and Push…');
-    expect(main).toContain('function renderLogActionRail()');
+    expect(main).toContain('function renderLogActionRail(s)');
     expect(main).toContain('class="log-branch-pane"');
-    expect(main).toContain('class="branch-current-sync');
+    expect(main).toContain('class="branch-sync-indicator');
     expect(main).not.toContain('class="branch-pane-footer"');
     expect(main).toContain('data-log-splitter');
     expect(main).toContain('Resize History branch tree');
@@ -110,11 +110,11 @@ describe('webview surface composition', () => {
     expect(main).toContain('class="context-menu file-context-menu"');
     expect(main).toContain('class="context-menu branch-context-menu"');
     expect(main).toContain('class="context-menu commit-context-menu"');
-    expect(main).toContain('class="graph-loading-row"');
+    expect(main).toContain('class="graph-load-sentinel" role="status"');
     expect(css).toContain('--idea-hover:');
     expect(css).toContain('--idea-selection:');
     expect(css).toContain('.parity-mode .graph-row:hover:not(.selected)');
-    expect(css).toContain('.graph-loading-row');
+    expect(css).toContain('.graph-load-sentinel');
   });
 
   it('renders active-theme file icons for changed files and keeps a native fallback', async () => {
@@ -166,7 +166,7 @@ describe('webview surface composition', () => {
 
   it('keeps commit readiness and menu focus predictable', async () => {
     const main = await readFile(path.join(root, 'media', 'main.js'), 'utf8');
-    expect(main).toContain('selectedCount && ui.commitMessage.trim() && !ui.busy');
+    expect(main).toContain('const canCommit = !commitBlocker();');
     expect(main).toContain('function syncCommitActionState()');
     expect(main).toContain('syncCommitActionState();');
     expect(main).toContain("returnFocus: anchor ? 'menu' : 'file'");
@@ -186,7 +186,7 @@ describe('webview surface composition', () => {
     const provider = await readFile(path.join(root, 'src', 'IdeaGitViewProvider.ts'), 'utf8');
     expect(provider).toContain('data-surface="${surface}"');
     expect(provider).toContain('this.html(view.webview, surface)');
-    expect(provider).toContain('changes.title = \'Commit\'');
+    expect(provider).toContain('changes.title = `${snapshot.repositoryName} · Commit`');
     expect(provider).toContain("history.title = 'History'");
     expect(provider).toContain('history.description = snapshot.branch');
     expect(provider).toContain('private async commitAndPush');

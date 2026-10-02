@@ -19,12 +19,19 @@ export function surfaceForViewType(viewType: string): KivoSurface | undefined {
 
 const sharedMessages = new Set([
   'ready',
+  'workflowRequest', 'closeWorkflow', 'openWorkflowDiff',
+  'stashCreate', 'stashApply', 'stashDrop',
+  'openConflict', 'resolveConflict', 'continueOperation', 'abortOperation',
   'refresh',
   'fetch',
   'pull',
   'push',
+  'respondPushReview',
+  'pushCommitDetails',
+  'openPushCommitDiff',
   'checkout',
-  'createBranch'
+  'createBranch',
+  'chooseRepository'
 ]);
 
 const messagesBySurface: Record<KivoSurface, ReadonlySet<string>> = {
@@ -37,6 +44,7 @@ const messagesBySurface: Record<KivoSurface, ReadonlySet<string>> = {
     'copyPath',
     'moveFileToChangelist',
     'moveSelectedFilesToChangelist',
+    'rollbackFiles',
     'showFileHistory',
     'showBranchHistory',
     'revealInExplorer',
@@ -44,8 +52,11 @@ const messagesBySurface: Record<KivoSurface, ReadonlySet<string>> = {
     'commitAndPush',
     'reuseCommitMessage',
     'configureGitIdentity',
+    'configureUpstream',
     'showLog',
     'showRecentCommit',
+    'recentCommitDetails',
+    'openRecentCommitDiff',
     'openSettings',
     'createChangelist',
     'renameChangelist',
@@ -54,12 +65,15 @@ const messagesBySurface: Record<KivoSurface, ReadonlySet<string>> = {
     'moveFiles'
   ]),
   history: new Set([
+    'searchHistory',
     'loadMoreCommits',
     'setHistoryRef',
     'commitDetails',
     'openCommitDiff',
     'showChanges',
     'mergeBranch',
+    'updateBranch',
+    'pushBranch',
     'renameBranch',
     'deleteBranch',
     'copyBranchName',

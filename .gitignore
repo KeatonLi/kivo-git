@@ -5,5 +5,6 @@ dist/
 .vscode-test/
 .vscode-test-workspace/
 coverage/
+visual-audit/
 # Work Mode attachment cache; source assets belong under media/ instead.
 upload/

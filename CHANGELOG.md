@@ -3,6 +3,139 @@
 ## Unreleased
 
 - Added Track and Stage to untracked files' Commit context menu, with a fresh Git status check before staging so the action cannot silently target a file whose state changed.
+
+## 0.4.3 - 2026-10-01
+
+- Keep the Pull strategy menu anchored to its toolbar button and inside narrow sidebars, including after resizing.
+- Make the Commit Message area compact by default, with a clearer drag handle, correct relative dragging, keyboard resizing and saved layout. Reset heights from the previous faulty resize behavior on upgrade.
+- Add subtle theme-aware backgrounds to the Local and Remote branch groups.
+- Preserve live History scroll positions while virtual rows change or older commits load; keep pagination feedback at a constant height and avoid stale next-frame scroll restoration.
+
+## 0.4.2 - 2026-09-30
+
+- Keep History commit titles readable as its pane narrows or dividers move: compact dates and progressively hide secondary columns, retaining full timestamps and metadata in hover text and details.
+- Show the current branch in the Commit toolbar where space permits, and reserve changed-file space when conflict controls are visible.
+- Capture Commit, History, Push, branch comparison, Stashes and conflict layouts alongside passing browser interaction tests for visual review before release.
+
+## 0.4.1 - 2026-09-30
+
+- Initialize the Webview event binder before registering workflow and conflict actions, preserving file selection, drag-and-drop and toolbar interactions on first render.
+- Check for startup runtime errors before exercising Webview interactions.
+
+## 0.4.0 - 2026-09-30
+
+- Give History commit titles priority over branch labels: show one readable primary ref and summarize the rest, with full names on hover and in commit details.
+- Compare another local or remote branch with the current branch without checkout, inspect each side's unique commits, and open immutable branch-tip file diffs.
+- Save, preview, restore and explicitly delete Git stashes. Include untracked files, preserve staged state, keep saved copies after restore, and offer Stash and Switch for unfinished work.
+- Detect merge, rebase, cherry-pick, revert and stash-restore conflicts; open VS Code's native Merge Editor, stage resolved files, and continue or confirm abort with operation-state revalidation.
+- Add real-Git workflow tests, browser interaction and narrow-view coverage, and a native Merge Editor smoke test in VS Code's Extension Host.
+
+## 0.3.15 - 2026-09-30
+
+- Keep operation notifications compact at the bottom right, with a dismiss button and a single message instead of stacked full-width bars.
+- Show Push progress and results only in the initiating tool window while preserving shared busy state in Commit and History.
+- Use polite success announcements, longer-lived scrollable errors, and pause dismissal while hovering or focusing a notification.
+
+## 0.3.14 - 2026-09-30
+
+- Prioritize filenames in recent-commit previews, with muted short directory labels and complete paths on hover; retain Git change colors and rename information.
+- Expand outgoing commits inside Push review to load their changed files, reuse cached details, retry failed reads, and open exact committed diffs without closing the review.
+- Scope file inspection to the active review and full commit hashes; ignore late responses after changing commits, repositories, or reviews.
+
+## 0.3.13 - 2026-09-30
+
+- Highlight commits not yet pushed to their tracking branch with a subtle green row, green node, and Unpushed badge in History and Recent commits; refresh the exact commit membership after tracking refs move.
+- Replace the native Push warning dialog with a themed in-extension review showing repository, source and destination branches, outgoing commits, and changed-file count.
+- Keep actions visible in narrow and short views, support Escape and keyboard focus containment, and route behind or rejected branches to Fetch and Review.
+- Keep reviewed refs on the extension host with one-use confirmation IDs, revalidate before pushing, and dismiss stale reviews after repository or branch changes.
+
+## 0.3.12 - 2026-09-30
+
+- Show the current branch's latest five commits independently of History filters; click a commit to preview its changed files, then open a file diff or full History.
+- Group recent commits by absolute date and show compact times with seconds, keeping the full timestamp on hover.
+- Remove redundant counts for a single changelist or file group; retain counts when they distinguish multiple lists or tracked/untracked groups.
+- Cache recent commit files, support retry, and ignore late responses after selecting another commit or repository.
+
+## 0.3.11 - 2026-09-30
+
+- Show the selected repository in a compact header above Commit actions, with the full path on hover and a clickable picker in multi-repository workspaces.
+- Truncate long repository names without squeezing toolbar controls and update the header when the selected repository changes.
+
+## 0.3.10 - 2026-09-30
+
+- Remove repeated file-status labels from the changes list; keep Git state in filename colors, hover details, and screen-reader descriptions, including when selected.
+- Use normal theme foregrounds for Commit toolbar icons and the same clear accent for Branches and History.
+- Fit Recent commits to its contents, move timestamps below full-width subjects, and add a persistent collapse control; retain manual resizing with a reset to automatic height.
+
+## 0.3.9 - 2026-09-29
+
+- Add Rollback for selected files in the Commit view and file context menu, with a native confirmation listing affected paths.
+- Restore selected tracked changes to HEAD, move new files to Trash, and recheck file state before changing anything; keep unrelated staged work intact.
+
+## 0.3.8 - 2026-09-29
+
+- Preload the selected repository's local Git snapshot and file icon theme after extension activation, keeping the snapshot current while views are hidden.
+- Show the cached snapshot as soon as a view opens, then check the remote asynchronously so Fetch does not hold up the first render.
+
+## 0.3.7 - 2026-09-29
+
+- Group tracked changes above untracked files within each changelist, and color file names and status by added, modified, deleted, renamed, or untracked state using VS Code theme colors.
+- Keep only Recent commits in the lower Commit area; move Git identity, upstream setup, and detached-HEAD branch creation into the toolbar menu.
+
+## 0.3.6 - 2026-09-29
+
+- Replace unclear Working and Untracked file badges with Modified, New file, or the specific change type; explain Git tracking and staging in the tooltip.
+
+## 0.3.5 - 2026-09-29
+
+- Show the active repository name before Commit in the left view title, updating when the selected repository changes.
+- Refresh branch status when VS Code Git updates repository state, and check the selected repository immediately after switching.
+- Check remote refs on manual Refresh and every minute by default while Kivo Git is visible.
+
+## 0.3.4 - 2026-09-29
+
+- Search the full repository history by commit text or hash, author, date, path, and ref while retaining automatic pagination.
+- Show per-repository and aggregate working-tree counts clearly in multi-repository workspaces, and avoid redundant status scans.
+- Explain remote checks and failures in the Commit view and offer a direct action to configure a branch's upstream.
+- Show absolute timestamps in History, commit details, and recent commits; preserve whitespace in committed file paths.
+- Load the next History page only at the bottom of the scrollable list, with a compact pagination hint.
+- Display numeric incoming and outgoing commit counts beside local branches, including non-current branches.
+
+## 0.3.3 - 2026-09-28
+
+- Show the total number of uncommitted files on the Kivo Git Activity Bar icon, updating on file changes and while the view is hidden; clear the badge for a clean workspace.
+- Keep full History timestamps legible at narrow widths by wrapping the date and time.
+
+## 0.3.2 - 2026-09-28
+
+- Show incoming and outgoing markers beside each local branch with a configured remote upstream when the refs differ.
+- Add an Update action to tracked non-current local branches in History; fetch only the selected upstream and fast-forward only that branch without switching HEAD or changing the working tree. Diverged branches remain untouched.
+- Align the Commit branch picker typography with History and highlight the branch toolbar button.
+- Automatically load older History while scrolling, show local timestamps to the second, and strengthen the graph lanes and selected commits.
+- Add Update and Push to tracked local branch menus, including other local branches without switching checkout; review the destination and outgoing commits before pushing.
+- Label History's action rail, remove the duplicate clear control and change summary, and show five recent commits in a compact timeline with working tree and remote counts.
+- Discover repositories through VS Code's Git integration so nested repositories appear in the switcher and file actions use the matching repository.
+
+## 0.3.1 - 2026-09-28
+
+- Kept Pull available on tracking branches even when no incoming commits are cached; Push still requires outgoing commits.
+- Made the branch picker compact, placed the current branch first, and collapsed remote branches until expanded or searched.
+- Added a visible Commit toolbar button that opens Kivo Git History in the bottom Panel.
+
+## 0.3.0 - 2026-09-28
+
+- Corrected the Marketplace category to `SCM Providers` so the release can be uploaded.
+- Renamed the Marketplace extension ID to `KeatonLi.kivo-git` because `idea-git` was already taken.
+- Added optional current-line inline blame with delayed, bounded Git lookups, short-lived caching, unsaved-edit safety, hover details, and a Command Palette toggle.
+- Preserved ID-keyed controls when opening file search so the file tree cannot inherit splitter drag handlers during DOM reuse.
+- Made checkbox decorations ignore pointer events so mouse selection reaches the actual input reliably.
+- Gave file review and the commit form 65% of the initial sidebar height while preserving user-resized layouts, and removed obsolete branch-flight animation bookkeeping.
+- Restricted file movement animation to actual changelist transfers, removed repeat row/detail entrance effects and counter bounce, and stopped active animations when motion is reduced or the view is hidden.
+- Improved keyboard focus, selected-row text contrast, high-contrast selection borders, narrow summary wrapping, and long notification text; reduced-motion mode now disables animations rather than accelerating them.
+- Unified filtered selection, list checkboxes, and keyboard ranges; added an inline selected-file count, hidden-selection guard, and whole-file commit explanation for staged changes.
+- Preserved unrelated staged work and restored newly staged files after commit failures; validated current selections, treated Git pathspecs literally, and committed both sides of selected staged renames.
+- Protected changelist data with schema validation, atomic writes, and cross-window locking; preserved assignments across tracked renames and recognized all unmerged Git states.
+- Serialized Git identity updates with other Git operations and added regression coverage for selection, persistence, failed hooks, literal paths, and recent messages.
 - Displayed the effective Git commit identity in Repository status and added a guided repository-local name and email setup action when it is missing, so commit authorship is clear before committing.
 - Added a Recent Messages action beside Commit that lists the current branch's last 20 commits and reuses the full selected message; replacing an existing draft requires confirmation, and edits made while choosing are preserved.
 - Previewed the focused changed file while navigating the Commit list with Arrow keys, Home, or End, so keyboard review follows the selected row without leaving the list.

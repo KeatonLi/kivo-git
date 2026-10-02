@@ -43,17 +43,19 @@
   </head>
   <body class="parity-mode" data-surface="history">
     <main id="app"></main>
-    <div id="toast-region" aria-live="assertive"></div>
+    <div id="toast-region"></div>
     <script>
       const visualSurface = new URLSearchParams(location.search).get('surface') === 'changes' ? 'changes' : 'history';
       document.body.dataset.surface = visualSurface;
       const fixture = {
         repositoryName: 'ack-k8s',
+        repositoryCount: new URLSearchParams(location.search).get('state') === 'multi' ? 2 : 1,
         root: '/workspace/ack-k8s',
         branch: 'feature/keaton/ACKk8s',
         upstream: 'origin/feature/keaton/ACKk8s',
-        ahead: 6,
+        ahead: 3,
         behind: 2,
+        identity: { name: 'Preview Author', email: 'preview@example.test', ready: true },
         changes: [
           { path: 'src/main/java/com/anker/mvp/provider/EksClusterProvider.java', kind: 'modified' },
           { path: 'src/main/java/com/anker/mvp/config/AwsWebClientInitializer.java', kind: 'added' },
@@ -69,7 +71,7 @@
         branches: [
           { name: 'master', current: false, remote: false },
           { name: 'feature/keaton/ACKk8s', current: true, remote: false },
-          { name: 'feature/keaton/20260924-solar', current: false, remote: false },
+          { name: 'feature/keaton/20260924-solar', current: false, remote: false, upstream: 'origin/feature/keaton/20260924-solar', tracking: '<' },
           { name: 'feature/team/analytics-uv-pv', current: false, remote: false },
           { name: 'origin/master', current: false, remote: true },
           { name: 'origin/feature/keaton/ACKk8s', current: false, remote: true },
@@ -87,21 +89,79 @@
           { hash: 'bb011a0a1b2c3d4e5f678901234567890abcd12', shortHash: 'bb011a0', author: 'jarvan.jiang', date: '2026-09-15T09:56:00Z', subject: 'Accept Merge Request #14862: release/20260910 → master', parents: [], paths: ['src/main/java/com/anker/mvp/provider/ClusterProvider.java'], refs: [{ name: 'origin/master', kind: 'remote' }], lane: 1, incomingLanes: [0, 1], parentLanes: [], hasIncoming: true, laneTransitions: [{ from: 0, to: 0, kind: 'through' }] }
         ]
       };
+      fixture.changes.forEach((change, index) => {
+        Object.assign(change, { staged: index !== 1, indexStatus: index === 1 ? '.' : 'M', workingTreeStatus: index === 0 ? '.' : 'M' });
+      });
+      fixture.changelists[0].changes = fixture.changes;
+      if (new URLSearchParams(location.search).get('state') === 'grouped') {
+        fixture.changes.splice(1, 0,
+          { path: 'src/new-file.txt', kind: 'untracked', staged: false, indexStatus: '?', workingTreeStatus: '?' },
+          { path: 'src/another-new-file.txt', kind: 'untracked', staged: false, indexStatus: '?', workingTreeStatus: '?' },
+          { path: 'src/deleted-file.txt', kind: 'deleted', staged: false, indexStatus: '.', workingTreeStatus: 'D' });
+        Object.assign(fixture.changes.find((change) => change.kind === 'added'), { staged: true, indexStatus: 'A', workingTreeStatus: '.' });
+      }
+      if (new URLSearchParams(location.search).get('state') === 'sync-clean') {
+        fixture.ahead = 0;
+        fixture.behind = 0;
+      }
+      if (new URLSearchParams(location.search).get('state') === 'no-upstream') fixture.upstream = '';
+      if (new URLSearchParams(location.search).get('state') === 'push-ready') fixture.behind = 0;
       if (new URLSearchParams(location.search).get('state') === 'empty') {
         fixture.changes = [];
         fixture.changelists[0].changes = [];
       }
+      fixture.commits.forEach((commit, index) => { if (fixture.upstream && index < fixture.ahead) commit.unpushedTo = fixture.upstream; });
+      fixture.recentCommits = fixture.commits.slice(0, 5);
       window.__vscodeMessages = [];
+      window.__pushReviewId = 0;
       function emit(data) { window.dispatchEvent(new MessageEvent('message', { data })); }
       window.acquireVsCodeApi = () => ({
-        getState: () => ({}),
-        setState: () => {},
+        getState: () => JSON.parse(sessionStorage.getItem('kivo-fixture-state') || '{}'),
+        setState: (state) => { window.__vscodeState = state; },
         postMessage: (message) => {
           window.__vscodeMessages.push(message);
-          if (message.type === 'commitDetails') {
+          if (message.type === 'workflowRequest' && !window.__holdWorkflow) {
+            const file = { path: 'src/feature/Panel.tsx', status: 'M', oldRevision: fixture.commits[1].hash, newRevision: fixture.commits[0].hash };
+            const stash = { hash: fixture.commits[0].hash, ref: 'stash@{0}', subject: 'On feature: unfinished UI', date: fixture.commits[0].date };
+            const payload = message.kind === 'compare' ? { currentName: fixture.branch, targetName: message.branch, currentOid: fixture.commits[0].hash, targetOid: fixture.commits[1].hash,
+              current: { count: 1, commits: [fixture.commits[0]] }, target: { count: 2, commits: fixture.commits.slice(1, 3) }, files: [file] }
+              : message.kind === 'stashes' ? [stash] : { ...stash, files: [file, { ...file, path: 'new.txt', status: 'A' }] };
+            setTimeout(() => emit({ type: 'workflowResult', root: message.root, requestId: message.requestId, payload }), 20);
+          }
+          if (message.type === 'push' || message.type === 'pushBranch') {
+            const branch = message.branch || fixture.branch;
+            const upstream = fixture.branches.find((item) => item.name === branch)?.upstream || fixture.upstream;
+            setTimeout(() => emit({ type: 'pushReview', id: ++window.__pushReviewId, root: fixture.root,
+              afterCommit: false, preview: { branch, upstream, remote: 'origin', targetBranch: upstream.replace(/^origin\//, ''),
+                head: fixture.commits[0].hash, upstreamOid: fixture.commits[3].hash, ahead: fixture.ahead, behind: fixture.behind,
+                commits: fixture.commits.slice(0, fixture.ahead).map((commit) => ({ hash: commit.hash, subject: commit.subject })), fileCount: 8 } }), 20);
+          }
+          if (message.type === 'respondPushReview') {
+            emit({ type: 'pushReviewClosed', id: message.id });
+            if (message.choice === 'push') {
+              fixture.ahead = 0;
+              fixture.commits.forEach((commit) => { delete commit.unpushedTo; });
+              emit({ type: 'snapshot', payload: fixture });
+            }
+          }
+          if (message.type === 'searchHistory') {
+            const { query = '', author = '', path = '', age = 'all' } = message.filters || {};
+            const needle = query.trim().toLowerCase();
+            const matches = fixture.commits.filter((commit) => {
+              const text = [commit.subject, commit.author, commit.hash, commit.shortHash].join(' ').toLowerCase();
+              return (!needle || text.includes(needle)) && (!author || commit.author.includes(author)) &&
+                (!path || commit.paths.some((file) => file.toLowerCase().includes(path.toLowerCase()))) &&
+                (age === 'all' || Date.now() - new Date(commit.date).getTime() < Number.parseInt(age, 10) * 86400000);
+            });
+            setTimeout(() => emit({ type: 'historySearchResults', requestId: message.requestId, root: fixture.root,
+              commits: matches.slice(0, message.limit), hasMore: matches.length > message.limit }), 20);
+          }
+          if (message.type === 'commitDetails' || message.type === 'recentCommitDetails' || message.type === 'pushCommitDetails') {
+            if (message.type === 'recentCommitDetails' && window.__holdRecentDetails) return;
+            if (message.type === 'pushCommitDetails' && window.__holdPushDetails) return;
             const commit = fixture.commits.find((item) => item.hash === message.hash);
             if (!commit) return;
-            setTimeout(() => emit({ type: 'commitDetails', payload: {
+            setTimeout(() => emit({ type: message.type, id: message.id, root: message.root, requestId: message.requestId, payload: {
               hash: commit.hash,
               subject: commit.subject,
               body: commit.hash === fixture.commits[0].hash
@@ -121,6 +181,7 @@
       });
     </script>
     <script src="/media/graph-layout.js"></script>
+    <script src="/media/change-selection.js"></script>
     <script src="/media/main.js"></script>
     <script>emit({ type: 'snapshot', payload: fixture });</script>
   </body>

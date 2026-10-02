@@ -15,18 +15,27 @@ Kivo Git keeps a familiar two-surface workflow in VS Code: **Commit** stays in t
 - **Native VS Code integration** — diffs, file icons, themes, keyboard navigation, and the local `git` executable stay part of the workflow.
 - **A focused visual language** — Kivo’s restrained cyan–violet accent system adds hierarchy and feedback without moving familiar Git controls.
 
-## Included in the beta
+## Features
 
 ### Commit workspace
 
 - Real repository status powered by the native Git CLI
 - IDE-style named changelists with drag-and-drop assignment
 - Selective commits without forcing a staged/unstaged workflow
+- File change colors with detailed state on hover, plus the current branch's five recent commits with inline changed-file previews and date groups
+- Consistent Unpushed highlights in Recent commits and History, with a themed push review for destination and outgoing commits
+- Expand Push review commits to inspect colored filenames and short directories, then open committed diffs while keeping the review available
 - Local and remote branch popup with checkout
 - Branch context actions to create and checkout a new branch from any local branch, remote ref, or tag
 - Native VS Code diff preview on single-click and a pinned editor on double-click
 - Arrow-key file navigation, Space toggle, and Shift range selection
 - Changed-file icons resolved from the active VS Code file icon theme, including compound extensions
+- Tracking and staging details on hover, with less-used toolbar actions in a named menu
+- A commit review step that lists the selected files and offers a diff shortcut for each before confirmation
+
+Commit operates on whole selected files, including their working-tree edits; the Staged filter does not turn it into an index-only commit. Unrelated staged files are preserved. Selection counts appear beside the commit form. Filtering never silently drops an existing selection: hidden selections must be reviewed by clearing the filter, or removed with **Remove hidden**, before committing. List checkboxes select matching files, while keyboard select-all and range selection use the expanded, visible rows.
+
+Changelist data is stored in the worktree's Git directory under `ideagit/changelists.json`. Writes are atomic and serialized across windows, and tracked renames retain their list assignment. Invalid data is reported without overwriting it. Locks left by a terminated local Kivo Git process are recovered automatically. If an older or unreadable `changelists.json.lock` persists, close all Kivo Git windows and verify no operation is still running before removing that lock file; keep the JSON file.
 
 ### History workspace
 
@@ -36,24 +45,47 @@ Kivo Git keeps a familiar two-surface workflow in VS Code: **Commit** stays in t
 - Incremental history loading with branch, author, time-window, and text filters
 - A draggable branch-tree / history divider with keyboard resizing and saved per-view width
 - Keyboard-first navigation with roving focus, instant selection, and lazy detail loading
+- A remembered focus mode that expands the commit graph; Blame navigation restores the detail pane automatically
+
+### Inline blame
+
+Kivo Git shows a quiet author, relative time, and commit summary after the current line in saved files. It waits until the cursor settles before asking Git, reuses recent results, and hides the annotation while the file has unsaved edits. Hover for the full commit details and a direct **Open commit in History** link, or use **Kivo Git: Show Line Blame** from the editor context menu for its actions.
+
+Inline blame is on by default. Run **Kivo Git: Toggle Inline Blame** from the Command Palette, or change `ideaGit.inlineBlame.enabled` in Settings, to turn it off or back on.
+
+### Branch comparison, stashes and conflicts
+
+- Right-click another local or remote branch and choose **Compare with Current**. File diffs compare the two branch tips; the two commit tabs show commits unique to each side (up to 80 per side). Opening a diff retains the comparison. No checkout is needed.
+- Open **Stashes** from History's action rail or Commit's **More actions** menu. Save staged/unstaged work and untracked files, preview saved files, and restore their original staged state into a clean working tree. Restoration keeps the saved copy; deletion is a separate confirmed action. Ignored files are left in place.
+- Switching branches with unfinished work offers **Stash and Switch** or **Switch with Changes**. A failed switch keeps the saved stash available for recovery.
+- An in-progress merge, rebase, cherry-pick or revert appears in Commit and History with unresolved files, **Open Merge Editor**, **Mark resolved**, **Continue** and confirmed **Abort** actions. Continuing requires all conflicts to be staged. Conflicts from stash restoration can be resolved here too; their saved copy stays available.
+
+The Merge Editor requires VS Code's built-in Git extension. Use it to edit and save the resolution, then mark the file resolved if it is still listed. Mark resolved stages the complete file. Ordinary commits are unavailable while a Git operation is in progress; use its Continue action.
 
 ### Sync and safety
 
 - Ahead/behind state with fetch, pull, and push actions
 - Quiet background auto-fetch with explicit incoming and outgoing commit counts
 - Explicit pull strategies: fast-forward only, Rebase, and Merge
+- A push review showing destination, outgoing commits, and changed-file count; rejection offers Fetch and Review without force-pushing
 - Clear loading, retry, disabled, and error feedback for remote sync and history
 - Theme-aware motion with reduced-motion accessibility
 
-## Install the latest beta
+## Install
 
-Download the `.vsix` asset from the [latest GitHub Release](https://github.com/KeatonLi/kivo-git/releases), then install it from VS Code’s Extensions view (`⋯` → **Install from VSIX…**) or with:
+Install **Kivo Git** from the [VS Code Marketplace](https://marketplace.visualstudio.com/items?itemName=KeatonLi.kivo-git), or run:
+
+```bash
+code --install-extension KeatonLi.kivo-git
+```
+
+Alternatively, download the `.vsix` asset from the [latest GitHub Release](https://github.com/KeatonLi/kivo-git/releases), then install it from VS Code’s Extensions view (`⋯` → **Install from VSIX…**) or with:
 
 ```bash
 code --install-extension kivo-git-<version>.vsix
 ```
 
-Kivo Git is in active beta development. Use a disposable repository first and report problems through [GitHub Issues](https://github.com/KeatonLi/kivo-git/issues).
+Kivo Git is an early release. Report problems through [GitHub Issues](https://github.com/KeatonLi/kivo-git/issues).
 
 ## Run locally
 
@@ -66,7 +98,11 @@ Open this folder in VS Code and press `F5` to launch the Extension Development H
 
 Use **Kivo Git: Show Changes** or **Kivo Git: Show History** from the Command Palette to focus the respective surface. Graph is a column inside bottom History, never a sidebar or separate page.
 
-Kivo Git checks remote refs in the background every five minutes while its view is visible. Configure `ideaGit.autoFetch` or `ideaGit.autoFetchInterval` when a repository needs a different network policy.
+Kivo Git checks remote refs in the background every minute while its view is visible. Manual Refresh also checks the remote, and changes from VS Code Git refresh the branch display promptly. Configure `ideaGit.autoFetch` or `ideaGit.autoFetchInterval` when a repository needs a different network policy.
+
+The extension prepares the selected repository's local status and history after activation, and keeps this snapshot current when its views are hidden. Opening Commit or History shows the prepared snapshot immediately; remote checks continue in the background.
+
+In Commit, select files and use **Rollback…** to review exactly what will be discarded. Tracked edits return to `HEAD` (including staged edits); new files move to the system Trash. Unselected files and the commit message are left alone.
 
 Run the complete local verification suite with:
 

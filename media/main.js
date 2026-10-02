@@ -20,35 +20,44 @@ const LOG_DETAIL_MIN_HEIGHT = 112;
 const LOG_DETAIL_DEFAULT_HEIGHT = 190;
 const COMMIT_METADATA_MIN_HEIGHT = 96;
 const COMMIT_METADATA_DEFAULT_HEIGHT = 180;
-const COMMIT_PANEL_MIN_HEIGHT = 124;
-const COMMIT_PANEL_MAX_HEIGHT = 220;
-const COMMIT_PANEL_LEGACY_DEFAULT_HEIGHT = 188;
-const COMMIT_PANEL_DEFAULT_HEIGHT = 144;
-const COMMIT_ZONE_DEFAULT_PERCENT = window.innerHeight < 720 ? 47 : 40;
+const COMMIT_PANEL_MIN_HEIGHT = 132;
+const COMMIT_PANEL_MAX_HEIGHT = 360;
+const COMMIT_PANEL_DEFAULT_HEIGHT = 148;
+// Recent commits fit their contents until the user explicitly resizes the split.
+const COMMIT_ZONE_DEFAULT_PERCENT = 65;
 const BRANCH_PAGE_SIZE = 36;
 const GRAPH_MAX_WIDTH = 176;
 const GRAPH_MIN_WIDTH = 64;
 const GRAPH_ROW_HEIGHT = 30;
-const GRAPH_LOAD_THRESHOLD = 180;
+const GRAPH_BOTTOM_EPSILON = 2;
 const GRAPH_VIRTUAL_OVERSCAN = 12;
 const clamp = (value, minimum, maximum) => Math.max(minimum, Math.min(maximum, value));
 const restoredBranchWidth = Number(initialRepositoryState.logBranchWidth);
 const restoredDetailWidth = Number(initialRepositoryState.logDetailWidth);
 const restoredDetailHeight = Number(initialRepositoryState.logDetailHeight);
 const restoredCommitMetadataHeight = Number(initialRepositoryState.commitMetadataHeight);
-const restoredCommitPanelHeight = Number(initialRepositoryState.commitPanelHeight);
+const restoredCommitPanelHeight = initialRepositoryState.commitPanelLayoutVersion === 1
+  ? Number(initialRepositoryState.commitPanelHeight) : NaN;
+const hasCustomCommitSplit = (state) => state.commitZoneResized === true
+  || (state.commitZoneResized === undefined && Number.isFinite(Number(state.commitZonePercent))
+    && Number(state.commitZonePercent) !== COMMIT_ZONE_DEFAULT_PERCENT);
 
 const ui = {
+  workflow: undefined,
+  workflowRequestId: 0,
+  stashMessage: '',
   snapshot: undefined,
   emptyMessage: undefined,
   selected: new Set(initialRepositoryState.selected || []),
   collapsed: new Set(initialRepositoryState.collapsed || []),
   branchOpen: false,
+  toolbarMenuOpen: false,
   branchQuery: '',
   changeQuery: initialRepositoryState.changeQuery || '',
   changeFilter: initialRepositoryState.changeFilter || initialRepositoryState.changeKindFilter || 'all',
   changeSearchOpen: false,
   logBranchQuery: initialRepositoryState.logBranchQuery || '',
+  historyFocusMode: initialRepositoryState.historyFocusMode === true,
   logBranchWidth: Number.isFinite(restoredBranchWidth)
     ? clamp(restoredBranchWidth, LOG_BRANCH_MIN_WIDTH, LOG_BRANCH_MAX_WIDTH)
     : LOG_BRANCH_DEFAULT_WIDTH,
@@ -62,9 +71,17 @@ const ui = {
     ? Math.max(COMMIT_METADATA_MIN_HEIGHT, restoredCommitMetadataHeight)
     : COMMIT_METADATA_DEFAULT_HEIGHT,
   commitPanelHeight: Number.isFinite(restoredCommitPanelHeight)
-    ? clamp(restoredCommitPanelHeight === COMMIT_PANEL_LEGACY_DEFAULT_HEIGHT ? COMMIT_PANEL_DEFAULT_HEIGHT : restoredCommitPanelHeight, COMMIT_PANEL_MIN_HEIGHT, COMMIT_PANEL_MAX_HEIGHT)
+    ? clamp(restoredCommitPanelHeight, COMMIT_PANEL_MIN_HEIGHT, COMMIT_PANEL_MAX_HEIGHT)
     : COMMIT_PANEL_DEFAULT_HEIGHT,
   commitZonePercent: clamp(Number(initialRepositoryState.commitZonePercent) || COMMIT_ZONE_DEFAULT_PERCENT, 35, 75),
+  commitZoneResized: hasCustomCommitSplit(initialRepositoryState),
+  recentCommitsCollapsed: initialRepositoryState.recentCommitsCollapsed === true,
+  recentSelectedHash: undefined,
+  recentDetails: undefined,
+  recentDetailsLoading: false,
+  recentDetailsError: undefined,
+  recentRequestId: 0,
+  recentDetailsCache: new Map(),
   branchGroupsExpanded: {
     local: initialRepositoryState.branchGroupsExpanded?.local !== false,
     remote: initialRepositoryState.branchGroupsExpanded?.remote !== false,
@@ -73,13 +90,13 @@ const ui = {
   collapsedLogBranchFolders: new Set(initialRepositoryState.collapsedLogBranchFolders || []),
   branchVisibleCounts: { local: BRANCH_PAGE_SIZE, remote: BRANCH_PAGE_SIZE, tags: BRANCH_PAGE_SIZE },
   branchPopupVisibleCounts: { local: BRANCH_PAGE_SIZE, remote: BRANCH_PAGE_SIZE },
+  branchPopupRemoteExpanded: false,
   busy: false,
   operationKind: undefined,
   operationId: 0,
   syncPhase: 'idle',
   lastFetchedAt: undefined,
   syncError: undefined,
-  branchMotion: undefined,
   branchContextMenu: undefined,
   commitContextMenu: undefined,
   fileContextMenu: undefined,
@@ -87,12 +104,26 @@ const ui = {
   focusedPath: initialRepositoryState.focusedPath,
   selectionAnchor: undefined,
   commitMessage: initialRepositoryState.commitMessage || '',
+  commitReviewOpen: false,
+  pushReview: undefined,
+  pushSelectedHash: undefined,
+  pushDetails: undefined,
+  pushDetailsLoading: false,
+  pushDetailsError: undefined,
+  pushDetailsRequestId: 0,
+  pushDetailsCache: new Map(),
+  commitReviewAndPush: false,
   graphQuery: initialRepositoryState.graphQuery || '',
+  pendingRevealHash: undefined,
   graphPathFilter: initialRepositoryState.graphPathFilter || '',
   graphBranchFilter: initialRepositoryState.graphBranchFilter || '',
   graphAuthorFilter: initialRepositoryState.graphAuthorFilter || '',
   graphAgeFilter: initialRepositoryState.graphAgeFilter || 'all',
   graphLoadingMore: false,
+  historySearch: undefined,
+  historySearchLoading: false,
+  historySearchRequestId: 0,
+  historySearchLimit: 80,
   historyRefLoading: false,
   graphViewportWidth: 0,
   graphViewportHeight: 0,
@@ -106,6 +137,7 @@ const ui = {
   commitDetailsError: undefined
 };
 let lastSnapshot = '';
+let historySearchTimer;
 let previewTimer;
 let commitDetailTimer;
 let dragAvatar;
@@ -118,6 +150,38 @@ let graphResizeObserver;
 let observedGraphList;
 let graphViewportFrame;
 let graphScrollFrame;
+const reducedMotion = window.matchMedia('(prefers-reduced-motion: reduce)');
+const runningMotion = new Set();
+const elementMotion = new WeakMap();
+
+function motionEnabled() { return !reducedMotion.matches && !document.hidden; }
+
+function playMotion(element, frames, options) {
+  if (!element || !motionEnabled()) return;
+  elementMotion.get(element)?.cancel();
+  const animation = element.animate(frames, options);
+  elementMotion.set(element, animation);
+  runningMotion.add(animation);
+  const cleanup = () => {
+    runningMotion.delete(animation);
+    if (elementMotion.get(element) === animation) elementMotion.delete(element);
+  };
+  animation.finished.then(cleanup, cleanup);
+}
+
+function stopMotion() {
+  for (const animation of runningMotion) animation.cancel();
+  runningMotion.clear();
+}
+reducedMotion.addEventListener('change', () => { if (reducedMotion.matches) stopMotion(); });
+document.addEventListener('visibilitychange', () => { if (document.hidden) stopMotion(); });
+
+function changelistMovement(before, after, viewportHeight) {
+  if (!before || before.listId === after.listId || !before.width || !before.height || !after.width || !after.height) return undefined;
+  const x = before.left - after.left;
+  const y = before.top - after.top;
+  return (x || y) && Math.abs(y) < viewportHeight ? { x, y } : undefined;
+}
 const commandKey = /Mac|iPhone|iPad/.test(navigator.platform) ? '⌘' : 'Ctrl';
 
 const escapeHtml = (value = '') => String(value)
@@ -126,13 +190,16 @@ const escapeHtml = (value = '') => String(value)
 
 const iconFor = (kind) => ({ modified: 'M', added: 'A', deleted: 'D', renamed: 'R', untracked: '?', conflict: '!' })[kind] || 'M';
 const describeFileState = (status) => ({ '.': 'unchanged', M: 'modified', A: 'added', D: 'deleted', R: 'renamed', C: 'copied', U: 'conflicted', '?': 'untracked' })[status] || 'changed';
-function fileStateLabel(change) {
-  if (change.kind === 'untracked') return '??';
-  return `${change.indexStatus === '.' ? '·' : change.indexStatus}${change.workingTreeStatus === '.' ? '·' : change.workingTreeStatus}`;
-}
 function fileStateTitle(change) {
-  if (change.kind === 'untracked') return 'Untracked; not staged in the index';
-  return `Index: ${describeFileState(change.indexStatus)} · Working tree: ${describeFileState(change.workingTreeStatus)}`;
+  if (change.kind === 'untracked') return 'New file · Git is not tracking it yet';
+  return `Staged: ${describeFileState(change.indexStatus)} · Unstaged: ${describeFileState(change.workingTreeStatus)}`;
+}
+function fileStateSummary(change) {
+  if (change.kind === 'conflict') return 'Conflict';
+  if (change.kind === 'untracked') return 'New file';
+  if (change.indexStatus !== '.' && change.workingTreeStatus !== '.') return 'Staged + edits';
+  if (change.indexStatus !== '.') return 'Staged';
+  return ({ deleted: 'Deleted', renamed: 'Renamed', added: 'Added' })[change.kind] || 'Modified';
 }
 const icon = (name, classes = '') => `<span class="codicon codicon-${name} ${classes}" aria-hidden="true"></span>`;
 const kivoIcon = (name, classes = '') => `<svg class="kivo-icon ${classes}" aria-hidden="true" focusable="false"><use href="#kivo-${name}"></use></svg>`;
@@ -142,6 +209,12 @@ const relativeTime = (date) => {
   if (seconds < 3600) return `${Math.floor(seconds / 60)}m`;
   if (seconds < 86400) return `${Math.floor(seconds / 3600)}h`;
   return `${Math.floor(seconds / 86400)}d`;
+};
+const absoluteTime = (value) => {
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return '—';
+  const pad = (part) => String(part).padStart(2, '0');
+  return `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())} ${pad(date.getHours())}:${pad(date.getMinutes())}:${pad(date.getSeconds())}`;
 };
 const updatedLabel = (date) => {
   const relative = relativeTime(date);
@@ -164,12 +237,16 @@ function serializeRepositoryState() {
     graphAuthorFilter: ui.graphAuthorFilter,
     graphAgeFilter: ui.graphAgeFilter,
     logBranchQuery: ui.logBranchQuery,
+    historyFocusMode: ui.historyFocusMode,
     logBranchWidth: ui.logBranchWidth,
     logDetailWidth: ui.logDetailWidth,
     logDetailHeight: ui.logDetailHeight,
     commitMetadataHeight: ui.commitMetadataHeight,
     commitPanelHeight: ui.commitPanelHeight,
+    commitPanelLayoutVersion: 1,
     commitZonePercent: ui.commitZonePercent,
+    commitZoneResized: ui.commitZoneResized,
+    recentCommitsCollapsed: ui.recentCommitsCollapsed,
     branchGroupsExpanded: ui.branchGroupsExpanded,
     collapsedLogBranchFolders: [...ui.collapsedLogBranchFolders],
     graphScrollTop: ui.graphScrollTop,
@@ -195,7 +272,7 @@ function restoreRepositoryState(root, state = {}) {
   const detailWidth = Number(state.logDetailWidth);
   const detailHeight = Number(state.logDetailHeight);
   const metadataHeight = Number(state.commitMetadataHeight);
-  const panelHeight = Number(state.commitPanelHeight);
+  const panelHeight = state.commitPanelLayoutVersion === 1 ? Number(state.commitPanelHeight) : NaN;
   ui.selected = new Set(state.selected || []);
   ui.collapsed = new Set(state.collapsed || []);
   ui.focusedPath = state.focusedPath;
@@ -207,20 +284,28 @@ function restoreRepositoryState(root, state = {}) {
   ui.changeSearchOpen = state.changeSearchOpen === true;
   ui.selectionAnchor = undefined;
   ui.commitMessage = state.commitMessage || '';
+  ui.commitReviewOpen = false;
+  ui.pushReview = undefined;
+  clearPushCommitPreview(true);
+  ui.commitReviewAndPush = false;
   ui.graphQuery = state.graphQuery || '';
   ui.graphPathFilter = state.graphPathFilter || '';
   ui.graphBranchFilter = state.graphBranchFilter || '';
   ui.graphAuthorFilter = state.graphAuthorFilter || '';
   ui.graphAgeFilter = state.graphAgeFilter || 'all';
   ui.logBranchQuery = state.logBranchQuery || '';
+  ui.historyFocusMode = state.historyFocusMode === true;
   ui.logBranchWidth = Number.isFinite(branchWidth) ? clamp(branchWidth, LOG_BRANCH_MIN_WIDTH, LOG_BRANCH_MAX_WIDTH) : LOG_BRANCH_DEFAULT_WIDTH;
   ui.logDetailWidth = Number.isFinite(detailWidth) ? clamp(detailWidth, LOG_DETAIL_MIN_WIDTH, LOG_DETAIL_MAX_WIDTH) : LOG_DETAIL_DEFAULT_WIDTH;
   ui.logDetailHeight = Number.isFinite(detailHeight) ? Math.max(LOG_DETAIL_MIN_HEIGHT, detailHeight) : LOG_DETAIL_DEFAULT_HEIGHT;
   ui.commitMetadataHeight = Number.isFinite(metadataHeight) ? Math.max(COMMIT_METADATA_MIN_HEIGHT, metadataHeight) : COMMIT_METADATA_DEFAULT_HEIGHT;
   ui.commitPanelHeight = Number.isFinite(panelHeight)
-    ? clamp(panelHeight === COMMIT_PANEL_LEGACY_DEFAULT_HEIGHT ? COMMIT_PANEL_DEFAULT_HEIGHT : panelHeight, COMMIT_PANEL_MIN_HEIGHT, COMMIT_PANEL_MAX_HEIGHT)
+    ? clamp(panelHeight, COMMIT_PANEL_MIN_HEIGHT, COMMIT_PANEL_MAX_HEIGHT)
     : COMMIT_PANEL_DEFAULT_HEIGHT;
   ui.commitZonePercent = clamp(Number(state.commitZonePercent) || COMMIT_ZONE_DEFAULT_PERCENT, 35, 75);
+  ui.commitZoneResized = hasCustomCommitSplit(state);
+  ui.recentCommitsCollapsed = state.recentCommitsCollapsed === true;
+  clearRecentCommitPreview(true);
   ui.branchGroupsExpanded = {
     local: state.branchGroupsExpanded?.local !== false,
     remote: state.branchGroupsExpanded?.remote !== false,
@@ -229,10 +314,15 @@ function restoreRepositoryState(root, state = {}) {
   ui.collapsedLogBranchFolders = new Set(state.collapsedLogBranchFolders || []);
   ui.branchVisibleCounts = { local: BRANCH_PAGE_SIZE, remote: BRANCH_PAGE_SIZE, tags: BRANCH_PAGE_SIZE };
   ui.branchPopupVisibleCounts = { local: BRANCH_PAGE_SIZE, remote: BRANCH_PAGE_SIZE };
+  ui.branchPopupRemoteExpanded = false;
   ui.graphScrollTop = Number(state.graphScrollTop) || 0;
   ui.graphViewportWidth = 0;
   ui.graphViewportHeight = 0;
   ui.historyRefLoading = false;
+  ui.historySearch = undefined;
+  ui.historySearchLoading = false;
+  ui.historySearchLimit = 80;
+  clearTimeout(historySearchTimer);
   ui.selectedCommitHash = state.selectedCommitHash;
   ui.focusedCommitHash = state.focusedCommitHash || state.selectedCommitHash;
   ui.commitDetailsDismissed = state.commitDetailsDismissed || false;
@@ -240,6 +330,7 @@ function restoreRepositoryState(root, state = {}) {
   ui.commitDetailsLoading = false;
   ui.commitDetailsError = undefined;
   ui.branchOpen = false;
+  ui.toolbarMenuOpen = false;
   ui.branchQuery = '';
   ui.branchContextMenu = undefined;
   ui.commitContextMenu = undefined;
@@ -249,7 +340,39 @@ function restoreRepositoryState(root, state = {}) {
   repositoryStates[root] = serializeRepositoryState();
 }
 
+function historySearchActive() {
+  return Boolean(ui.graphQuery.trim() || ui.graphPathFilter.trim() || ui.graphAuthorFilter.trim() || ui.graphAgeFilter !== 'all');
+}
+
+function historySearchKey() {
+  const snapshot = ui.snapshot;
+  return JSON.stringify([snapshot?.root, snapshot?.commits?.[0]?.hash, snapshot?.branches?.map((branch) => `${branch.name}:${branch.oid || ''}:${branch.tracking || ''}`), ui.graphBranchFilter, ui.graphQuery.trim(), ui.graphAuthorFilter.trim(), ui.graphAgeFilter, ui.graphPathFilter.trim()]);
+}
+
+function requestHistorySearch(reset = true, delay = 160) {
+  clearTimeout(historySearchTimer);
+  if (surface !== 'history' || !ui.snapshot || !historySearchActive()) {
+    ui.historySearch = undefined;
+    ui.historySearchLoading = false;
+    return;
+  }
+  if (reset) {
+    ui.historySearchLimit = 80;
+    ui.graphScrollTop = 0;
+  }
+  const requestId = ++ui.historySearchRequestId;
+  ui.historySearchLoading = true;
+  ui.historySearchError = undefined;
+  if (reset) ui.historySearch = undefined;
+  render();
+  historySearchTimer = setTimeout(() => post('searchHistory', {
+    requestId, limit: ui.historySearchLimit,
+    filters: { query: ui.graphQuery, path: ui.graphPathFilter, author: ui.graphAuthorFilter, age: ui.graphAgeFilter, ref: ui.graphBranchFilter }
+  }), delay);
+}
+
 function graphCommits() {
+  if (historySearchActive()) return ui.historySearch?.key === historySearchKey() ? ui.historySearch.commits : [];
   const commits = ui.snapshot?.commits ?? [];
   const query = ui.graphQuery.trim().toLowerCase();
   const ageDays = { all: 0, '7d': 7, '30d': 30, '90d': 90 }[ui.graphAgeFilter] || 0;
@@ -267,7 +390,7 @@ function graphCommits() {
 }
 
 function reconcileHistorySelection() {
-  if (surface !== 'history' || !ui.snapshot || ui.historyRefLoading) return;
+  if (surface !== 'history' || !ui.snapshot || ui.historyRefLoading || ui.historySearchLoading) return;
   const commits = graphCommits();
   if (commits.some((commit) => commit.hash === ui.selectedCommitHash)) {
     if (!ui.commitDetails && !ui.commitDetailsLoading && !ui.commitDetailsError && !ui.commitDetailsDismissed) {
@@ -348,22 +471,27 @@ function graphRenderWindow(commits) {
 
 function restoreGraphScroll(scrollTop) {
   if (!Number.isFinite(scrollTop)) return;
-  requestAnimationFrame(() => {
-    const list = app.querySelector('[data-graph-list]');
-    if (list) list.scrollTop = scrollTop;
-  });
+  const list = app.querySelector('[data-graph-list]');
+  if (list && Math.abs(list.scrollTop - scrollTop) > .5) list.scrollTop = scrollTop;
+  ui.graphScrollTop = list?.scrollTop ?? scrollTop;
 }
 
 function requestMoreHistory(scrollTop) {
-  if (!ui.snapshot?.commitsHasMore || ui.graphLoadingMore || ui.historyRefLoading || ui.busy) return false;
+  const hasMore = historySearchActive() ? ui.historySearch?.hasMore : ui.snapshot?.commitsHasMore;
+  if (!hasMore || ui.graphLoadingMore || ui.historyRefLoading || ui.historySearchLoading || ui.busy) return false;
   ui.graphLoadingMore = true;
+  if (historySearchActive()) {
+    ui.historySearchLimit += 80;
+    requestHistorySearch(false, 0);
+    return true;
+  }
   render();
-  restoreGraphScroll(scrollTop);
   post('loadMoreCommits');
   return true;
 }
 
 function requestOlderHistoryForHash() {
+  if (historySearchActive()) { requestHistorySearch(true, 0); return true; }
   const hashPrefix = ui.graphQuery.trim().toLowerCase();
   if (surface !== 'history' || !/^[0-9a-f]{7,40}$/.test(hashPrefix)) return false;
   const snapshot = ui.snapshot;
@@ -384,7 +512,6 @@ function syncGraphViewport(list) {
   ui.graphViewportHeight = nextHeight;
   ui.graphScrollTop = scrollTop;
   render();
-  restoreGraphScroll(scrollTop);
 }
 
 function scheduleGraphViewportWidth(list) {
@@ -415,20 +542,23 @@ function bindGraphViewport() {
 function onGraphScroll(event) {
   const list = event.currentTarget;
   const scrollTop = list.scrollTop;
-  if (Math.abs(scrollTop - ui.graphScrollTop) >= GRAPH_ROW_HEIGHT) {
-    ui.graphScrollTop = scrollTop;
+  const changed = scrollTop !== ui.graphScrollTop;
+  ui.graphScrollTop = scrollTop;
+  if (changed) {
     if (!graphScrollFrame) {
       graphScrollFrame = requestAnimationFrame(() => {
         graphScrollFrame = undefined;
         if (!list.isConnected) return;
-        const currentScrollTop = list.scrollTop;
-        ui.graphScrollTop = currentScrollTop;
-        render();
-        restoreGraphScroll(currentScrollTop);
+        ui.graphScrollTop = list.scrollTop;
+        const range = graphRenderWindow(graphCommits());
+        const rendered = list.querySelector('[data-graph-window]');
+        if (rendered && (range.start !== Number(rendered.dataset.windowStart) || range.end !== Number(rendered.dataset.windowEnd))) render();
       });
     }
   }
-  if (scrollTop + list.clientHeight >= list.scrollHeight - GRAPH_LOAD_THRESHOLD) requestMoreHistory(scrollTop);
+  if (list.scrollHeight > list.clientHeight && scrollTop + list.clientHeight >= list.scrollHeight - GRAPH_BOTTOM_EPSILON) {
+    requestMoreHistory(scrollTop);
+  }
 }
 
 function reachableCommitHashes(commits, branch) {
@@ -499,17 +629,19 @@ function selectCommit(hash, { focus = false, immediate = true } = {}) {
   postCommitDetails(hash, immediate);
 }
 
+function changeSelection() {
+  return KivoChangeSelection.model(ui.snapshot, { filter: ui.changeFilter, query: ui.changeQuery, collapsed: ui.collapsed, selected: ui.selected });
+}
+
 function orderedPaths() {
-  return ui.snapshot?.changelists.flatMap((list) => list.changes.map((change) => change.path)) ?? [];
+  return changeSelection().visiblePaths;
 }
 
 function setSelection(path, checked, range = false) {
+  if (ui.busy) return;
   const paths = orderedPaths();
   const anchorIndex = range ? paths.indexOf(ui.selectionAnchor) : -1;
-  const pathIndex = paths.indexOf(path);
-  const affected = anchorIndex >= 0 && pathIndex >= 0
-    ? paths.slice(Math.min(anchorIndex, pathIndex), Math.max(anchorIndex, pathIndex) + 1)
-    : [path];
+  const affected = range ? KivoChangeSelection.range(paths, ui.selectionAnchor, path) : [path];
   for (const affectedPath of affected) checked ? ui.selected.add(affectedPath) : ui.selected.delete(affectedPath);
   if (!range || anchorIndex < 0) ui.selectionAnchor = path;
   persist();
@@ -560,11 +692,21 @@ function clearDragFeedback() {
 // are browser state, not something a fresh innerHTML string can reproduce reliably.
 function keyFor(node) {
   if (node.nodeType !== Node.ELEMENT_NODE) return null;
+  if (node.id) return `id:${node.id}`;
   if (node.dataset.path) return `file:${node.dataset.path}`;
-  if (node.dataset.listId) return `list:${node.dataset.listId}`;
+  if (node.dataset.listId && node.classList.contains('changelist')) return `list:${node.dataset.listId}`;
   if (node.dataset.checkout) return `branch:${node.dataset.checkout}`;
   if (node.dataset.hash) return `commit:${node.dataset.hash}`;
   return null;
+}
+
+function interactionIdentity(node) {
+  if (node.nodeType !== Node.ELEMENT_NODE) return '';
+  return [...node.attributes]
+    .filter((attribute) => attribute.name.startsWith('data-') || attribute.name === 'role')
+    .map((attribute) => `${attribute.name}=${attribute.value}`)
+    .sort()
+    .join('|');
 }
 
 function patchNode(current, desired, pool) {
@@ -585,7 +727,8 @@ function patchNode(current, desired, pool) {
     const wanted = desiredChildren[index];
     const key = keyFor(wanted);
     let child = key ? pool.get(key) : current.childNodes[index];
-    if (child && (child.nodeType !== wanted.nodeType || child.nodeName !== wanted.nodeName || (keyFor(child) && keyFor(child) !== key))) child = null;
+    if (child && (child.nodeType !== wanted.nodeType || child.nodeName !== wanted.nodeName || (keyFor(child) && keyFor(child) !== key) ||
+        (child.__ideaGitListeners && interactionIdentity(child) !== interactionIdentity(wanted)))) child = null;
     if (!child) child = wanted.cloneNode(true);
     if (child !== current.childNodes[index]) current.insertBefore(child, current.childNodes[index] || null);
     if (child !== wanted) patchNode(child, wanted, pool);
@@ -601,25 +744,30 @@ function patchApp(html) {
   const target = document.createElement('main');
   target.id = 'app';
   target.innerHTML = html;
-  const pool = new Map([...app.querySelectorAll('[data-path], [data-list-id], [data-checkout], [data-hash]')].map((node) => [keyFor(node), node]));
-  const before = new Map([...app.querySelectorAll('.file-row')].map((node) => [node.dataset.path, node.getBoundingClientRect()]));
-  const counters = new Map([...app.querySelectorAll('.count, .sync-chip strong')].map((node) => [node, node.textContent]));
+  const graphList = app.querySelector('[data-graph-list]');
+  const graphScrollTop = graphList?.scrollTop;
+  const pool = new Map([...app.querySelectorAll('[id], [data-path], [data-list-id], [data-checkout], [data-hash]')].map((node) => [keyFor(node), node]));
+  const before = new Map();
+  if (motionEnabled()) {
+    const destinations = new Map([...target.querySelectorAll('.file-row')].filter((row) => !row.closest('.collapsed')).map((row) => [row.dataset.path, row.dataset.listId]));
+    for (const row of app.querySelectorAll('.file-row')) {
+      const destination = destinations.get(row.dataset.path);
+      if (!destination || destination === row.dataset.listId || row.closest('.collapsed')) continue;
+      const rect = row.getBoundingClientRect();
+      before.set(row.dataset.path, { listId: row.dataset.listId, left: rect.left, top: rect.top, width: rect.width, height: rect.height });
+    }
+  }
   patchNode(app, target, pool);
-  if (!window.matchMedia('(prefers-reduced-motion: reduce)').matches) {
+  // DOM changes must not rewind a newer wheel/trackpad position on a later frame.
+  if (graphList?.isConnected && Math.abs(graphList.scrollTop - graphScrollTop) > .5) graphList.scrollTop = graphScrollTop;
+  if (before.size && motionEnabled()) {
     for (const row of app.querySelectorAll('.file-row')) {
       const old = before.get(row.dataset.path);
       if (!old) continue;
       const next = row.getBoundingClientRect();
-      const dx = old.left - next.left;
-      const dy = old.top - next.top;
-      if ((dx || dy) && Math.abs(dy) < 1200) row.animate([
-        { transform: `translate(${dx}px, ${dy}px)` }, { transform: 'translate(0, 0)' }
-      ], { duration: 220, easing: 'cubic-bezier(.2,.8,.2,1)' });
-    }
-    for (const [node, value] of counters) {
-      if (node.isConnected && node.textContent !== value) node.animate([
-        { transform: 'translateY(3px) scale(.88)', opacity: .45 },
-        { transform: 'translateY(0) scale(1)', opacity: 1 }
+      const movement = changelistMovement(old, { listId: row.dataset.listId, left: next.left, top: next.top, width: next.width, height: next.height }, window.innerHeight);
+      if (movement) playMotion(row, [
+        { transform: `translate(${movement.x}px, ${movement.y}px)` }, { transform: 'translate(0, 0)' }
       ], { duration: 180, easing: 'cubic-bezier(.2,.8,.2,1)' });
     }
   }
@@ -634,11 +782,14 @@ function render() {
     return;
   }
   patchApp(`
-    <section class="content ${surface}-content" aria-busy="${ui.busy}">
+    <section class="content ${surface}-content ${surface === 'changes' && ui.commitZoneResized && !ui.recentCommitsCollapsed ? 'recent-resized' : ''} ${surface === 'changes' && ui.recentCommitsCollapsed ? 'recent-collapsed' : ''}" aria-busy="${ui.busy}" ${ui.commitReviewOpen || ui.pushReview || ui.workflow ? 'inert' : ''}>
       ${surface === 'changes' ? renderChanges(s) : renderGraph(s)}
     </section>
     ${surface === 'changes' && ui.branchOpen ? renderBranchPopup(s) : ''}
     ${surface === 'changes' ? renderBranchContextMenu() : ''}
+    ${surface === 'changes' && ui.commitReviewOpen ? renderCommitReview(s) : ''}
+    ${ui.pushReview ? renderPushReview(s) : ''}
+    ${ui.workflow ? renderWorkflow(s) : ''}
   `);
   const textarea = app.querySelector('#commit-message');
   if (textarea && document.activeElement !== textarea && textarea.value !== ui.commitMessage) textarea.value = ui.commitMessage;
@@ -649,11 +800,23 @@ function render() {
   app.querySelectorAll('[data-select]').forEach((input) => { input.checked = ui.selected.has(input.dataset.select); });
   app.querySelectorAll('[data-select-list]').forEach((input) => {
     const list = s.changelists.find((candidate) => candidate.id === input.dataset.selectList);
-    const selected = list?.changes.filter((change) => ui.selected.has(change.path)).length ?? 0;
-    input.checked = Boolean(list?.changes.length && selected === list.changes.length);
-    input.indeterminate = selected > 0 && selected < (list?.changes.length ?? 0);
+    const changes = list?.changes.filter(matchesChangeFilter) || [];
+    const selected = changes.filter((change) => ui.selected.has(change.path)).length;
+    input.checked = Boolean(changes.length && selected === changes.length);
+    input.indeterminate = selected > 0 && selected < changes.length;
   });
   bind();
+  positionPullMenu();
+}
+
+function positionPullMenu() {
+  const menu = app.querySelector('.sync-menu.open');
+  const anchor = app.querySelector('[data-action="pull-menu"]');
+  if (!menu || !anchor) return;
+  const rect = anchor.getBoundingClientRect();
+  const margin = 8;
+  menu.style.left = `${clamp(rect.left, margin, Math.max(margin, window.innerWidth - menu.offsetWidth - margin))}px`;
+  menu.style.top = `${clamp(rect.bottom + 4, margin, Math.max(margin, window.innerHeight - menu.offsetHeight - margin))}px`;
 }
 
 function renderPullMenu() {
@@ -665,46 +828,115 @@ function renderPullMenu() {
   </div>`;
 }
 
+function requestWorkflow(kind, options = {}) {
+  const previous = ui.workflow;
+  const requestId = ++ui.workflowRequestId;
+  ui.workflow = { kind, root: ui.snapshot.root, requestId, loading: true, tab: 'files', ...options };
+  ui.branchOpen = false;
+  ui.toolbarMenuOpen = false;
+  ui.branchContextMenu = undefined;
+  ui.commitReviewOpen = false;
+  render();
+  post('workflowRequest', { kind, root: ui.workflow.root, requestId, branch: options.branch, remote: options.remote, hash: options.hash });
+  if (!previous) requestAnimationFrame(() => app.querySelector('.workflow-dialog header button')?.focus());
+}
+
+function closeWorkflow() {
+  if (!ui.workflow) return;
+  post('closeWorkflow', { requestId: ui.workflow.requestId });
+  ui.workflow = undefined;
+  ui.workflowRequestId++;
+  render();
+  requestAnimationFrame(() => app.querySelector('[data-action="stashes"], [data-log-branch][tabindex], .log-branch-row.current, [data-action="branch"]')?.focus());
+}
+
+function renderWorkflowFiles(files) {
+  return files.length ? files.map(file => {
+    const { kind, label } = commitFileState(file);
+    return `<button class="commit-recent-file workflow-file ${kind}" data-workflow-file="${escapeHtml(file.path)}" title="${label}: ${escapeHtml(file.originalPath ? `${file.originalPath} → ${file.path}` : file.path)}" aria-label="${label}: ${escapeHtml(file.path)}; open diff">${renderFileTypeIcon(file)}${renderCompactCommitFile(file)}</button>`;
+  }).join('') : '<p class="workflow-empty">No file differences.</p>';
+}
+
+function renderWorkflow(s) {
+  const w = ui.workflow, p = w.payload;
+  let title = w.kind === 'compare' ? 'Compare branches' : w.kind === 'stashes' ? 'Stashes' : 'Saved changes';
+  let body = w.loading ? `<div class="workflow-empty" role="status">${icon('loading', 'codicon-modifier-spin')} Loading…</div>` : w.error ? `<div class="detail-error" role="alert"><span>${escapeHtml(w.error)}</span><button data-action="retry-workflow">Retry</button></div>` : '';
+  let footer = '';
+  if (p && !w.loading && !w.error && w.kind === 'compare') {
+    const tabs = [['files', `${p.files.length} file${p.files.length === 1 ? '' : 's'}`], ['current', `${p.current.count} only in current`], ['target', `${p.target.count} only in target`]];
+    body = `<div class="workflow-route"><strong title="${escapeHtml(p.currentName)}">${escapeHtml(p.currentName)}</strong>${icon('arrow-right')}<strong title="${escapeHtml(p.targetName)}">${escapeHtml(p.targetName)}</strong></div><p>Files compare the two branch tips. Each commit list shows commits absent from the other branch.</p><div class="workflow-tabs" role="tablist" aria-label="Branch comparison">${tabs.map(([tab, label]) => `<button role="tab" aria-selected="${w.tab === tab}" data-workflow-tab="${tab}">${escapeHtml(label)}</button>`).join('')}</div><div class="workflow-files" role="tabpanel">${w.tab === 'files' ? renderWorkflowFiles(p.files) : p[w.tab].commits.length ? p[w.tab].commits.map(commit => `<div class="workflow-commit" title="${escapeHtml(commit.hash)}"><code>${escapeHtml(commit.hash.slice(0, 7))}</code><span>${escapeHtml(commit.subject)}</span></div>`).join('') + (p[w.tab].count > p[w.tab].commits.length ? '<p>Showing the latest 80 commits.</p>' : '') : '<p class="workflow-empty">No unique commits on this side.</p>'}</div>`;
+  }
+  if (p && !w.loading && !w.error && w.kind === 'stashes') {
+    body = `<div class="workflow-save"><label for="stash-message">Save current changes</label><div><input id="stash-message" placeholder="Optional description" value="${escapeHtml(ui.stashMessage)}" ${ui.busy ? 'disabled' : ''}><button class="primary-button" data-action="save-stash" ${ui.busy || s.operation || !s.changes.length ? 'disabled' : ''}>Save</button></div><p>Includes untracked files and staged edits. Ignored files stay in place.</p></div><div class="workflow-stashes">${p.length ? p.map(stash => `<button class="workflow-stash" data-stash-details="${escapeHtml(stash.hash)}" title="${escapeHtml(stash.subject)}"><span>${icon('archive')}<strong>${escapeHtml(stash.subject)}</strong>${icon('chevron-right')}</span><small><code>${escapeHtml(stash.ref)}</code><time>${absoluteTime(stash.date)}</time></small></button>`).join('') : '<p class="workflow-empty">No saved stashes. Save unfinished work here before switching branches.</p>'}</div>`;
+  }
+  if (p && !w.loading && !w.error && w.kind === 'stashDetails') {
+    body = `<button class="text-button" data-action="stashes">${icon('arrow-left')} Back to Stashes</button><div class="workflow-stash-heading"><strong>${escapeHtml(p.subject)}</strong><small>${escapeHtml(p.ref)} · ${absoluteTime(p.date)} · ${p.files.length} files</small></div><p>Restore also restores the staged state. The saved copy is kept. Your current working tree must be clean.</p><div class="workflow-files">${renderWorkflowFiles(p.files)}</div>`;
+    footer = `<button class="push-review-cancel" data-action="drop-stash" ${ui.busy ? 'disabled' : ''}>Delete saved copy…</button><button class="primary-button" data-action="apply-stash" ${ui.busy || s.operation || s.changes.length ? 'disabled' : ''} title="${s.changes.length ? 'Save or commit your current changes first' : 'Restore changes and keep the saved copy'}">Restore</button>`;
+  }
+  return `<div class="push-review-overlay workflow-overlay"><div class="push-review-scrim" data-action="close-workflow"></div><section class="push-review-dialog workflow-dialog" role="dialog" aria-modal="true" aria-labelledby="workflow-title"><header><div><small>${icon('repo')} ${escapeHtml(s.repositoryName)}</small><h2 id="workflow-title">${title}</h2></div><button data-action="close-workflow" aria-label="Close workflow">${icon('close')}</button></header><div class="push-review-body">${body}</div><footer>${footer || '<button class="push-review-cancel" data-action="close-workflow">Close</button>'}</footer></section></div>`;
+}
+
+function renderConflictState(s) {
+  const operation = s.operation;
+  if (!operation) return '';
+  const label = ({ merge: 'Merge', rebase: 'Rebase', 'cherry-pick': 'Cherry-pick', revert: 'Revert', conflicts: 'Resolve conflicts' })[operation.kind];
+  return `<section class="conflict-state" aria-label="Git operation"><div class="conflict-state-heading">${icon('warning')}<strong>${label}${operation.kind === 'conflicts' ? '' : ' in progress'}</strong><span>${operation.files.length} unresolved</span></div>${operation.files.length ? `<div class="conflict-files">${operation.files.map(file => `<div class="conflict-file"><button data-open-conflict="${escapeHtml(file)}" title="Open Merge Editor: ${escapeHtml(file)}">${icon('git-merge')}<span>${escapeHtml(file)}</span></button><button data-resolve-conflict="${escapeHtml(file)}" title="Stage the resolved result for ${escapeHtml(file)}" ${ui.busy ? 'disabled' : ''}>Mark resolved</button></div>`).join('')}</div>` : '<p>All conflicts are staged. Review your changes, then continue.</p>'}${operation.kind === 'conflicts' ? '<p>Review each file and mark it resolved. The saved stash remains available if these came from a restore.</p>' : `<div class="conflict-actions"><button data-action="abort-operation" ${ui.busy ? 'disabled' : ''}>Abort…</button><button class="primary-button" data-action="continue-operation" ${ui.busy || operation.files.length ? 'disabled' : ''}>Continue ${label}</button></div>`}</section>`;
+}
+
+function renderCommitRepository(s) {
+  const name = s.repositoryName || 'Repository';
+  const title = `${name}${s.root ? `\n${s.root}` : ''}`;
+  const label = `${icon('repo')}<span class="commit-repository-name">${escapeHtml(name)}</span>`;
+  return `<div class="commit-repository-header">${s.repositoryCount > 1
+    ? `<button class="commit-repository-label commit-repository-picker" data-action="choose-repository" aria-label="Choose repository, current ${escapeHtml(name)}" aria-haspopup="dialog" title="${escapeHtml(title)}\nChoose repository" ${ui.busy ? 'disabled' : ''}>${label}${icon('chevron-down')}</button>`
+    : `<div class="commit-repository-label" aria-label="Current repository ${escapeHtml(name)}" title="${escapeHtml(title)}">${label}</div>`}</div>`;
+}
+
 function renderCommitToolbar(s) {
   const syncing = ui.syncPhase === 'fetching';
   const branchLabel = s.branch === '(detached)' ? 'Detached HEAD' : s.branch;
   const branchActionLabel = s.branch === '(detached)' ? 'Git branches, detached HEAD' : `Git branches, current branch ${s.branch}`;
   const fetchIcon = syncing || ui.operationKind === 'fetch' ? 'loading' : 'refresh';
   const hasUpstream = Boolean(s.upstream);
-  const pullTitle = s.behind ? `Pull ${s.behind} incoming commit${s.behind === 1 ? '' : 's'}` : 'No incoming commits';
+  const pullTitle = hasUpstream
+    ? s.behind ? `Pull ${s.behind} known incoming commit${s.behind === 1 ? '' : 's'} (checks remote)` : 'Pull from upstream (checks remote for new commits)'
+    : 'Set an upstream branch before pulling';
   const pushTitle = s.ahead ? `Push ${s.ahead} outgoing commit${s.ahead === 1 ? '' : 's'}` : 'No commits to push';
   return `<header class="commit-toolbar" aria-label="Commit tool window actions" aria-busy="${syncing}">
     <button class="idea-toolbar-button" data-action="refresh" aria-label="Refresh changes" title="Refresh changes" ${ui.busy ? 'disabled' : ''}>${icon('refresh')}</button>
-    <span class="idea-toolbar-divider" aria-hidden="true"></span>
-    <button class="idea-toolbar-button" data-action="show-log" aria-label="Open Kivo Git History in the bottom panel" title="Open Kivo Git History">${kivoIcon('graph', 'kivo-toolbar-mark')}</button>
-    <button class="idea-toolbar-button" data-action="branches" aria-label="${escapeHtml(branchActionLabel)}" title="Branches: ${escapeHtml(branchLabel)}" aria-haspopup="dialog" aria-expanded="${ui.branchOpen}">${icon('git-branch')}</button>
-    <button class="idea-toolbar-button ${syncing ? 'working' : ''}" data-action="fetch" aria-label="${syncing ? 'Checking remote' : 'Fetch remote updates'}" title="${syncing ? 'Checking remote' : 'Fetch remote updates'}" ${ui.busy || syncing ? 'disabled' : ''}>${icon(fetchIcon, syncing || ui.operationKind === 'fetch' ? 'codicon-modifier-spin' : '')}</button>
+    <button class="idea-toolbar-button commit-branch-picker" data-action="branches" aria-label="${escapeHtml(branchActionLabel)}" title="Branches: ${escapeHtml(branchLabel)}" aria-haspopup="dialog" aria-expanded="${ui.branchOpen}">${icon('git-branch')}<span class="commit-branch-name">${escapeHtml(branchLabel)}</span></button>
     <div class="sync-action-wrap compact-sync-action">
-    <button class="idea-toolbar-button ${s.behind ? 'has-count incoming-count' : ''}" data-action="pull-menu" aria-label="${escapeHtml(pullTitle)}" title="${escapeHtml(pullTitle)}" aria-haspopup="menu" aria-expanded="${ui.pullMenuOpen}" ${!hasUpstream || !s.behind || ui.busy || syncing ? 'disabled' : ''}>${icon('arrow-down')}${s.behind ? `<span class="tool-count">${s.behind}</span>` : ''}</button>
+    <button class="idea-toolbar-button ${s.behind ? 'has-count incoming-count' : ''}" data-action="pull-menu" aria-label="${escapeHtml(pullTitle)}" title="${escapeHtml(pullTitle)}" aria-haspopup="menu" aria-expanded="${ui.pullMenuOpen}" ${!hasUpstream || ui.busy || syncing ? 'disabled' : ''}>${icon('arrow-down')}${s.behind ? `<span class="tool-count">${s.behind}</span>` : ''}</button>
       ${renderPullMenu()}
     </div>
     <button class="idea-toolbar-button ${s.ahead ? 'has-count outgoing-count' : ''}" data-action="push" aria-label="${escapeHtml(pushTitle)}" title="${escapeHtml(pushTitle)}" ${!hasUpstream || !s.ahead || ui.busy || syncing ? 'disabled' : ''}>${icon('arrow-up')}${s.ahead ? `<span class="tool-count">${s.ahead}</span>` : ''}</button>
+    <button class="idea-toolbar-button" data-action="show-log" aria-label="Open Kivo Git History in bottom Panel" title="Open History in bottom Panel">${kivoIcon('graph', 'kivo-toolbar-mark')}</button>
     <span class="toolbar-spacer"></span>
     <button class="idea-toolbar-button" data-action="search-changes" aria-label="${ui.changeSearchOpen ? 'Close changed-file search' : 'Search changed files'}" title="${ui.changeSearchOpen ? 'Close changed-file search' : 'Search changed files'}" aria-expanded="${ui.changeSearchOpen}">${icon(ui.changeSearchOpen ? 'close' : 'search')}</button>
-    <button class="idea-toolbar-button" data-action="new-list" aria-label="Create changelist" title="Create changelist" ${ui.busy ? 'disabled' : ''}>${icon('add')}</button>
-    <button class="idea-toolbar-button" data-action="collapse-all" aria-label="Collapse all changelists" title="Collapse all">${icon('chevron-up')}</button>
-    <button class="idea-toolbar-button" data-action="expand-all" aria-label="Expand all changelists" title="Expand all">${icon('chevron-down')}</button>
+    <div class="commit-toolbar-more">
+      <button class="idea-toolbar-button ${ui.syncPhase === 'error' ? 'has-error' : ''}" data-action="toolbar-more" aria-label="${escapeHtml(ui.syncPhase === 'error' ? 'Remote check failed; more Commit actions' : 'More Commit actions')}" title="${escapeHtml(ui.syncPhase === 'error' ? ui.syncError || 'Remote check failed' : 'More Commit actions')}" aria-haspopup="menu" aria-expanded="${ui.toolbarMenuOpen}">${icon('ellipsis')}</button>
+      <div class="commit-toolbar-menu ${ui.toolbarMenuOpen ? 'open' : ''}" role="menu" aria-label="More Commit actions" ${ui.toolbarMenuOpen ? '' : 'inert'}>
+        <button role="menuitem" data-toolbar-action="fetch" ${ui.busy || syncing ? 'disabled' : ''}>${icon(fetchIcon, syncing || ui.operationKind === 'fetch' ? 'codicon-modifier-spin' : '')}<span>${syncing ? 'Checking remote…' : ui.syncPhase === 'error' ? 'Remote check failed · Retry' : 'Fetch remote updates'}</span></button>
+        ${!s.upstream && s.branch !== '(detached)' ? `<button role="menuitem" data-toolbar-action="configure-upstream" ${ui.busy ? 'disabled' : ''}>${icon('git-branch')}<span>Set tracking branch…</span></button>` : ''}
+        <button role="menuitem" data-toolbar-action="configure-git-identity" ${ui.busy ? 'disabled' : ''}>${icon('account')}<span>${s.identity?.ready ? 'Edit Git identity…' : 'Set Git identity…'}</span></button>
+        ${s.branch === '(detached)' ? `<button role="menuitem" data-toolbar-action="save-detached-head" ${ui.busy ? 'disabled' : ''}>${icon('git-branch')}<span>Create branch from HEAD…</span></button>` : ''}
+        <span class="commit-toolbar-menu-divider" role="separator"></span>
+        <button role="menuitem" data-toolbar-action="new-list" ${ui.busy ? 'disabled' : ''}>${icon('add')}<span>Create changelist</span></button>
+        <button role="menuitem" data-action="stashes">${icon('archive')}<span>Stashes</span></button><button role="menuitem" data-toolbar-action="collapse-all">${icon('chevron-up')}<span>Collapse all changelists</span></button>
+        <button role="menuitem" data-toolbar-action="expand-all">${icon('chevron-down')}<span>Expand all changelists</span></button>
+      </div>
+    </div>
   </header>`;
 }
 
 function matchesChangeFilter(change) {
-  if (ui.changeFilter === 'staged') return change.staged && change.kind !== 'conflict';
-  if (ui.changeFilter === 'worktree') return change.workingTreeStatus !== '.';
-  return ui.changeFilter === 'all' || change.kind === ui.changeFilter;
+  return KivoChangeSelection.matches(change, ui.changeFilter, ui.changeQuery);
 }
 
 function renderChanges(s) {
   const query = ui.changeQuery.trim().toLowerCase();
   const filtersActive = Boolean(query || ui.changeFilter !== 'all');
-  const changesByList = new Map(s.changelists.map((list) => [list.id, list.changes.filter((change) =>
-    matchesChangeFilter(change)
-      && (!query || `${change.path} ${change.kind} ${change.indexStatus} ${change.workingTreeStatus}`.toLowerCase().includes(query))
-  )]));
+  const changesByList = new Map(changeSelection().lists.map((list) => [list.id, list.changes]));
   const filteredTotal = [...changesByList.values()].reduce((count, changes) => count + changes.length, 0);
   const visiblePaths = s.changelists
     .filter((list) => !ui.collapsed.has(list.id))
@@ -713,14 +945,17 @@ function renderChanges(s) {
   const lists = s.changelists.filter((list) => !filtersActive || changesByList.get(list.id)?.length).map((list) => {
     const collapsed = ui.collapsed.has(list.id);
     const changes = changesByList.get(list.id) || [];
-    const selected = list.changes.filter((change) => ui.selected.has(change.path)).length;
-    const allSelected = list.changes.length > 0 && selected === list.changes.length;
+    const tracked = changes.filter((change) => change.kind !== 'untracked');
+    const untracked = changes.filter((change) => change.kind === 'untracked');
+    const selected = changes.filter((change) => ui.selected.has(change.path)).length;
+    const allSelected = changes.length > 0 && selected === changes.length;
     return `<section class="changelist ${collapsed ? 'collapsed' : ''} ${list.active ? 'active-list' : ''}" data-list-id="${escapeHtml(list.id)}">
-      <div class="list-heading"><label class="list-check check"><input type="checkbox" data-select-list="${escapeHtml(list.id)}" aria-label="Select all files in ${escapeHtml(list.name)}" ${allSelected ? 'checked' : ''} ${ui.busy || !list.changes.length ? 'disabled' : ''}><span></span></label><button class="list-collapse" data-collapse="${escapeHtml(list.id)}" aria-expanded="${!collapsed}">
-        ${icon('chevron-down', 'disclosure')}<span class="active-dot" title="${list.active ? 'Active changelist' : ''}"></span><span class="list-name">${escapeHtml(list.name)}</span><span class="count">${filtersActive ? `${changes.length}/${list.changes.length}` : list.changes.length}</span>
+      <div class="list-heading"><label class="list-check check"><input type="checkbox" data-select-list="${escapeHtml(list.id)}" aria-label="Select matching files in ${escapeHtml(list.name)}" ${allSelected ? 'checked' : ''} ${ui.busy || !changes.length ? 'disabled' : ''}><span></span></label><button class="list-collapse" data-collapse="${escapeHtml(list.id)}" aria-expanded="${!collapsed}">
+        ${icon('chevron-down', 'disclosure')}<span class="active-dot" title="${list.active ? 'Active changelist' : ''}"></span><span class="list-name">${escapeHtml(list.name)}</span>${s.changelists.length > 1 ? `<span class="count">${filtersActive ? `${changes.length}/${list.changes.length}` : list.changes.length}</span>` : ''}
       </button><button class="list-more" data-list-menu="${escapeHtml(list.id)}" aria-label="Actions for ${escapeHtml(list.name)}" aria-expanded="${ui.listMenuId === list.id}">${icon('more')}</button></div>
       <div class="file-list-shell"><div class="file-list ${list.changes.length ? '' : 'empty'}" data-drop-list="${escapeHtml(list.id)}">
-        ${changes.map((change) => renderFile(change, list.id)).join('')}
+        ${tracked.length ? `<div class="file-group-heading" role="heading" aria-level="3"><span>Tracked</span>${untracked.length ? `<span>${tracked.length}</span>` : ''}</div>${tracked.map((change) => renderFile(change, list.id)).join('')}` : ''}
+        ${untracked.length ? `<div class="file-group-heading untracked-group" role="heading" aria-level="3"><span>Untracked</span>${tracked.length ? `<span>${untracked.length}</span>` : ''}</div>${untracked.map((change) => renderFile(change, list.id)).join('')}` : ''}
       </div></div><div class="list-menu ${ui.listMenuId === list.id ? 'open' : ''}" role="menu" ${ui.listMenuId === list.id ? '' : 'inert'}>
         ${list.active ? '' : `<button role="menuitem" data-list-action="active" data-list-id="${escapeHtml(list.id)}">Set Active</button>`}
         <button role="menuitem" data-list-action="rename" data-list-id="${escapeHtml(list.id)}" data-list-name="${escapeHtml(list.name)}">Rename</button>
@@ -728,18 +963,20 @@ function renderChanges(s) {
       </div>
     </section>`;
   }).join('');
-  const selectedCount = ui.selected.size;
-  const canCommit = Boolean(selectedCount && ui.commitMessage.trim() && !ui.busy);
-  const commitHint = !selectedCount ? 'Select at least one changed file' : !ui.commitMessage.trim() ? 'Write a commit message' : 'Commit selected files';
+  const commitHint = commitBlocker() || 'Commit selected files';
+  const canCommit = !commitBlocker();
   return `
-    <div class="commit-upper" id="kivo-commit-upper" style="flex-basis:${ui.commitZonePercent}%">
+    <div class="commit-upper" id="kivo-commit-upper" ${ui.commitZoneResized && !ui.recentCommitsCollapsed ? `style="flex-basis:${ui.commitZonePercent}%"` : ''}>
+      ${renderCommitRepository(s)}
       ${renderCommitToolbar(s)}
-      <div class="commit-changes-heading" role="heading" aria-level="2"><span class="changes-heading-label">${kivoIcon('changes', 'changes-heading-icon')}<span>Changes</span></span><small>${filtersActive ? `${filteredTotal}/${s.changes.length}` : s.changes.length || ''}</small></div>
+      ${renderConflictState(s)}
+      <div class="commit-changes-heading" role="heading" aria-level="2"><span class="changes-heading-label">${kivoIcon('changes', 'changes-heading-icon')}<span>Changes</span></span><small>${filtersActive ? `${filteredTotal}/${s.changes.length}` : s.changes.length} ${s.changes.length === 1 ? 'file' : 'files'}</small></div>
       ${ui.changeSearchOpen ? `<div class="commit-change-search"><input id="change-search" type="search" aria-label="Search changed files by path or status" placeholder="Path or status…" value="${escapeHtml(ui.changeQuery)}"><select id="change-filter" aria-label="Filter changed files by type or Git state"><option value="all" ${ui.changeFilter === 'all' ? 'selected' : ''}>All changes</option><option value="staged" ${ui.changeFilter === 'staged' ? 'selected' : ''}>Staged</option><option value="worktree" ${ui.changeFilter === 'worktree' ? 'selected' : ''}>Working tree</option><option value="modified" ${ui.changeFilter === 'modified' ? 'selected' : ''}>Modified</option><option value="added" ${ui.changeFilter === 'added' ? 'selected' : ''}>Added</option><option value="deleted" ${ui.changeFilter === 'deleted' ? 'selected' : ''}>Deleted</option><option value="renamed" ${ui.changeFilter === 'renamed' ? 'selected' : ''}>Renamed</option><option value="untracked" ${ui.changeFilter === 'untracked' ? 'selected' : ''}>Untracked</option><option value="conflict" ${ui.changeFilter === 'conflict' ? 'selected' : ''}>Conflicts</option></select><kbd>Esc</kbd></div>` : ''}
       <div class="lists commit-changes-tree" id="kivo-commit-changes">${lists || `<div class="commit-empty-list">${filtersActive ? 'No changed files match the current filters' : 'No changes'}</div>`}</div>
       <div class="commit-panel-splitter" data-commit-panel-splitter role="separator" aria-label="Resize changes and commit message" aria-controls="kivo-commit-changes kivo-commit-message" aria-orientation="horizontal" aria-valuemin="${COMMIT_PANEL_MIN_HEIGHT}" aria-valuenow="${Math.round(ui.commitPanelHeight)}" tabindex="0" title="Drag to resize. Double-click to reset."></div>
       <footer class="commit-panel" id="kivo-commit-message" style="--commit-panel-height:${Math.round(ui.commitPanelHeight)}px">
-      <textarea id="commit-message" rows="4" placeholder="Commit Message" aria-label="Commit Message" spellcheck="true" ${ui.operationKind === 'commit' ? 'disabled' : ''}>${escapeHtml(ui.commitMessage)}</textarea>
+      ${renderSelectionStatus()}
+      <textarea id="commit-message" rows="3" placeholder="Commit Message" aria-label="Commit Message" spellcheck="true" ${ui.operationKind === 'commit' ? 'disabled' : ''}>${escapeHtml(ui.commitMessage)}</textarea>
       <div class="commit-actions">
         <button class="primary-button ${ui.operationKind === 'commit' ? 'working' : ''}" data-action="commit" title="${escapeHtml(commitHint)} (${commandKey}+Enter)" ${!canCommit ? 'disabled' : ''}>${ui.operationKind === 'commit' ? `${icon('loading', 'codicon-modifier-spin button-spinner')}<span>Committing…</span>` : '<span>Commit</span>'}</button>
         <button class="commit-push-button ${ui.operationKind === 'push' ? 'working' : ''}" data-action="commit-and-push" title="${escapeHtml(canCommit ? 'Commit selected files and push' : commitHint)}" ${!canCommit ? 'disabled' : ''}>${ui.operationKind === 'push' ? `${icon('loading', 'codicon-modifier-spin button-spinner')}<span>Pushing…</span>` : '<span>Commit and Push…</span>'}</button>
@@ -748,59 +985,166 @@ function renderChanges(s) {
       </div>
       </footer>
     </div>
-    <div class="commit-zone-splitter" data-commit-zone-splitter role="separator" aria-label="Resize commit and insights sections" aria-controls="kivo-commit-upper kivo-commit-lower" aria-orientation="horizontal" aria-valuenow="${ui.commitZonePercent}" aria-valuemin="35" aria-valuemax="75" tabindex="0" title="Drag to resize. Double-click to reset."></div>
+    ${ui.recentCommitsCollapsed ? '' : `<div class="commit-zone-splitter" data-commit-zone-splitter role="separator" aria-label="Resize changes and recent commits" aria-controls="kivo-commit-upper kivo-commit-lower" aria-orientation="horizontal" aria-valuenow="${ui.commitZonePercent}" aria-valuemin="35" aria-valuemax="75" tabindex="0" title="Drag to resize. Double-click to fit recent commits to content."></div>`}
     <div class="commit-lower" id="kivo-commit-lower">
       ${renderRecentCommits(s)}
-      ${renderCommitRepositoryContext(s)}
-      ${renderCommitSummary(s)}
     </div>
     ${renderFileContextMenu()}`;
 }
 
+function renderCommitReview(s) {
+  const { selectedChanges } = changeSelection();
+  const partial = selectedChanges.filter((change) => change.indexStatus !== '.' && change.workingTreeStatus !== '.').length;
+  const destination = ui.commitReviewAndPush ? `<p class="commit-review-push">After committing, you will review the push to <strong>${escapeHtml(s.upstream || 'the configured upstream')}</strong>.</p>` : '';
+  return `<div class="commit-review-overlay"><div class="commit-review-scrim" data-action="close-commit-review"></div>
+    <section class="commit-review-dialog" role="dialog" aria-modal="true" aria-labelledby="commit-review-title" aria-describedby="commit-review-description">
+      <header><div><small>BEFORE COMMIT</small><h2 id="commit-review-title">Review ${selectedChanges.length} selected ${selectedChanges.length === 1 ? 'file' : 'files'}</h2></div><button class="idea-toolbar-button" data-action="close-commit-review" aria-label="Close commit review" title="Close review">${icon('close')}</button></header>
+      <p id="commit-review-description">Kivo Git commits the current working-tree contents of these files, including both staged and unstaged edits. Other staged files stay untouched.</p>
+      ${partial ? `<p class="commit-review-warning" role="note">${icon('warning')} ${partial} ${partial === 1 ? 'file has' : 'files have'} both staged and working-tree edits. Both will be included.</p>` : ''}
+      <div class="commit-review-files" aria-label="Files in this commit">${selectedChanges.map((change) => `<div class="commit-review-file"><span class="commit-review-path" title="${escapeHtml(change.path)}">${escapeHtml(change.path)}</span><span class="commit-review-state">${escapeHtml(fileStateSummary(change))}</span><button data-review-diff="${escapeHtml(change.path)}" data-original-path="${escapeHtml(change.originalPath || '')}" data-kind="${escapeHtml(change.kind)}" aria-label="Review diff for ${escapeHtml(change.path)}">Review diff</button></div>`).join('')}</div>
+      <div class="commit-review-message"><span>Message</span><strong>${escapeHtml(ui.commitMessage.trim())}</strong></div>
+      ${destination}
+      <footer><button class="commit-review-cancel" data-action="close-commit-review">Back</button><button class="primary-button" data-action="confirm-commit-review">${ui.commitReviewAndPush ? 'Commit, then review push' : 'Commit these files'}</button></footer>
+    </section>
+  </div>`;
+}
+
+function renderPushReview(s) {
+  const review = ui.pushReview;
+  const p = review.preview;
+  const blocked = Boolean(p.behind || review.rejection);
+  const warning = review.rejection || (p.behind ? `${p.behind} incoming ${p.behind === 1 ? 'commit' : 'commits'}. Fetch and review the branch before pushing.` : '');
+  return `<div class="push-review-overlay"><div class="push-review-scrim" data-action="cancel-push-review"></div>
+    <section class="push-review-dialog" role="dialog" aria-modal="true" aria-labelledby="push-review-title" aria-describedby="push-review-description">
+      <header><div><small>${icon('repo')} ${escapeHtml(s.repositoryName)}</small><h2 id="push-review-title">${icon('arrow-up')} ${review.rejection ? 'Push rejected' : 'Push commits'}</h2></div><button data-action="cancel-push-review" aria-label="Close push review" title="Close">${icon('close')}</button></header>
+      <div class="push-review-body"><p id="push-review-description">${review.afterCommit ? 'Commit saved locally. Review the destination.' : 'Review the destination and outgoing commits.'}</p>
+        <div class="push-review-route"><div><span class="push-route-label">Local</span>${icon('git-branch')}<strong>${escapeHtml(p.branch)}</strong></div><div class="push-route-target"><span class="push-route-label">Remote</span>${icon('cloud')}<strong>${escapeHtml(`${p.remote}/${p.targetBranch}`)}</strong></div></div>
+        ${warning ? `<p class="push-review-warning" role="alert">${icon('warning')}<span>${escapeHtml(warning)}</span></p>` : ''}
+        <div class="push-review-summary"><span><b>${p.ahead}</b> ${p.ahead === 1 ? 'commit' : 'commits'} to push</span><span><b>${p.fileCount}</b> ${p.fileCount === 1 ? 'changed file' : 'changed files'}</span></div>
+        <div class="push-review-commits" aria-label="Outgoing commits">${p.commits.map((commit) => {
+          const expanded = ui.pushSelectedHash === commit.hash;
+          return `<div class="push-review-entry" data-hash="${escapeHtml(commit.hash)}"><button class="push-review-commit" data-push-commit="${escapeHtml(commit.hash)}" aria-expanded="${expanded}" ${expanded ? `aria-controls="push-files-${review.id}-${escapeHtml(commit.hash)}"` : ''} title="${expanded ? 'Hide' : 'Show'} changed files · ${escapeHtml(commit.subject)}">${icon(expanded ? 'chevron-down' : 'chevron-right', 'push-commit-disclosure')}<span class="push-commit-dot" aria-hidden="true"></span><code title="${escapeHtml(commit.hash)}">${escapeHtml(commit.hash.slice(0, 7))}</code><span class="push-commit-subject">${escapeHtml(commit.subject)}</span></button>${expanded ? renderPushCommitPreview(commit) : ''}</div>`;
+        }).join('')}${p.ahead > p.commits.length ? `<p class="push-review-more">+ ${p.ahead - p.commits.length} more commits</p>` : ''}</div>
+      </div>
+      <footer><button class="push-review-cancel" data-action="cancel-push-review">Cancel</button><button class="primary-button" data-action="${blocked ? 'fetch-push-review' : 'confirm-push-review'}">${icon(blocked ? 'sync' : 'arrow-up')} ${blocked ? 'Fetch and Review' : `Push ${p.ahead} ${p.ahead === 1 ? 'commit' : 'commits'}`}</button></footer>
+    </section>
+  </div>`;
+}
+
+function respondPushReview(choice) {
+  if (!ui.pushReview) return;
+  const { id, root } = ui.pushReview;
+  ui.pushReview = undefined;
+  clearPushCommitPreview(true);
+  render();
+  post('respondPushReview', { id, root, choice });
+  app.querySelector('[data-action="push"]')?.focus();
+}
+
+function clearPushCommitPreview(clearCache = false) {
+  ui.pushDetailsRequestId++;
+  ui.pushSelectedHash = undefined;
+  ui.pushDetails = undefined;
+  ui.pushDetailsLoading = false;
+  ui.pushDetailsError = undefined;
+  if (clearCache) ui.pushDetailsCache.clear();
+}
+
+function selectPushCommit(hash, retry = false) {
+  if (!ui.pushReview?.preview.commits.some((commit) => commit.hash === hash)) return;
+  if (ui.pushSelectedHash === hash && !retry) clearPushCommitPreview();
+  else {
+    clearPushCommitPreview();
+    ui.pushSelectedHash = hash;
+    ui.pushDetails = ui.pushDetailsCache.get(hash);
+    ui.pushDetailsLoading = !ui.pushDetails;
+    if (ui.pushDetailsLoading) post('pushCommitDetails', { id: ui.pushReview.id, root: ui.pushReview.root, hash, requestId: ui.pushDetailsRequestId });
+  }
+  render();
+}
+
+function renderPushCommitPreview(commit) {
+  let content = '';
+  if (ui.pushDetailsLoading) content = '<div class="commit-recent-status" role="status">Loading changed files…</div>';
+  else if (ui.pushDetailsError) content = `<div class="commit-recent-status" role="alert">${escapeHtml(ui.pushDetailsError)} <button data-push-retry="${escapeHtml(commit.hash)}">Retry</button></div>`;
+  else if (ui.pushDetails) {
+    const files = ui.pushDetails.files || [];
+    content = `<div class="commit-recent-file-count">${files.length ? `${files.length} ${files.length === 1 ? 'changed file' : 'changed files'}` : 'No file changes in this commit'}</div>${files.map((file) => {
+      const { kind, label } = commitFileState(file);
+      return `<button class="commit-recent-file push-preview-file ${kind}" data-push-file="${escapeHtml(file.path)}" data-push-hash="${escapeHtml(commit.hash)}" title="${label}: ${escapeHtml(file.originalPath ? `${file.originalPath} → ${file.path}` : file.path)}" aria-label="${label}: ${escapeHtml(file.path)}; view committed diff">${renderFileTypeIcon(file, ui.pushDetails.fileIcons)}${renderCompactCommitFile(file)}</button>`;
+    }).join('')}`;
+  }
+  return `<div class="push-commit-files" id="push-files-${ui.pushReview.id}-${escapeHtml(commit.hash)}" aria-busy="${ui.pushDetailsLoading}">${content}</div>`;
+}
+
+function commitFileState(file) {
+  const kind = ({ A: 'added', D: 'deleted', R: 'renamed', C: 'added' })[file.status?.[0]] || 'modified';
+  return { kind, label: ({ added: 'Added', deleted: 'Deleted', renamed: 'Renamed', modified: 'Modified' })[kind] };
+}
+
+function renderCompactCommitFile(file) {
+  const split = file.path.lastIndexOf('/');
+  const filename = file.path.slice(split + 1);
+  const directory = split < 0 ? '' : file.path.slice(0, split);
+  const parts = directory.split('/');
+  const shortDirectory = parts.length > 2 ? `…/${parts.slice(-2).join('/')}` : directory;
+  return `<span class="preview-file-copy ${directory ? 'has-directory' : ''}"><span class="preview-file-name">${escapeHtml(filename)}</span>${directory ? `<span class="preview-file-directory">${escapeHtml(shortDirectory)}</span>` : ''}</span>`;
+}
+
+function clearRecentCommitPreview(clearCache = false) {
+  ui.recentRequestId++;
+  ui.recentSelectedHash = undefined;
+  ui.recentDetails = undefined;
+  ui.recentDetailsLoading = false;
+  ui.recentDetailsError = undefined;
+  if (clearCache) ui.recentDetailsCache.clear();
+}
+
+function selectRecentCommit(hash, retry = false) {
+  if (!ui.snapshot || !recentCommits(ui.snapshot).some((commit) => commit.hash === hash)) return;
+  if (ui.recentSelectedHash === hash && !retry) {
+    clearRecentCommitPreview();
+  } else {
+    clearRecentCommitPreview();
+    ui.recentSelectedHash = hash;
+    ui.recentDetails = ui.recentDetailsCache.get(hash);
+    ui.recentDetailsLoading = !ui.recentDetails;
+    if (ui.recentDetailsLoading) post('recentCommitDetails', { hash, root: ui.snapshot.root, requestId: ui.recentRequestId });
+  }
+  render();
+}
+
+function recentCommits(s) { return (s.recentCommits || s.commits || []).slice(0, 5); }
+
+function renderRecentCommitPreview(commit) {
+  let content = '';
+  if (ui.recentDetailsLoading) content = '<div class="commit-recent-status" role="status">Loading changed files…</div>';
+  else if (ui.recentDetailsError) content = `<div class="commit-recent-status" role="alert">${escapeHtml(ui.recentDetailsError)} <button data-recent-retry="${escapeHtml(commit.hash)}">Retry</button></div>`;
+  else if (ui.recentDetails) {
+    const files = ui.recentDetails.files || [];
+    content = `<div class="commit-recent-file-count">${files.length} ${files.length === 1 ? 'changed file' : 'changed files'}</div>${files.slice(0, 8).map((file) => {
+      const { kind, label } = commitFileState(file);
+      return `<button class="commit-recent-file ${kind}" data-recent-file="${escapeHtml(file.path)}" data-original-path="${escapeHtml(file.originalPath || '')}" data-kind="${escapeHtml(file.status || '')}" title="${label}: ${escapeHtml(file.originalPath ? `${file.originalPath} → ${file.path}` : file.path)}" aria-label="${label}: ${escapeHtml(file.path)}; view committed diff">${renderFileTypeIcon(file, ui.recentDetails.fileIcons)}${renderCompactCommitFile(file)}</button>`;
+    }).join('')}${files.length > 8 ? `<div class="commit-recent-status">${files.length - 8} more in History</div>` : ''}`;
+  }
+  return `<div class="commit-recent-preview" id="recent-${escapeHtml(commit.hash)}" aria-busy="${ui.recentDetailsLoading}">${content}<button class="commit-recent-history" data-recent-history="${escapeHtml(commit.hash)}">Open in History ${icon('arrow-right')}</button></div>`;
+}
+
 function renderRecentCommits(s) {
-  const commits = (s.commits || []).slice(0, 2);
+  const commits = recentCommits(s);
+  let previousDate;
   return `<section class="commit-recent" aria-label="Recent commits">
-    <div class="commit-lower-heading">${icon('history')}<span>Recent commits</span><button data-action="show-log" aria-label="Show all commit history">View all</button></div>
-    <div class="commit-recent-list">${commits.length ? commits.map((commit) => `<button class="commit-recent-row" data-recent-commit="${escapeHtml(commit.hash)}" title="Open ${escapeHtml(commit.subject)} in History">
-      ${icon('git-commit')}<span class="commit-recent-copy"><strong>${escapeHtml(commit.subject)}</strong><code>${escapeHtml(commit.shortHash)}</code></span><time title="${escapeHtml(commit.date)}">${relativeTime(commit.date)}</time>
-    </button>`).join('') : '<div class="commit-recent-empty">No commits yet</div>'}</div>
-  </section>`;
-}
-
-function renderCommitSummary(s) {
-  const modified = s.changes.filter((change) => change.kind === 'modified').length;
-  const added = s.changes.filter((change) => change.kind === 'added' || change.kind === 'untracked').length;
-  const other = s.changes.length - modified - added;
-  const listCount = s.changelists.length;
-  const conflicts = s.changes.filter((change) => change.kind === 'conflict').length;
-  return `<section class="commit-insight-card" aria-label="Change summary">
-    <div class="commit-insight-title">${icon('diff')}<span>Change summary</span></div>
-    <div class="commit-insight-total"><strong>${s.changes.length}</strong><span>changed ${s.changes.length === 1 ? 'file' : 'files'}</span></div>
-    <div class="commit-insight-kinds"><span class="modified">${modified} modified</span><span class="added">${added} added</span>${other ? `<span>${other} other</span>` : ''}</div>
-    <div class="commit-insight-footer"><span>Across changelists</span><strong>${listCount} ${listCount === 1 ? 'list' : 'lists'}</strong></div>
-    <div class="commit-checks"><span>${icon(selectedCountForSummary(s) ? 'check' : 'circle-outline')} ${selectedCountForSummary(s)} selected</span><span data-commit-message-check class="${ui.commitMessage.trim() ? '' : 'pending'}">${icon(ui.commitMessage.trim() ? 'check' : 'circle-outline')} ${ui.commitMessage.trim() ? 'Message ready' : 'Message needed'}</span>${conflicts ? `<span class="pending">${icon('warning')} ${conflicts} ${conflicts === 1 ? 'conflict' : 'conflicts'}</span>` : ''}</div>
-  </section>`;
-}
-
-function selectedCountForSummary(s) {
-  return s.changes.filter((change) => ui.selected.has(change.path)).length;
-}
-
-function renderCommitRepositoryContext(s) {
-  const detached = s.branch === '(detached)';
-  const currentBranch = detached ? `Detached HEAD${s.headOid ? ` · ${s.headOid.slice(0, 8)}` : ''}` : s.branch || 'Unknown branch';
-  const branchActionLabel = detached ? `Choose branch; ${currentBranch}` : `Choose branch, current branch ${currentBranch}`;
-  const syncState = ui.syncPhase === 'error'
-    ? 'Fetch failed'
-    : ui.syncPhase === 'fetching'
-      ? 'Checking remote'
-      : s.upstream ? `Tracking ${s.upstream}` : 'No upstream';
-  return `<section class="commit-repository-context" aria-label="Repository status">
-    <div class="commit-insight-title">${icon('repo')}<span>Repository status</span></div>
-    <div class="commit-repo-state">${icon(s.changes.length ? 'circle-filled' : 'check')}<span>${s.changes.length ? `Working tree has ${s.changes.length} ${s.changes.length === 1 ? 'change' : 'changes'}` : 'Working tree clean'}</span></div>
-    <div class="commit-repo-meta"><button data-action="branches" aria-label="${escapeHtml(branchActionLabel)}" title="Choose branch" aria-haspopup="dialog" aria-expanded="${ui.branchOpen}" ${ui.busy ? 'disabled' : ''}>${icon('git-branch')} ${escapeHtml(currentBranch)}</button><span>·</span><span class="${ui.syncPhase === 'error' ? 'has-error' : ''}" title="${escapeHtml(ui.syncError || syncState)}">${escapeHtml(syncState)}</span></div>
-    <div class="commit-repo-identity ${s.identity?.ready ? '' : 'missing'}">${icon('account')}<span title="${escapeHtml(s.identity?.ready ? `${s.identity.name} <${s.identity.email}>` : 'Git author or committer identity is incomplete')}">${s.identity?.ready ? `${escapeHtml(s.identity.name)} &lt;${escapeHtml(s.identity.email)}&gt;` : 'Git identity missing'}</span><button data-action="configure-git-identity" ${ui.busy ? 'disabled' : ''}>${s.identity?.ready ? 'Edit' : 'Set identity…'}</button></div>
-    ${detached ? `<div class="commit-repo-warning" role="note">${icon('warning')}<span>New commits here have no branch name. Create a branch to keep them easy to find.</span><button data-action="save-detached-head" ${ui.busy ? 'disabled' : ''}>Create branch…</button></div>` : ''}
+    <div class="commit-lower-heading"><button class="commit-recent-toggle" data-action="toggle-recent-commits" aria-label="${ui.recentCommitsCollapsed ? 'Expand' : 'Collapse'} recent commits" aria-expanded="${!ui.recentCommitsCollapsed}" aria-controls="kivo-recent-list">${icon(ui.recentCommitsCollapsed ? 'chevron-right' : 'chevron-down')}<span>Recent commits</span></button><button class="commit-recent-view-all" data-action="show-log" aria-label="Show all commit history">View all</button></div>
+    <div class="commit-recent-list" id="kivo-recent-list" ${ui.recentCommitsCollapsed ? 'hidden' : ''}><div class="commit-recent-branch" title="Recent commits on ${escapeHtml(s.branch)}">${icon('git-branch')}<span>${escapeHtml(s.branch || 'HEAD')}</span></div>${commits.length ? commits.map((commit) => {
+      const timestamp = absoluteTime(commit.date);
+      const date = timestamp.split(' ')[0];
+      const heading = previousDate !== date ? `<div class="commit-recent-date">${date}</div>` : '';
+      previousDate = date;
+      const expanded = ui.recentSelectedHash === commit.hash;
+      return `<div class="commit-recent-entry" data-hash="${escapeHtml(commit.hash)}">${heading}<button class="commit-recent-row ${commit.unpushedTo ? 'unpushed' : ''}" data-recent-commit="${escapeHtml(commit.hash)}" aria-expanded="${expanded}" ${expanded ? `aria-controls="recent-${escapeHtml(commit.hash)}"` : ''} title="${expanded ? 'Hide' : 'Show'} changed files · ${escapeHtml(commit.subject)}">
+        <span class="commit-recent-node" aria-hidden="true"></span><span class="commit-recent-copy"><strong title="${escapeHtml(commit.subject)}">${escapeHtml(commit.subject)}</strong><span class="commit-recent-meta"><code>${escapeHtml(commit.shortHash)}</code>${renderUnpushedBadge(commit)}<span class="commit-recent-author" title="${escapeHtml(commit.author)}">${escapeHtml(commit.author)}</span><time datetime="${escapeHtml(commit.date)}" title="${timestamp}">${timestamp.split(' ')[1] || '—'}</time></span></span>
+      </button>${expanded ? renderRecentCommitPreview(commit) : ''}</div>`;
+    }).join('') : '<div class="commit-recent-empty">No commits yet</div>'}</div>
   </section>`;
 }
 
@@ -808,12 +1152,11 @@ function renderFile(change, listId) {
   const checked = ui.selected.has(change.path);
   const filename = change.path.split('/').pop();
   const parent = change.path.includes('/') ? change.path.slice(0, change.path.lastIndexOf('/')) : '';
-  return `<div class="file-row ${checked ? 'selected' : ''} ${ui.focusedPath === change.path ? 'focused' : ''}" draggable="${!ui.busy}" data-file-row data-path="${escapeHtml(change.path)}" data-list-id="${escapeHtml(listId)}" title="${escapeHtml(change.path)}">
+  return `<div class="file-row ${change.kind} ${checked ? 'selected' : ''} ${ui.focusedPath === change.path ? 'focused' : ''}" draggable="${!ui.busy}" data-file-row data-path="${escapeHtml(change.path)}" data-list-id="${escapeHtml(listId)}" title="${escapeHtml(change.path)}">
     <label class="check"><input type="checkbox" aria-label="Select ${escapeHtml(change.path)}" data-select="${escapeHtml(change.path)}" ${checked ? 'checked' : ''} ${ui.busy ? 'disabled' : ''}><span></span></label>
-    <button class="file-main" data-diff="${escapeHtml(change.path)}" data-original-path="${escapeHtml(change.originalPath || '')}" data-kind="${escapeHtml(change.kind)}" tabindex="${ui.focusedPath === change.path ? '0' : '-1'}" aria-keyshortcuts="M" aria-label="Preview diff for ${escapeHtml(change.path)}; press M to move to another changelist" title="${escapeHtml(change.path)} · Press M to move to another changelist">
+    <button class="file-main" data-diff="${escapeHtml(change.path)}" data-original-path="${escapeHtml(change.originalPath || '')}" data-kind="${escapeHtml(change.kind)}" tabindex="${ui.focusedPath === change.path ? '0' : '-1'}" aria-keyshortcuts="M" aria-label="Preview diff for ${escapeHtml(change.path)}; ${escapeHtml(fileStateSummary(change))}; ${escapeHtml(fileStateTitle(change))}; press M to move to another changelist" title="${escapeHtml(change.path)} · ${escapeHtml(fileStateTitle(change))} · Press M to move to another changelist">
       ${renderFileTypeIcon(change)}<span class="file-name">${escapeHtml(filename)}</span>${parent ? `<span class="file-parent">${escapeHtml(parent)}</span>` : ''}
     </button>
-    <span class="status ${change.kind}" title="${escapeHtml(fileStateTitle(change))}" aria-label="${escapeHtml(fileStateTitle(change))}">${escapeHtml(fileStateLabel(change))}</span>
     <button class="file-more" data-file-menu aria-label="More actions for ${escapeHtml(change.path)}" title="More actions" aria-haspopup="menu" aria-expanded="${ui.fileContextMenu?.path === change.path}">${icon('more')}</button>
   </div>`;
 }
@@ -839,7 +1182,7 @@ function renderFileContextMenu() {
   const list = ui.snapshot?.changelists.find((candidate) => candidate.id === menu.listId);
   const partialDiff = change.staged && change.kind !== 'conflict' && change.workingTreeStatus !== '.' && change.workingTreeStatus !== 'R';
   const width = 278;
-  const height = (list?.changes.length && list.changes.length > 1 ? 278 : 248) + (partialDiff ? 52 : 0) + (change.kind === 'untracked' ? 28 : 0);
+  const height = (list?.changes.length && list.changes.length > 1 ? 310 : 280) + (partialDiff ? 52 : 0) + (change.kind === 'untracked' ? 28 : 0);
   const left = clamp(menu.x, 8, Math.max(8, window.innerWidth - width - 8));
   const top = clamp(menu.y, 8, Math.max(8, window.innerHeight - height - 8));
   const openFileDisabled = change.kind === 'deleted' || ui.busy;
@@ -858,14 +1201,29 @@ function renderFileContextMenu() {
     <div class="context-menu-separator" role="separator"></div>
     ${change.kind === 'untracked' ? `<button role="menuitem" data-file-context-action="track" ${ui.busy ? 'disabled' : ''}>${icon('add')}<span>Track and Stage</span></button>` : ''}
     <button role="menuitem" data-file-context-action="move" ${ui.busy ? 'disabled' : ''}>${icon('arrow-swap')}<span>Move to Changelist…</span></button>
-    ${list?.changes.length && list.changes.length > 1 ? `<button role="menuitem" data-file-context-action="select-list" ${ui.busy ? 'disabled' : ''}>${icon('list-selection')}<span>Select All in Changelist</span></button>` : ''}
+    ${list?.changes.length && list.changes.length > 1 ? `<button role="menuitem" data-file-context-action="select-list" ${ui.busy ? 'disabled' : ''}>${icon('list-selection')}<span>Select Matching Files in Changelist</span></button>` : ''}
     <button role="menuitem" data-file-context-action="copy-path">${icon('copy')}<span>Copy Relative Path</span></button>
+    <div class="context-menu-separator" role="separator"></div>
+    <button role="menuitem" class="danger-action" data-file-context-action="rollback" ${ui.busy ? 'disabled' : ''}>${icon('discard')}<span>${ui.selected.has(change.path) && changeSelection().selectedChanges.length > 1 && !changeSelection().hiddenCount ? `Rollback ${changeSelection().selectedChanges.length} selected files…` : 'Rollback file…'}</span></button>
   </div>`;
 }
 
 function renderRef(ref) {
   const kind = ref.kind === 'remote' ? 'remote' : ref.kind === 'tag' ? 'tag' : 'local';
-  return `<span class="graph-ref ${kind} ${ref.current ? 'current' : ''}">${icon(ref.kind === 'tag' ? 'tag' : ref.kind === 'remote' ? 'cloud' : 'git-branch')}<span>${ref.current ? 'HEAD · ' : ''}${escapeHtml(ref.name)}</span></span>`;
+  return `<span class="graph-ref ${kind} ${ref.current ? 'current' : ''}" title="${escapeHtml(`${ref.current ? 'HEAD · ' : ''}${ref.name}`)}">${icon(ref.kind === 'tag' ? 'tag' : ref.kind === 'remote' ? 'cloud' : 'git-branch')}<span>${ref.current ? 'HEAD · ' : ''}${escapeHtml(ref.name)}</span></span>`;
+}
+
+function renderRowRefs(refs = []) {
+  if (!refs.length) return '';
+  const primary = refs.find(ref => ref.current) || refs[0];
+  const full = refs.map(ref => `${ref.current ? 'HEAD · ' : ''}${ref.name}`).join('\n');
+  return `<span class="log-row-refs" title="${escapeHtml(full)}">${renderRef(primary)}${refs.length > 1 ? `<span class="ref-overflow" aria-label="${refs.length - 1} more refs: ${escapeHtml(full)}">+${refs.length - 1}</span>` : ''}</span>`;
+}
+
+function renderUnpushedBadge(commit) {
+  if (!commit.unpushedTo) return '';
+  const label = `Not pushed to ${commit.unpushedTo} · Compared with the local tracking ref`;
+  return `<span class="unpushed-badge" role="img" title="${escapeHtml(label)}" aria-label="${escapeHtml(label)}">${icon('arrow-up')}<span>Unpushed</span></span>`;
 }
 
 function graphPoint(lane, laneWidth = 18) {
@@ -928,7 +1286,16 @@ function buildPathTree(items) {
 
 function renderCommitFileTree(node, depth = 0) {
   const folders = [...node.directories.entries()].sort(([left], [right]) => left.localeCompare(right));
-  return `${folders.map(([name, child]) => `<div class="commit-file-folder" style="--tree-indent:${depth * 13}px">${icon('chevron-down')} ${icon('folder')}<span>${escapeHtml(name)}</span></div>${renderCommitFileTree(child, depth + 1)}`).join('')}${node.leaves.sort((left, right) => left.leaf.localeCompare(right.leaf)).map((file) => {
+  return `${folders.map(([name, child]) => {
+    const segments = [name];
+    while (!child.leaves.length && child.directories.size === 1) {
+      const [segment, next] = child.directories.entries().next().value;
+      segments.push(segment);
+      child = next;
+    }
+    const label = segments.join('/');
+    return `<div class="commit-file-folder" style="--tree-indent:${depth * 13}px" title="${escapeHtml(label)}">${icon('chevron-down')} ${icon('folder')}<span>${escapeHtml(label)}</span></div>${renderCommitFileTree(child, depth + 1)}`;
+  }).join('')}${node.leaves.sort((left, right) => left.leaf.localeCompare(right.leaf)).map((file) => {
     const kind = file.status === 'D' ? 'deleted' : file.status === 'A' ? 'added' : 'modified';
     return `<button class="commit-file tree-file" style="--tree-indent:${depth * 13}px" data-commit-file="${escapeHtml(file.path)}" data-commit-kind="${escapeHtml(file.status)}" data-commit-original="${escapeHtml(file.originalPath || '')}" title="Open diff for ${escapeHtml(file.path)}">${renderFileTypeIcon(file, ui.commitDetails?.fileIcons)}<span class="commit-file-name">${escapeHtml(file.leaf)}</span><span class="status ${kind}">${escapeHtml(file.status)}</span></button>`;
   }).join('')}`;
@@ -954,7 +1321,7 @@ function renderCommitDetails(s) {
     <div class="commit-detail-splitter" data-commit-detail-splitter role="separator" aria-label="Resize changed files and commit information" aria-orientation="horizontal" aria-valuemin="${COMMIT_METADATA_MIN_HEIGHT}" aria-valuenow="${metadataHeight}" tabindex="0" title="Drag to resize. Double-click to reset."></div>
     <div class="commit-metadata">
       <div class="commit-detail-head"><div><span class="detail-kicker">${escapeHtml(commit.shortHash)}</span><strong>${escapeHtml(commit.subject)}</strong></div></div>
-      <div class="commit-detail-meta"><span>${escapeHtml(commit.author)} · ${relativeTime(commit.date)}</span><code>${escapeHtml(commit.hash)}</code></div>
+      <div class="commit-detail-meta"><span>${escapeHtml(commit.author)} · ${absoluteTime(commit.date)}</span><code>${escapeHtml(commit.hash)}</code></div>
       <div class="commit-detail-refs">${commit.refs.map(renderRef).join('') || '<span class="detail-muted">No branch label</span>'}</div>
       ${details?.body && details.body !== details.subject ? `<p class="commit-body">${escapeHtml(details.body)}</p>` : ''}
       ${details?.parents?.length ? `<div class="detail-parents"><span>Parents</span>${details.parents.map((parent) => `<code>${escapeHtml(parent.slice(0, 8))}</code>`).join('')}</div>` : ''}
@@ -965,7 +1332,24 @@ function renderCommitDetails(s) {
 function renderLogBranchRow(branch, depth = 0, sync = '') {
   const kind = branch.kind === 'tag' ? 'tag' : 'branch';
   const label = branch.leaf || branch.name;
-  return `<button class="log-branch-row ${branch.current ? 'current' : ''} ${ui.graphBranchFilter === branch.name ? 'selected' : ''}" style="--tree-indent:${depth * 13}px" data-log-branch="${escapeHtml(branch.name)}" data-branch-ref="${escapeHtml(branch.name)}" data-branch-remote="${branch.remote ? 'true' : 'false'}" data-branch-kind="${kind}" aria-pressed="${ui.graphBranchFilter === branch.name}" aria-haspopup="menu" title="Show ${escapeHtml(branch.name)} history · Right-click for ${kind} actions">${icon(branch.remote ? 'cloud' : kind === 'tag' ? 'tag' : 'git-branch')}<span>${escapeHtml(label)}</span>${sync}${branch.current ? '<small>HEAD</small>' : ''}</button>`;
+  const row = `<button class="log-branch-row ${branch.current ? 'current' : ''} ${ui.graphBranchFilter === branch.name ? 'selected' : ''}" style="--tree-indent:${depth * 13}px" data-log-branch="${escapeHtml(branch.name)}" data-branch-ref="${escapeHtml(branch.name)}" data-branch-remote="${branch.remote ? 'true' : 'false'}" data-branch-kind="${kind}" aria-pressed="${ui.graphBranchFilter === branch.name}" aria-haspopup="menu" title="Show ${escapeHtml(branch.name)} history · Right-click for ${kind} actions">${icon(branch.remote ? 'cloud' : kind === 'tag' ? 'tag' : 'git-branch')}<span>${escapeHtml(label)}</span>${sync}${branch.current ? '<small>HEAD</small>' : ''}</button>`;
+  if (branch.remote || branch.current || kind === 'tag' || !branch.upstream) return row;
+  const title = `Update ${branch.name} from ${branch.upstream} (fast-forward only)`;
+  return `<div class="log-branch-entry ${ui.graphBranchFilter === branch.name ? 'selected' : ''}">${row}<button class="log-branch-update" data-update-branch="${escapeHtml(branch.name)}" aria-label="${escapeHtml(title)}" title="${escapeHtml(title)}" ${ui.busy ? 'disabled' : ''}>${icon('arrow-down')}</button></div>`;
+}
+
+function renderLogBranchSync(branch, snapshot) {
+  if (branch.remote || branch.kind === 'tag') return '';
+  const upstream = branch.current ? snapshot.upstream : branch.upstream;
+  if (!upstream) return '';
+  const behind = branch.current ? snapshot.behind : branch.behind;
+  const ahead = branch.current ? snapshot.ahead : branch.ahead;
+  const incoming = behind !== undefined ? behind > 0 : branch.tracking?.includes('<');
+  const outgoing = ahead !== undefined ? ahead > 0 : branch.tracking?.includes('>');
+  const failed = branch.current && ui.syncPhase === 'error';
+  if (!incoming && !outgoing && !failed) return '';
+  const title = `${behind === undefined && incoming ? 'Incoming commits' : `${behind ?? 0} incoming`}, ${ahead === undefined && outgoing ? 'outgoing commits' : `${ahead ?? 0} outgoing`} · ${upstream}${failed ? ' · Remote check failed' : ''}`;
+  return `<span class="branch-sync-indicator" role="img" aria-label="${escapeHtml(title)}" title="${escapeHtml(title)}">${incoming ? `<span class="branch-sync-count branch-sync-incoming">${icon('arrow-down')}<b>${behind ?? ''}</b></span>` : ''}${outgoing ? `<span class="branch-sync-count branch-sync-outgoing">${icon('arrow-up')}<b>${ahead ?? ''}</b></span>` : ''}${failed ? icon('warning', 'branch-sync-error') : ''}</span>`;
 }
 
 function renderLogBranchTree(node, depth = 0, parentPath = '', forceExpanded = false) {
@@ -980,25 +1364,18 @@ function renderLogBranchTree(node, depth = 0, parentPath = '', forceExpanded = f
 function renderLogBranchPane(s) {
   const query = ui.logBranchQuery.trim().toLowerCase();
   const matches = (item) => !query || item.name.toLowerCase().includes(query);
-  const current = s.branches.find((branch) => branch.current && !branch.remote);
   const local = s.branches.filter((branch) => !branch.remote && matches(branch))
     .sort((left, right) => Number(right.current) - Number(left.current) || left.name.localeCompare(right.name));
   const remote = s.branches.filter((branch) => branch.remote && matches(branch));
   const tags = (s.tags || []).filter(matches).map((tag) => ({ ...tag, path: tag.name, name: tag.name, remote: false, kind: 'tag' }));
   const tagCount = (s.tags || []).length;
-  const syncTitle = s.upstream
-    ? `${s.behind} incoming, ${s.ahead} outgoing · ${s.upstream}${ui.syncPhase === 'error' ? ' · Remote check failed' : ''}`
-    : 'No upstream branch';
-  const syncIcon = current
-    ? `<span class="branch-current-sync ${s.behind || s.ahead ? 'has-count' : ''}" title="${escapeHtml(syncTitle)}" aria-label="${escapeHtml(syncTitle)}">${icon(ui.syncPhase === 'fetching' ? 'loading' : ui.syncPhase === 'error' ? 'warning' : s.upstream ? 'sync' : 'circle-slash', ui.syncPhase === 'fetching' ? 'codicon-modifier-spin' : '')}</span>`
-    : '';
   const group = (key, label, items, emptyLabel) => {
     const expanded = Boolean(query) || ui.branchGroupsExpanded[key];
     const visibleCount = ui.branchVisibleCounts[key];
     const visible = expanded ? items.slice(0, visibleCount) : [];
     const remaining = Math.max(0, items.length - visible.length);
     const tree = key === 'local'
-      ? visible.map((branch) => renderLogBranchRow(branch, 0, branch.current ? syncIcon : '')).join('')
+      ? visible.map((branch) => renderLogBranchRow(branch, 0, renderLogBranchSync(branch, s))).join('')
       : visible.length ? renderLogBranchTree(buildPathTree(visible), 0, '', Boolean(query)) : '';
     return `<section class="log-branch-group ${expanded ? 'expanded' : 'collapsed'}" data-branch-group-section="${key}">
       <button class="log-branch-group-title" data-branch-group="${key}" aria-expanded="${expanded}">${icon('chevron-right', 'branch-group-chevron')}<span>${label}</span><small>${items.length}</small></button>
@@ -1019,9 +1396,11 @@ function renderBranchContextMenu() {
   const menu = ui.branchContextMenu;
   if (!menu) return '';
   const width = 264;
-  const actionCount = 3
+  const trackedLocal = menu.kind === 'branch' && !menu.remote && ui.snapshot?.branches.some((branch) => branch.name === menu.ref && Boolean(branch.upstream));
+  const actionCount = 3 + (menu.kind === 'branch' && !menu.current ? 1 : 0)
     + (menu.kind === 'branch' && !menu.current ? 3 : 0)
-    + (menu.kind === 'branch' && !menu.remote ? 1 : 0);
+    + (menu.kind === 'branch' && !menu.remote ? 1 : 0)
+    + (trackedLocal ? 2 : 0);
   const height = 40 + actionCount * 27 + 12;
   const left = clamp(menu.x, 8, Math.max(8, window.innerWidth - width - 8));
   const top = clamp(menu.y, 8, Math.max(8, window.innerHeight - height - 8));
@@ -1029,6 +1408,8 @@ function renderBranchContextMenu() {
   return `<div class="context-menu branch-context-menu" data-branch-context role="menu" aria-label="Actions for ${escapeHtml(menu.ref)}" style="left:${left}px;top:${top}px">
     <div class="context-menu-title branch-context-title"><span>${icon(menu.remote ? 'cloud' : menu.kind === 'tag' ? 'tag' : 'git-branch')}</span><strong title="${escapeHtml(menu.ref)}">${escapeHtml(menu.ref)}</strong></div>
     ${menu.kind === 'branch' && !menu.current ? `<button role="menuitem" data-branch-context-action="checkout" ${ui.busy ? 'disabled' : ''}>${icon('check')}<span>Checkout</span></button>` : ''}
+    ${trackedLocal ? `<button role="menuitem" data-branch-context-action="update" ${ui.busy ? 'disabled' : ''}>${icon('arrow-down')}<span>Update from Remote</span></button><button role="menuitem" data-branch-context-action="push" ${ui.busy ? 'disabled' : ''}>${icon('arrow-up')}<span>Push…</span></button>` : ''}
+    ${menu.kind === 'branch' && !menu.current ? `<button role="menuitem" data-branch-context-action="compare" ${ui.busy ? 'disabled' : ''}>${icon('compare-changes')}<span>Compare with Current</span></button>` : ''}
     <button role="menuitem" data-branch-context-action="new" ${ui.busy ? 'disabled' : ''}>${icon('git-branch-create')}<span>New Branch from this ${refLabel}…</span></button>
     ${menu.kind === 'branch' && !menu.current ? `<button role="menuitem" data-branch-context-action="merge" ${ui.busy ? 'disabled' : ''}>${icon('git-merge')}<span>Merge into Current…</span></button>` : ''}
     ${menu.kind === 'branch' ? '<div class="context-menu-separator" role="separator"></div>' : ''}
@@ -1043,7 +1424,7 @@ function renderBranchContextMenu() {
 function renderCommitContextMenu() {
   const menu = ui.commitContextMenu;
   if (!menu) return '';
-  const commit = ui.snapshot?.commits.find((candidate) => candidate.hash === menu.hash);
+  const commit = graphCommits().find((candidate) => candidate.hash === menu.hash);
   if (!commit) return '';
   const width = 270;
   const height = 244;
@@ -1062,25 +1443,29 @@ function renderCommitContextMenu() {
   </div>`;
 }
 
-function renderLogActionRail() {
+function renderLogActionRail(s) {
   return `<aside class="log-action-rail" aria-label="History actions">
-    <button class="idea-toolbar-button" data-action="show-changes" aria-label="Open Commit tool window" title="Open Commit tool window">${kivoIcon('changes', 'kivo-toolbar-mark')}</button>
-    <button class="idea-toolbar-button" data-action="refresh" aria-label="Refresh History" title="Refresh History">${icon('refresh')}</button>
-    <button class="idea-toolbar-button" data-action="fetch" aria-label="Fetch remote updates" title="Fetch remote updates" ${ui.busy || ui.syncPhase === 'fetching' ? 'disabled' : ''}>${icon(ui.syncPhase === 'fetching' ? 'loading' : 'cloud-download', ui.syncPhase === 'fetching' ? 'codicon-modifier-spin' : '')}</button>
+    <button class="idea-toolbar-button" data-action="stashes" aria-label="Open saved Stashes" title="Stashes" ${ui.busy ? 'disabled' : ''}>${icon('archive')}<span class="rail-text">Stashes</span></button>
+    <button class="idea-toolbar-button" data-action="show-changes" aria-label="Open Commit tool window" title="Open Commit tool window">${kivoIcon('changes', 'kivo-toolbar-mark')}<span class="rail-text">Commit</span></button>
+    ${s.repositoryCount > 1 ? `<button class="idea-toolbar-button" data-action="choose-repository" aria-label="Choose repository, current ${escapeHtml(s.repositoryName)}" title="Repository: ${escapeHtml(s.repositoryName)}" ${ui.busy ? 'disabled' : ''}>${icon('repo')}<span class="rail-text">Repos</span></button>` : ''}
+    <button class="idea-toolbar-button" data-action="refresh" aria-label="Refresh History" title="Refresh History">${icon('refresh')}<span class="rail-text">Refresh</span></button>
+    <button class="idea-toolbar-button" data-action="fetch" aria-label="Fetch remote updates" title="Fetch remote updates" ${ui.busy || ui.syncPhase === 'fetching' ? 'disabled' : ''}>${icon(ui.syncPhase === 'fetching' ? 'loading' : 'cloud-download', ui.syncPhase === 'fetching' ? 'codicon-modifier-spin' : '')}<span class="rail-text">Fetch</span></button>
     <span class="idea-toolbar-divider" aria-hidden="true"></span>
-    <button class="idea-toolbar-button" data-action="clear-graph-filters" aria-label="Clear History filters" title="Clear History filters">${icon('clear-all')}</button>
+    <button class="idea-toolbar-button" data-action="toggle-history-focus" aria-label="${ui.historyFocusMode ? 'Show History side panels' : 'Focus on commit history'}" title="${ui.historyFocusMode ? 'Show branches and commit details' : 'Focus on commit history'}" aria-pressed="${ui.historyFocusMode}">${icon(ui.historyFocusMode ? 'screen-full' : 'screen-normal')}<span class="rail-text">${ui.historyFocusMode ? 'Panels' : 'Focus'}</span></button>
   </aside>`;
 }
 
 function renderLogFilterBar(s, commits, filtersActive) {
   const branchOptions = [...new Set([...s.branches, ...(s.tags || [])].map((branch) => branch.name))].sort((a, b) => a.localeCompare(b));
   const authorOptions = [...new Set(s.commits.map((commit) => commit.author))].sort((a, b) => a.localeCompare(b));
-  const countLabel = filtersActive ? `${commits.length} of ${s.commits.length}${s.commitsHasMore ? ' loaded' : ''}` : `${s.commits.length}${s.commitsHasMore ? '+ loaded' : ''}`;
+  const countLabel = historySearchActive()
+    ? ui.historySearchLoading ? 'Searching history…' : `${commits.length}${ui.historySearch?.hasMore ? '+ matching' : ' matching'}`
+    : filtersActive ? `${commits.length} of ${s.commits.length}${s.commitsHasMore ? ' loaded' : ''}` : `${s.commits.length}${s.commitsHasMore ? '+ loaded' : ''}`;
   return `<div class="log-filter-bar"><div class="graph-toolbar-head">
     <label class="graph-search log-search">${icon('search')}<input id="graph-search" aria-label="Search by text or hash" placeholder="Search commits or hash" value="${escapeHtml(ui.graphQuery)}"></label>
     <div class="graph-filters" aria-label="History filters">
       <label class="graph-filter"><span>Ref</span><select data-graph-filter="branch" aria-label="Filter by branch or tag"><option value="">All refs</option>${branchOptions.map((branch) => `<option value="${escapeHtml(branch)}" ${ui.graphBranchFilter === branch ? 'selected' : ''}>${escapeHtml(branch)}</option>`).join('')}</select></label>
-      <label class="graph-filter"><span>User</span><select data-graph-filter="author" aria-label="Filter by author"><option value="">All</option>${authorOptions.map((author) => `<option value="${escapeHtml(author)}" ${ui.graphAuthorFilter === author ? 'selected' : ''}>${escapeHtml(author)}</option>`).join('')}</select></label>
+      <label class="graph-filter"><span>User</span><input id="graph-author" aria-label="Filter by author" list="graph-author-options" placeholder="Any" value="${escapeHtml(ui.graphAuthorFilter)}"><datalist id="graph-author-options">${authorOptions.map((author) => `<option value="${escapeHtml(author)}"></option>`).join('')}</datalist></label>
       <label class="graph-filter"><span>Date</span><select data-graph-filter="age" aria-label="Filter by date"><option value="all" ${ui.graphAgeFilter === 'all' ? 'selected' : ''}>All</option><option value="7d" ${ui.graphAgeFilter === '7d' ? 'selected' : ''}>7 days</option><option value="30d" ${ui.graphAgeFilter === '30d' ? 'selected' : ''}>30 days</option><option value="90d" ${ui.graphAgeFilter === '90d' ? 'selected' : ''}>90 days</option></select></label>
       <label class="graph-filter path-filter"><span>Paths</span><input id="graph-path" aria-label="Filter by path" placeholder="Any" value="${escapeHtml(ui.graphPathFilter)}"></label>
       ${filtersActive ? '<button class="text-button graph-clear" data-action="clear-graph-filters">Clear</button>' : ''}
@@ -1088,8 +1473,14 @@ function renderLogFilterBar(s, commits, filtersActive) {
   </div></div>`;
 }
 
+function renderLogDate(date) {
+  const full = absoluteTime(date);
+  return `<time class="log-date" datetime="${escapeHtml(date)}" title="${escapeHtml(full)}" aria-label="${escapeHtml(full)}"><span class="log-time-full">${full}</span><span class="log-time-compact" aria-hidden="true">${full.slice(5, 16)}</span></time>`;
+}
+
 function renderGraph(s) {
   const commits = graphCommits();
+  const hasMore = historySearchActive() ? ui.historySearch?.hasMore : s.commitsHasMore;
   const windowed = graphRenderWindow(commits);
   const visibleCommits = commits.slice(windowed.start, windowed.end);
   const graph = graphLayoutFor(visibleCommits);
@@ -1107,17 +1498,16 @@ function renderGraph(s) {
   const detailMinimum = detailUsesRows ? LOG_DETAIL_MIN_HEIGHT : LOG_DETAIL_MIN_WIDTH;
   const detailMaximum = detailUsesRows ? Math.max(LOG_DETAIL_DEFAULT_HEIGHT * 2, detailHeight) : LOG_DETAIL_MAX_WIDTH;
   return `<div class="graph-view log-view" role="tabpanel" aria-label="Kivo Git History">
-    <div class="log-workspace" style="--log-branch-width:${branchWidth}px;--log-detail-width:${detailWidth}px;--log-detail-height:${detailHeight}px">
-      ${renderLogActionRail()}
+    <div class="log-workspace ${ui.historyFocusMode ? 'history-focus' : ''}" style="--log-branch-width:${branchWidth}px;--log-detail-width:${detailWidth}px;--log-detail-height:${detailHeight}px">
+      ${renderLogActionRail(s)}
       ${renderLogBranchPane(s)}
       <div class="log-splitter" data-log-splitter role="separator" aria-label="Resize History branch tree" aria-controls="kivo-log-branches kivo-log-history" aria-orientation="vertical" aria-valuemin="${LOG_BRANCH_MIN_WIDTH}" aria-valuemax="${LOG_BRANCH_MAX_WIDTH}" aria-valuenow="${branchWidth}" tabindex="0" title="Drag to resize the branch tree. Double-click to reset."></div>
-      <section class="log-history-pane" id="kivo-log-history" aria-label="Commit history">
+      <section class="log-history-pane" id="kivo-log-history" aria-label="Commit history">${renderConflictState(s)}
         ${renderLogFilterBar(s, commits, filtersActive)}
         <div class="log-column-header" aria-hidden="true" style="--graph-width:${graphWidth}px"><span>AUTHOR</span><span>GRAPH</span><span>COMMIT</span><span>DATE</span></div>
-        <div class="graph-list ${graph.compressed ? 'graph-compressed' : ''} ${ui.graphLoadingMore ? 'is-loading' : ''}" data-graph-list role="listbox" aria-label="Commit history${graph.compressed ? `, compact ${laneCount}-lane topology` : ''}" aria-busy="${ui.graphLoadingMore || ui.historyRefLoading}" aria-setsize="${commits.length}" style="--lane-count:${laneCount};--graph-width:${graphWidth}px;--graph-row-height:${GRAPH_ROW_HEIGHT}px">${ui.historyRefLoading ? `<div class="inline-empty" role="status">${icon('loading', 'codicon-modifier-spin')} Loading branch history…</div>` : commits.length ? `${windowed.topSpacer ? `<div class="graph-virtual-spacer" aria-hidden="true" style="height:${windowed.topSpacer}px"></div>` : ''}${visibleCommits.map((commit, index) => `<article class="graph-row ${commit.parents.length > 1 ? 'merge-row' : ''} ${ui.selectedCommitHash === commit.hash ? 'selected' : ''}" data-commit="${escapeHtml(commit.hash)}" data-hash="${escapeHtml(commit.hash)}" role="option" aria-selected="${ui.selectedCommitHash === commit.hash}" aria-posinset="${windowed.start + index + 1}" tabindex="${focusHash === commit.hash ? '0' : '-1'}">
-          <span class="log-author" title="${escapeHtml(commit.author)}">${escapeHtml(commit.author)}</span><div class="graph-canvas">${renderGraphSvg(commit, graph)}</div><div class="graph-commit"><div class="log-subject"><strong title="${escapeHtml(commit.subject)}">${escapeHtml(commit.subject)}</strong>${(commit.refs || []).slice(0, 3).map(renderRef).join('')}</div><span class="log-meta"><code>${escapeHtml(commit.shortHash)}</code>${commit.parents?.length > 1 ? '<span class="merge-note">Merge</span>' : ''}</span></div><time class="log-date" title="${escapeHtml(commit.date)}">${relativeTime(commit.date)}</time>
-        </article>`).join('')}${windowed.bottomSpacer ? `<div class="graph-virtual-spacer" aria-hidden="true" style="height:${windowed.bottomSpacer}px"></div>` : ''}` : `<div class="inline-empty" role="status">${ui.graphLoadingMore && searchingHash ? `Searching older history for ${escapeHtml(ui.graphQuery.trim())}…` : s.commitsHasMore ? `No matches in ${s.commits.length} loaded commits. Load more to search older history.` : s.commits.length ? 'No matching commits' : 'No commits yet'}</div>`}${ui.graphLoadingMore ? `<div class="graph-loading-row" role="status">${icon('loading', 'codicon-modifier-spin')}<span>Loading more history…</span></div>` : ''}</div>
-        ${s.commitsHasMore && !ui.graphLoadingMore && !ui.historyRefLoading ? `<button class="load-more" data-action="load-more-commits" ${ui.busy ? 'disabled' : ''}>${icon('history')}<span>Load more history</span><small>Loaded ${s.commits.length} · Scroll for more</small></button>` : ''}
+        <div class="graph-list ${graph.compressed ? 'graph-compressed' : ''} ${ui.graphLoadingMore ? 'is-loading' : ''}" id="kivo-graph-list" data-graph-list role="listbox" aria-label="Commit history${graph.compressed ? `, compact ${laneCount}-lane topology` : ''}" aria-busy="${ui.graphLoadingMore || ui.historyRefLoading || ui.historySearchLoading}" aria-setsize="${commits.length}" style="--lane-count:${laneCount};--graph-width:${graphWidth}px;--graph-row-height:${GRAPH_ROW_HEIGHT}px">${ui.historyRefLoading || ui.historySearchLoading && !commits.length ? `<div class="inline-empty" role="status">${icon('loading', 'codicon-modifier-spin')} ${ui.historyRefLoading ? 'Loading branch history…' : 'Searching complete history…'}</div>` : commits.length ? `<div class="graph-rows" id="kivo-graph-rows" style="height:${windowed.totalHeight}px"><div class="graph-virtual-spacer" id="kivo-graph-top" aria-hidden="true" style="height:${windowed.topSpacer}px"></div><div class="graph-row-window" id="kivo-graph-window" data-graph-window data-window-start="${windowed.start}" data-window-end="${windowed.end}" style="height:${visibleCommits.length * GRAPH_ROW_HEIGHT}px">${visibleCommits.map((commit, index) => `<article class="graph-row ${commit.unpushedTo ? 'unpushed' : ''} ${commit.parents.length > 1 ? 'merge-row' : ''} ${ui.selectedCommitHash === commit.hash ? 'selected' : ''}" data-commit="${escapeHtml(commit.hash)}" data-hash="${escapeHtml(commit.hash)}" role="option" aria-selected="${ui.selectedCommitHash === commit.hash}" aria-posinset="${windowed.start + index + 1}" tabindex="${focusHash === commit.hash ? '0' : '-1'}">
+          <span class="log-author" title="${escapeHtml(commit.author)}">${escapeHtml(commit.author)}</span><div class="graph-canvas">${renderGraphSvg(commit, graph)}</div><div class="graph-commit"><div class="log-subject">${renderUnpushedBadge(commit)}<strong title="${escapeHtml(commit.subject)}">${escapeHtml(commit.subject)}</strong>${renderRowRefs(commit.refs)}</div><span class="log-meta"><code>${escapeHtml(commit.shortHash)}</code>${commit.parents?.length > 1 ? '<span class="merge-note">Merge</span>' : ''}</span></div>${renderLogDate(commit.date)}
+        </article>`).join('')}</div><div class="graph-virtual-spacer" id="kivo-graph-bottom" aria-hidden="true" style="height:${windowed.bottomSpacer}px"></div></div>` : `<div class="inline-empty" role="status">${ui.historySearchError ? `Search failed. <button data-action="retry-history-search">Retry</button>` : historySearchActive() ? 'No matching commits in this repository' : 'No commits yet'}</div>`}${commits.length && !ui.historyRefLoading ? `<div class="graph-load-sentinel" role="status">${ui.graphLoadingMore ? `${icon('loading', 'codicon-modifier-spin')}<span>Loading older commits…</span>` : hasMore ? 'Scroll to the bottom for older commits' : 'End of history'}</div>` : ''}</div>
       </section>
       <div class="log-detail-splitter" data-log-detail-splitter role="separator" aria-label="Resize commit history and details" aria-controls="kivo-log-history kivo-log-details" aria-orientation="${detailUsesRows ? 'horizontal' : 'vertical'}" aria-valuemin="${detailMinimum}" aria-valuemax="${detailMaximum}" aria-valuenow="${detailSize}" tabindex="0" title="Drag to resize. Double-click to reset."></div>
       ${renderCommitDetails(s)}
@@ -1131,7 +1521,7 @@ function logBranchBounds(splitter) {
   const workspace = splitter.closest('.log-workspace');
   const compact = window.matchMedia('(max-width: 860px)').matches;
   const narrow = window.matchMedia('(max-width: 1180px)').matches;
-  const railWidth = compact || narrow ? 30 : 32;
+  const railWidth = compact || narrow ? 30 : 56;
   const detailWidth = compact ? 0 : ui.logDetailWidth;
   const historyMinimum = compact ? 220 : narrow ? 300 : 430;
   const splitterWidth = compact ? 6 : 12;
@@ -1253,16 +1643,23 @@ function runFileContextAction(event) {
     post('moveFileToChangelist', { path: change.path });
   }
   if (action === 'track' && !ui.busy && change.kind === 'untracked') post('trackFile', { path: change.path });
-  if (action === 'select-list') {
+  if (action === 'select-list' && !ui.busy) {
     const list = ui.snapshot?.changelists.find((candidate) => candidate.id === menu.listId);
     if (list) {
-      for (const item of list.changes) ui.selected.add(item.path);
+      const matching = list.changes.filter(matchesChangeFilter);
+      for (const item of matching) ui.selected.add(item.path);
       ui.selectionAnchor = change.path;
       persist();
-      toast(`Selected ${list.changes.length} files`, 'success');
+      toast(`Selected ${matching.length} matching files`, 'success');
     }
   }
   if (action === 'copy-path') post('copyPath', { path: change.path });
+  if (action === 'rollback' && !ui.busy) {
+    const selection = changeSelection();
+    const paths = ui.selected.has(change.path) && selection.selectedChanges.length > 1 && !selection.hiddenCount
+      ? selection.selectedChanges.map((item) => item.path) : [change.path];
+    post('rollbackFiles', { paths });
+  }
   render();
 }
 
@@ -1351,6 +1748,7 @@ function runBranchContextAction(event) {
   event.stopPropagation();
   const menu = ui.branchContextMenu;
   const action = event.currentTarget.dataset.branchContextAction;
+  if (action === 'compare' && !ui.busy && menu) { requestWorkflow('compare', { branch: menu.ref, remote: menu.remote }); return; }
   if (!menu || !action) return;
   ui.branchContextMenu = undefined;
   if (menu.fromPopup) {
@@ -1360,6 +1758,14 @@ function runBranchContextAction(event) {
   if (action === 'new' && !ui.busy) post('createBranch', { startPoint: menu.ref });
   if (action === 'checkout' && !ui.busy) post('checkout', { branch: menu.ref, remote: menu.remote });
   if (action === 'merge' && !ui.busy) post('mergeBranch', { branch: menu.ref });
+  if (action === 'update' && !ui.busy && !menu.remote) {
+    if (menu.current) post('pull', { strategy: 'ff-only' });
+    else post('updateBranch', { branch: menu.ref });
+  }
+  if (action === 'push' && !ui.busy && !menu.remote) {
+    if (menu.current) post('push');
+    else post('pushBranch', { branch: menu.ref });
+  }
   if (action === 'rename' && !ui.busy) post('renameBranch', { branch: menu.ref });
   if (action === 'delete' && !ui.busy) post('deleteBranch', { branch: menu.ref, remote: menu.remote });
   if (action === 'copy') post('copyBranchName', { branch: menu.ref });
@@ -1581,13 +1987,18 @@ function resetCommitMetadataHeight(event) {
 
 function commitPanelBounds(splitter) {
   const content = splitter.closest('.commit-upper') || splitter.closest('.changes-content');
+  const panel = content?.querySelector('.commit-panel');
+  const minimum = Math.max(COMMIT_PANEL_MIN_HEIGHT, Number.parseFloat(panel && getComputedStyle(panel).minHeight) || 0);
+  const repositoryHeight = content?.querySelector('.commit-repository-header')?.getBoundingClientRect().height || 34;
   const toolbarHeight = content?.querySelector('.commit-toolbar')?.getBoundingClientRect().height || 31;
   const headingHeight = content?.querySelector('.commit-changes-heading')?.getBoundingClientRect().height || 26;
+  const conflictHeight = content?.querySelector('.conflict-state')?.getBoundingClientRect().height || 0;
+  const searchHeight = content?.querySelector('.commit-change-search')?.getBoundingClientRect().height || 0;
   const available = content?.clientHeight || 0;
   const maximum = Math.min(COMMIT_PANEL_MAX_HEIGHT, available
-    ? Math.max(COMMIT_PANEL_MIN_HEIGHT, available - toolbarHeight - headingHeight - 82)
+    ? Math.max(minimum, available - repositoryHeight - toolbarHeight - headingHeight - conflictHeight - searchHeight - 82)
     : COMMIT_PANEL_MAX_HEIGHT);
-  return { minimum: COMMIT_PANEL_MIN_HEIGHT, maximum };
+  return { minimum, maximum };
 }
 
 function applyCommitPanelHeight(splitter, height) {
@@ -1621,11 +2032,13 @@ function startCommitPanelResize(event) {
   const content = splitter.closest('.changes-content');
   if (!content) return;
   event.preventDefault();
-  const initialHeight = applyCommitPanelHeight(splitter, ui.commitPanelHeight);
+  const panel = splitter.parentElement?.querySelector('.commit-panel');
+  const initialHeight = applyCommitPanelHeight(splitter, panel?.getBoundingClientRect().height || ui.commitPanelHeight);
+  const startY = event.clientY;
   const pointerId = event.pointerId;
   const move = (pointerEvent) => {
     if (pointerEvent.pointerId !== pointerId) return;
-    applyCommitPanelHeight(splitter, content.getBoundingClientRect().bottom - pointerEvent.clientY);
+    applyCommitPanelHeight(splitter, initialHeight + startY - pointerEvent.clientY);
   };
   const complete = (pointerEvent) => {
     if (pointerEvent.pointerId === pointerId) finishCommitPanelResize(true);
@@ -1663,9 +2076,18 @@ function resetCommitPanelHeight(event) {
 function applyCommitZonePercent(splitter, percent) {
   const next = Math.round(clamp(percent, 35, 75));
   ui.commitZonePercent = next;
+  ui.commitZoneResized = true;
+  splitter.parentElement?.classList.add('recent-resized');
   splitter.parentElement?.querySelector('.commit-upper')?.style.setProperty('flex-basis', `${next}%`);
   splitter.setAttribute('aria-valuenow', String(next));
   return next;
+}
+
+function resetCommitZoneSize() {
+  ui.commitZonePercent = COMMIT_ZONE_DEFAULT_PERCENT;
+  ui.commitZoneResized = false;
+  persist();
+  render();
 }
 
 function finishCommitZoneResize(save = true) {
@@ -1678,24 +2100,30 @@ function finishCommitZoneResize(save = true) {
   document.body.classList.remove('commit-zone-resizing');
   activeCommitZoneResize = undefined;
   if (save) persist();
-  else applyCommitZonePercent(resize.splitter, resize.initialPercent);
+  else {
+    ui.commitZoneResized = resize.initialResized;
+    ui.commitZonePercent = resize.initialPercent;
+    render();
+  }
 }
 
 function startCommitZoneResize(event) {
   if (event.button !== 0 || activeCommitZoneResize) return;
   const splitter = event.currentTarget;
-  const content = splitter.closest('.commit-upper') || splitter.closest('.changes-content');
+  const content = splitter.closest('.changes-content');
   if (!content?.clientHeight) return;
   event.preventDefault();
+  const initialResized = ui.commitZoneResized;
   const initialPercent = ui.commitZonePercent;
+  const startPercent = (content.querySelector('.commit-upper')?.getBoundingClientRect().height || 0) * 100 / content.clientHeight;
   const startY = event.clientY;
   const move = (pointerEvent) => {
     if (pointerEvent.pointerId !== event.pointerId) return;
-    applyCommitZonePercent(splitter, initialPercent + (pointerEvent.clientY - startY) * 100 / content.clientHeight);
+    applyCommitZonePercent(splitter, startPercent + (pointerEvent.clientY - startY) * 100 / content.clientHeight);
   };
   const complete = (pointerEvent) => { if (pointerEvent.pointerId === event.pointerId) finishCommitZoneResize(true); };
   const cancel = (pointerEvent) => { if (pointerEvent.pointerId === event.pointerId) finishCommitZoneResize(false); };
-  activeCommitZoneResize = { splitter, pointerId: event.pointerId, initialPercent, move, complete, cancel };
+  activeCommitZoneResize = { splitter, pointerId: event.pointerId, initialPercent, initialResized, move, complete, cancel };
   splitter.setPointerCapture?.(event.pointerId);
   splitter.addEventListener('pointermove', move);
   splitter.addEventListener('pointerup', complete);
@@ -1706,14 +2134,21 @@ function startCommitZoneResize(event) {
 function adjustCommitZonePercent(event) {
   if (!['ArrowUp', 'ArrowDown', 'Home'].includes(event.key)) return;
   event.preventDefault();
-  applyCommitZonePercent(event.currentTarget, event.key === 'Home' ? COMMIT_ZONE_DEFAULT_PERCENT : ui.commitZonePercent + (event.key === 'ArrowDown' ? 3 : -3));
+  if (event.key === 'Home') {
+    resetCommitZoneSize();
+    return;
+  }
+  const content = event.currentTarget.closest('.changes-content');
+  const percent = ui.commitZoneResized ? ui.commitZonePercent
+    : (content?.querySelector('.commit-upper')?.getBoundingClientRect().height || 0) * 100 / (content?.clientHeight || 1);
+  applyCommitZonePercent(event.currentTarget, percent + (event.key === 'ArrowDown' ? 3 : -3));
   persist();
 }
 
 function renderBranchPopup(s) {
   const query = ui.branchQuery.trim().toLowerCase();
   const filtered = s.branches.filter((branch) => branch.name.toLowerCase().includes(query));
-  const local = filtered.filter((branch) => !branch.remote);
+  const local = filtered.filter((branch) => !branch.remote).sort((a, b) => Number(b.current) - Number(a.current));
   const remote = filtered.filter((branch) => branch.remote);
   const rows = (items) => items.map((branch) => `<button class="branch-row ${branch.current ? 'current' : ''}" data-checkout="${escapeHtml(branch.name)}" data-remote="${branch.remote}" ${ui.busy ? 'disabled' : ''}>
       ${icon(branch.current ? 'check' : branch.remote ? 'cloud' : 'git-branch')}<span class="branch-row-name">${escapeHtml(branch.name)}</span>${branch.tracking ? `<small>${escapeHtml(branch.tracking)}</small>` : ''}
@@ -1722,7 +2157,8 @@ function renderBranchPopup(s) {
     const count = ui.branchPopupVisibleCounts[key];
     const visible = items.slice(0, count);
     const remaining = Math.max(0, items.length - visible.length);
-    return `<section class="branch-popup-group"><h3>${label}<span>${items.length}</span></h3>${rows(visible) || `<p class="no-results">No ${label.toLowerCase()}</p>`}${remaining ? `<button class="branch-popup-more" data-branch-popup-more="${key}">Show ${Math.min(BRANCH_PAGE_SIZE, remaining)} more</button>` : ''}</section>`;
+    const expanded = key !== 'remote' || ui.branchPopupRemoteExpanded || Boolean(query);
+    return `<section class="branch-popup-group"><h3>${key === 'remote' ? `<button class="branch-popup-toggle" data-branch-popup-toggle="remote" aria-expanded="${expanded}">${icon(expanded ? 'chevron-down' : 'chevron-right')}${label}<span>${items.length}</span></button>` : `${label}<span>${items.length}</span>`}</h3>${expanded ? `${rows(visible) || `<p class="no-results">No ${label.toLowerCase()}</p>`}${remaining ? `<button class="branch-popup-more" data-branch-popup-more="${key}">Show ${Math.min(BRANCH_PAGE_SIZE, remaining)} more</button>` : ''}` : ''}</section>`;
   };
   return `<div class="branch-overlay ${ui.branchOpen ? 'open' : ''}" ${ui.branchOpen ? '' : 'inert'} aria-hidden="${!ui.branchOpen}"><div class="scrim" data-action="close-branches"></div><aside class="branch-popup" role="dialog" aria-modal="true" aria-label="Git branches">
     <div class="popup-title"><strong>Git Branches</strong><button class="icon-button" aria-label="Close branches" data-action="close-branches">${icon('close')}</button></div>
@@ -1739,13 +2175,66 @@ function bind() {
     node.__ideaGitListeners.add(token);
     node.addEventListener(event, handler);
   });
+  once('[data-workflow-file]', 'click', event => { const w = ui.workflow; if (w) post('openWorkflowDiff', { root: w.root, requestId: w.requestId, path: event.currentTarget.dataset.workflowFile }); });
+  once('[data-stash-details]', 'click', event => requestWorkflow('stashDetails', { hash: event.currentTarget.dataset.stashDetails }));
+  once('[data-workflow-tab]', 'click', event => { ui.workflow.tab = event.currentTarget.dataset.workflowTab; render(); });
+  once('#stash-message', 'input', event => { ui.stashMessage = event.currentTarget.value; });
+  once('[data-open-conflict]', 'click', event => post('openConflict', { root: ui.snapshot.root, path: event.currentTarget.dataset.openConflict }));
+  once('[data-resolve-conflict]', 'click', event => { if (!ui.busy) post('resolveConflict', { root: ui.snapshot.root, path: event.currentTarget.dataset.resolveConflict }); });
   bindContextMenuDelegation();
   once('[data-action]', 'click', (event) => handleAction(event.currentTarget.dataset.action));
+  once('[data-toolbar-action]', 'click', (event) => {
+    event.stopPropagation();
+    const action = event.currentTarget.dataset.toolbarAction;
+    ui.toolbarMenuOpen = false;
+    render();
+    handleAction(action);
+  });
+  once('[data-review-diff]', 'click', (event) => {
+    const button = event.currentTarget;
+    post('openDiff', { path: button.dataset.reviewDiff, originalPath: button.dataset.originalPath || undefined, kind: button.dataset.kind, preview: false });
+  });
+  once('.commit-review-dialog', 'keydown', (event) => {
+    if (event.key !== 'Tab') return;
+    const items = [...event.currentTarget.querySelectorAll('button:not(:disabled)')];
+    if (!items.length) return;
+    const first = items[0];
+    const last = items[items.length - 1];
+    if (event.shiftKey && document.activeElement === first) { event.preventDefault(); last.focus(); }
+    else if (!event.shiftKey && document.activeElement === last) { event.preventDefault(); first.focus(); }
+  });
+  once('.commit-toolbar-menu', 'keydown', (event) => {
+    if (event.key === 'Escape') {
+      event.preventDefault();
+      ui.toolbarMenuOpen = false;
+      render();
+      app.querySelector('[data-action="toolbar-more"]')?.focus();
+      return;
+    }
+    if (!['ArrowDown', 'ArrowUp', 'Home', 'End'].includes(event.key)) return;
+    event.preventDefault();
+    const items = [...event.currentTarget.querySelectorAll('button:not(:disabled)')];
+    const current = items.indexOf(document.activeElement);
+    const next = event.key === 'Home' ? 0 : event.key === 'End' ? items.length - 1 : (current + (event.key === 'ArrowDown' ? 1 : -1) + items.length) % items.length;
+    items[Math.max(0, next)]?.focus();
+  });
   once('[data-file-menu]', 'click', (event) => openFileContextMenu(event, event.currentTarget.closest('[data-file-row]')));
   once('[data-graph-list]', 'scroll', onGraphScroll);
   bindGraphViewport();
   once('[data-commit]', 'click', (event) => selectCommit(event.currentTarget.dataset.commit));
-  once('[data-recent-commit]', 'click', (event) => post('showRecentCommit', { hash: event.currentTarget.dataset.recentCommit }));
+  once('[data-recent-commit]', 'click', (event) => selectRecentCommit(event.currentTarget.dataset.recentCommit));
+  once('[data-recent-retry]', 'click', (event) => selectRecentCommit(event.currentTarget.dataset.recentRetry, true));
+  once('[data-recent-history]', 'click', (event) => post('showRecentCommit', { hash: event.currentTarget.dataset.recentHistory }));
+  once('[data-recent-file]', 'click', (event) => {
+    const file = event.currentTarget.dataset;
+    post('openRecentCommitDiff', { root: ui.snapshot.root, hash: ui.recentSelectedHash, path: file.recentFile, originalPath: file.originalPath, kind: file.kind });
+  });
+  once('[data-push-commit]', 'click', (event) => selectPushCommit(event.currentTarget.dataset.pushCommit));
+  once('[data-push-retry]', 'click', (event) => selectPushCommit(event.currentTarget.dataset.pushRetry, true));
+  once('[data-push-file]', 'click', (event) => {
+    if (!ui.pushReview) return;
+    post('openPushCommitDiff', { id: ui.pushReview.id, root: ui.pushReview.root, hash: event.currentTarget.dataset.pushHash, path: event.currentTarget.dataset.pushFile });
+  });
   once('[data-commit]', 'keydown', (event) => {
     if (event.key === 'ContextMenu' || (event.shiftKey && event.key === 'F10')) {
       const bounds = event.currentTarget.getBoundingClientRect();
@@ -1786,10 +2275,9 @@ function bind() {
     graphSearch.__ideaGitListeners = new Set(['search']);
     graphSearch.addEventListener('input', () => {
       ui.graphQuery = graphSearch.value;
-      reconcileHistorySelection();
       persist();
-      render();
-      requestOlderHistoryForHash();
+      requestHistorySearch();
+      if (!historySearchActive()) { reconcileHistorySelection(); render(); }
       requestAnimationFrame(() => {
         const input = app.querySelector('#graph-search');
         input?.focus();
@@ -1802,13 +2290,28 @@ function bind() {
     graphPath.__ideaGitListeners = new Set(['path-search']);
     graphPath.addEventListener('input', () => {
       ui.graphPathFilter = graphPath.value;
-      reconcileHistorySelection();
       persist();
-      render();
+      requestHistorySearch();
+      if (!historySearchActive()) { reconcileHistorySelection(); render(); }
       requestAnimationFrame(() => {
         const input = app.querySelector('#graph-path');
         input?.focus();
         input?.setSelectionRange(ui.graphPathFilter.length, ui.graphPathFilter.length);
+      });
+    });
+  }
+  const graphAuthor = app.querySelector('#graph-author');
+  if (graphAuthor && !graphAuthor.__ideaGitListeners) {
+    graphAuthor.__ideaGitListeners = new Set(['author-search']);
+    graphAuthor.addEventListener('input', () => {
+      ui.graphAuthorFilter = graphAuthor.value;
+      persist();
+      requestHistorySearch();
+      if (!historySearchActive()) { reconcileHistorySelection(); render(); }
+      requestAnimationFrame(() => {
+        const input = app.querySelector('#graph-author');
+        input?.focus();
+        input?.setSelectionRange(ui.graphAuthorFilter.length, ui.graphAuthorFilter.length);
       });
     });
   }
@@ -1893,14 +2396,16 @@ function bind() {
       requestAnimationFrame(() => app.querySelector('[data-graph-filter="branch"]')?.focus());
       return;
     }
-    if (select.dataset.graphFilter === 'author') ui.graphAuthorFilter = select.value;
     if (select.dataset.graphFilter === 'age') ui.graphAgeFilter = select.value || 'all';
-    reconcileHistorySelection();
     persist();
-    render();
+    requestHistorySearch();
+    if (!historySearchActive()) { reconcileHistorySelection(); render(); }
   });
   once('[data-log-branch]', 'click', (event) => {
     setHistoryRef(event.currentTarget.dataset.logBranch || '');
+  });
+  once('[data-update-branch]', 'click', (event) => {
+    if (!ui.busy) post('updateBranch', { branch: event.currentTarget.dataset.updateBranch });
   });
   once('[data-log-branch]', 'keydown', (event) => {
     if (event.key !== 'ContextMenu' && !(event.shiftKey && event.key === 'F10')) return;
@@ -1936,7 +2441,7 @@ function bind() {
   once('[data-commit-panel-splitter]', 'dblclick', resetCommitPanelHeight);
   once('[data-commit-panel-splitter]', 'keydown', adjustCommitPanelHeight);
   once('[data-commit-zone-splitter]', 'pointerdown', startCommitZoneResize);
-  once('[data-commit-zone-splitter]', 'dblclick', (event) => { applyCommitZonePercent(event.currentTarget, COMMIT_ZONE_DEFAULT_PERCENT); persist(); });
+  once('[data-commit-zone-splitter]', 'dblclick', resetCommitZoneSize);
   once('[data-commit-zone-splitter]', 'keydown', adjustCommitZonePercent);
   once('[data-pull-strategy]', 'click', (event) => {
     event.stopPropagation();
@@ -2003,7 +2508,7 @@ function bind() {
     const input = event.currentTarget;
     const list = ui.snapshot?.changelists.find((candidate) => candidate.id === input.dataset.selectList);
     if (!list) return;
-    for (const change of list.changes) input.checked ? ui.selected.add(change.path) : ui.selected.delete(change.path);
+    for (const change of list.changes.filter(matchesChangeFilter)) input.checked ? ui.selected.add(change.path) : ui.selected.delete(change.path);
     persist();
     render();
   });
@@ -2038,6 +2543,7 @@ function bind() {
     }
     if ((event.ctrlKey || event.metaKey) && !event.altKey && event.key.toLowerCase() === 'a') {
       event.preventDefault();
+      if (ui.busy) return;
       for (const path of orderedPaths()) ui.selected.add(path);
       focusFile(button.dataset.diff);
       return;
@@ -2055,6 +2561,7 @@ function bind() {
     }
     if (event.key === 'Enter') {
       event.preventDefault();
+      clearTimeout(previewTimer);
       postDiff(button);
       return;
     }
@@ -2086,10 +2593,6 @@ function bind() {
   once('[data-checkout]', 'click', (event) => {
     const button = event.currentTarget;
     if (button.classList.contains('current') || ui.busy) return;
-    const source = button.getBoundingClientRect();
-    const target = app.querySelector('.branch-pill')?.getBoundingClientRect();
-    const branch = button.dataset.remote === 'true' ? button.dataset.checkout.split('/').slice(1).join('/') : button.dataset.checkout;
-    if (target) ui.branchMotion = { branch, x: source.left - target.left, y: source.top - target.top };
     ui.branchOpen = false;
     ui.branchQuery = '';
     post('checkout', { branch: button.dataset.checkout, remote: button.dataset.remote === 'true' });
@@ -2187,15 +2690,80 @@ function bind() {
     render();
     requestAnimationFrame(() => (app.querySelector(`[data-branch-popup-more="${group}"]`) || app.querySelector('#branch-search'))?.focus());
   });
+  once('[data-branch-popup-toggle]', 'click', () => {
+    ui.branchPopupRemoteExpanded = !ui.branchPopupRemoteExpanded;
+    render();
+    requestAnimationFrame(() => app.querySelector('[data-branch-popup-toggle]')?.focus());
+  });
 }
 
 function handleAction(action) {
+  if (action === 'stashes') { requestWorkflow('stashes'); return; }
+  if (action === 'close-workflow') { closeWorkflow(); return; }
+  if (action === 'retry-workflow' && ui.workflow) { const { kind, branch, remote, hash } = ui.workflow; requestWorkflow(kind, { branch, remote, hash }); return; }
+  if (action === 'save-stash' && !ui.busy) { post('stashCreate', { root: ui.snapshot.root, message: ui.stashMessage }); return; }
+  if ((action === 'apply-stash' || action === 'drop-stash') && !ui.busy && ui.workflow?.payload) { post(action === 'apply-stash' ? 'stashApply' : 'stashDrop', { root: ui.workflow.root, hash: ui.workflow.payload.hash }); return; }
+  if ((action === 'continue-operation' || action === 'abort-operation') && !ui.busy && ui.snapshot.operation) { post(action === 'continue-operation' ? 'continueOperation' : 'abortOperation', { root: ui.snapshot.root, token: ui.snapshot.operation.token }); return; }
+  if (action === 'cancel-push-review') { respondPushReview('cancel'); return; }
+  if (action === 'confirm-push-review') { respondPushReview('push'); return; }
+  if (action === 'fetch-push-review') { respondPushReview('fetch'); return; }
+  if (action === 'toggle-recent-commits') {
+    ui.recentCommitsCollapsed = !ui.recentCommitsCollapsed;
+    persist();
+    render();
+    requestAnimationFrame(() => app.querySelector('[data-action="toggle-recent-commits"]')?.focus());
+    return;
+  }
+  if (action === 'close-commit-review') {
+    const andPush = ui.commitReviewAndPush;
+    ui.commitReviewOpen = false;
+    render();
+    requestAnimationFrame(() => app.querySelector(`[data-action="${andPush ? 'commit-and-push' : 'commit'}"]`)?.focus());
+    return;
+  }
+  if (action === 'confirm-commit-review') {
+    submitReviewedCommit();
+    return;
+  }
+  if (action === 'toolbar-more') {
+    ui.toolbarMenuOpen = !ui.toolbarMenuOpen;
+    ui.pullMenuOpen = false;
+    render();
+    if (ui.toolbarMenuOpen) requestAnimationFrame(() => app.querySelector('[data-toolbar-action]:not(:disabled)')?.focus());
+    return;
+  }
+  if (action === 'toggle-history-focus') {
+    ui.historyFocusMode = !ui.historyFocusMode;
+    persist();
+    render();
+    requestAnimationFrame(() => app.querySelector('[data-action="toggle-history-focus"]')?.focus());
+    return;
+  }
+  if (action === 'choose-repository' && !ui.busy) post('chooseRepository');
+  if (action === 'clear-selection' && !ui.busy) {
+    ui.selected.clear();
+    persist();
+    render();
+  }
+  if (action === 'clear-hidden-selection' && !ui.busy) {
+    const { filteredPaths } = changeSelection();
+    ui.selected = new Set([...ui.selected].filter((path) => filteredPaths.has(path)));
+    persist();
+    render();
+  }
+  if (action === 'rollback-selected' && !ui.busy) {
+    const selection = changeSelection();
+    if (selection.selectedChanges.length && !selection.hiddenCount) {
+      post('rollbackFiles', { paths: selection.selectedChanges.map((change) => change.path) });
+    }
+  }
   if (action === 'refresh') post('refresh');
   if (action === 'show-log') post('showLog');
   if (action === 'show-changes') post('showChanges');
   if (action === 'open-settings') post('openSettings');
   if (action === 'reuse-commit-message' && !ui.busy) post('reuseCommitMessage', { draft: ui.commitMessage });
   if (action === 'configure-git-identity' && !ui.busy) post('configureGitIdentity');
+  if (action === 'configure-upstream' && !ui.busy) post('configureUpstream');
   if (action === 'save-detached-head' && !ui.busy && ui.snapshot?.branch === '(detached)') {
     post('createBranch', { startPoint: ui.snapshot.headOid || 'HEAD' });
   }
@@ -2206,7 +2774,12 @@ function handleAction(action) {
     if (ui.pullMenuOpen) requestAnimationFrame(() => app.querySelector('[data-pull-strategy]:not(:disabled)')?.focus());
   }
   if (action === 'load-more-commits') requestMoreHistory(ui.graphScrollTop);
+  if (action === 'retry-history-search') requestHistorySearch(true, 0);
   if (action === 'clear-graph-filters') {
+    clearTimeout(historySearchTimer);
+    ui.historySearchRequestId += 1;
+    ui.historySearch = undefined;
+    ui.historySearchLoading = false;
     ui.graphQuery = '';
     ui.graphPathFilter = '';
     const hadRef = Boolean(ui.graphBranchFilter);
@@ -2225,6 +2798,7 @@ function handleAction(action) {
   if (action === 'branches') {
     ui.branchOpen = !ui.branchOpen;
     if (!ui.branchOpen) ui.branchQuery = '';
+    else ui.branchPopupRemoteExpanded = false;
     render();
     if (ui.branchOpen) setTimeout(() => app.querySelector('#branch-search')?.focus(), 30);
   }
@@ -2271,15 +2845,33 @@ function handleAction(action) {
   if (action === 'retry-commit' && ui.selectedCommitHash) selectCommit(ui.selectedCommitHash);
 }
 
+function commitBlocker() {
+  if (ui.snapshot?.operation) return 'Finish the current Git operation or resolve conflicts before committing';
+  const selection = changeSelection();
+  if (ui.busy) return 'A Git operation is in progress';
+  if (!selection.selectedChanges.length) return 'Select at least one changed file';
+  if (selection.hiddenCount) return 'Review or remove hidden selected files before committing';
+  if (ui.snapshot?.changes.some((change) => change.kind === 'conflict')) return 'Resolve merge conflicts before committing';
+  if (ui.snapshot?.identity?.ready === false) return 'Set your Git identity before committing';
+  if (!ui.commitMessage.trim()) return 'Write a commit message';
+  return undefined;
+}
+
+function renderSelectionStatus() {
+  const { selectedChanges, hiddenCount } = changeSelection();
+  const wholeFiles = ui.changeFilter === 'staged' || selectedChanges.some((change) => change.staged && change.workingTreeStatus !== '.');
+  return `<div class="commit-selection-status" role="status"><span>${selectedChanges.length} ${selectedChanges.length === 1 ? 'file' : 'files'} selected${hiddenCount ? ` · ${hiddenCount} hidden by filters` : ''}</span>${selectedChanges.length ? `<div class="commit-selection-actions"><button class="text-button rollback-selection" data-action="rollback-selected" title="Restore tracked changes to HEAD; move new files to Trash" ${ui.busy || hiddenCount ? 'disabled' : ''}>Rollback…</button><button class="text-button" data-action="${hiddenCount ? 'clear-hidden-selection' : 'clear-selection'}" ${ui.busy ? 'disabled' : ''}>${hiddenCount ? 'Remove hidden' : 'Clear'}</button></div>` : ''}</div>${hiddenCount ? '<div class="commit-selection-note warning">Hidden selections must be reviewed or removed.</div>' : wholeFiles ? '<div class="commit-selection-note">Commits include all working-tree changes in selected files.</div>' : ''}`;
+}
+
 function syncCommitActionState() {
-  const enabled = Boolean(ui.selected.size && ui.commitMessage.trim() && !ui.busy);
+  const hint = commitBlocker();
+  const enabled = !hint;
   const messageCheck = app.querySelector('[data-commit-message-check]');
   if (messageCheck) {
     const ready = Boolean(ui.commitMessage.trim());
     messageCheck.classList.toggle('pending', !ready);
     messageCheck.innerHTML = `${icon(ready ? 'check' : 'circle-outline')} ${ready ? 'Message ready' : 'Message needed'}`;
   }
-  const hint = ui.busy ? 'A Git operation is in progress' : !ui.selected.size ? 'Select at least one changed file' : !ui.commitMessage.trim() ? 'Write a commit message' : undefined;
   for (const button of app.querySelectorAll('[data-action="commit"], [data-action="commit-and-push"]')) {
     button.disabled = !enabled;
     button.title = hint || (button.dataset.action === 'commit' ? `Commit selected files (${commandKey}+Enter)` : 'Commit selected files and push');
@@ -2287,24 +2879,56 @@ function syncCommitActionState() {
 }
 
 function commit(andPush = false) {
-  if (!ui.selected.size || !ui.commitMessage.trim() || ui.busy) {
-    if (!ui.commitMessage.trim()) toast('Write a commit message first', 'error');
+  const blocker = commitBlocker();
+  if (blocker) {
+    toast(blocker, 'error');
     return;
   }
-  post(andPush ? 'commitAndPush' : 'commit', { message: ui.commitMessage, paths: [...ui.selected] });
+  if (andPush && !ui.snapshot?.upstream) {
+    toast('Set an upstream before using Commit and Push. You can still commit locally.', 'error');
+    return;
+  }
+  ui.commitReviewAndPush = andPush;
+  ui.commitReviewOpen = true;
+  render();
+  requestAnimationFrame(() => app.querySelector('[data-action="confirm-commit-review"]')?.focus());
+}
+
+function submitReviewedCommit() {
+  if (!ui.commitReviewOpen) return;
+  const blocker = commitBlocker();
+  if (blocker) { toast(blocker, 'error'); return; }
+  const andPush = ui.commitReviewAndPush;
+  const paths = changeSelection().selectedChanges.map((change) => change.path);
+  ui.commitReviewOpen = false;
+  render();
+  post(andPush ? 'commitAndPush' : 'commit', { message: ui.commitMessage, paths });
 }
 
 function toast(message, phase = 'success') {
   const element = document.createElement('div');
   element.className = `toast ${phase}`;
-  element.innerHTML = `${icon(phase === 'success' ? 'check' : phase === 'loading' ? 'loading' : 'error', phase === 'loading' ? 'codicon-modifier-spin' : '')}<p>${escapeHtml(message)}</p>`;
-  toastRegion.append(element);
-  if (phase !== 'loading') setTimeout(() => dismissToast(element), 2800);
+  element.setAttribute('role', phase === 'error' ? 'alert' : 'status');
+  element.innerHTML = `${icon(phase === 'success' ? 'check' : phase === 'loading' ? 'loading' : 'error', phase === 'loading' ? 'codicon-modifier-spin' : '')}<p>${escapeHtml(message)}</p><button class="toast-close" aria-label="Dismiss notification" title="Dismiss">${icon('close')}</button>`;
+  clearTimeout(toastRegion.firstElementChild?.dismissTimer);
+  toastRegion.replaceChildren(element);
+  const scheduleDismiss = () => {
+    clearTimeout(element.dismissTimer);
+    if (phase !== 'loading' && !element.matches(':hover, :focus-within')) element.dismissTimer = setTimeout(() => dismissToast(element), phase === 'error' ? 8000 : 2800);
+  };
+  element.querySelector('button').addEventListener('click', () => dismissToast(element));
+  element.addEventListener('mouseenter', () => clearTimeout(element.dismissTimer));
+  element.addEventListener('focusin', () => clearTimeout(element.dismissTimer));
+  element.addEventListener('mouseleave', scheduleDismiss);
+  element.addEventListener('focusout', () => requestAnimationFrame(scheduleDismiss));
+  scheduleDismiss();
   return element;
 }
 
 function dismissToast(element) {
   if (!element?.isConnected || element.classList.contains('leaving')) return;
+  clearTimeout(element.dismissTimer);
+  if (!motionEnabled()) { element.remove(); return; }
   element.classList.add('leaving');
   element.addEventListener('animationend', () => element.remove(), { once: true });
   setTimeout(() => element.remove(), 240);
@@ -2312,6 +2936,72 @@ function dismissToast(element) {
 
 window.addEventListener('message', (event) => {
   const message = event.data;
+  if (message.type === 'workflowResult') {
+    const w = ui.workflow;
+    if (!w || w.requestId !== message.requestId || w.root !== message.root || ui.snapshot?.root !== message.root) return;
+    w.loading = false; w.error = message.error; w.payload = message.payload;
+    render();
+  }
+  if (message.type === 'pushReview') {
+    if (message.root !== ui.snapshot?.root || ui.pushReview?.id > message.id) return;
+    if (ui.pushReview?.id !== message.id) clearPushCommitPreview(true);
+    ui.pushReview = message;
+    ui.commitReviewOpen = false;
+    ui.branchOpen = false;
+    ui.branchContextMenu = undefined;
+    ui.commitContextMenu = undefined;
+    ui.fileContextMenu = undefined;
+    ui.toolbarMenuOpen = false;
+    render();
+    requestAnimationFrame(() => app.querySelector('.push-review-dialog footer .primary-button')?.focus());
+    return;
+  }
+  if (message.type === 'pushReviewClosed') {
+    if (message.id !== ui.pushReview?.id) return;
+    ui.pushReview = undefined;
+    clearPushCommitPreview(true);
+    render();
+    return;
+  }
+  if (message.type === 'pushCommitDetails' || message.type === 'pushCommitDetailsError') {
+    const hash = message.payload?.hash || message.hash;
+    if (!ui.pushReview || message.id !== ui.pushReview.id || message.root !== ui.snapshot?.root ||
+        message.requestId !== ui.pushDetailsRequestId || hash !== ui.pushSelectedHash) return;
+    ui.pushDetailsLoading = false;
+    ui.pushDetailsError = message.type === 'pushCommitDetailsError' ? message.message || 'Unable to load changed files.' : undefined;
+    ui.pushDetails = message.type === 'pushCommitDetails' ? message.payload : undefined;
+    if (ui.pushDetails) ui.pushDetailsCache.set(hash, ui.pushDetails);
+    render();
+    return;
+  }
+  if (message.type === 'historySearchResults' && surface === 'history') {
+    if (message.requestId !== ui.historySearchRequestId || message.root !== ui.snapshot?.root || !historySearchActive()) return;
+    ui.historySearch = { key: historySearchKey(), commits: message.commits, hasMore: message.hasMore };
+    ui.historySearchLoading = false;
+    ui.graphLoadingMore = false;
+    if (ui.pendingRevealHash && message.commits.some((commit) => commit.hash === ui.pendingRevealHash)) {
+      const hash = ui.pendingRevealHash;
+      ui.pendingRevealHash = undefined;
+      selectCommit(hash, { focus: true });
+    } else {
+      if (ui.pendingRevealHash && !message.hasMore) {
+        ui.pendingRevealHash = undefined;
+        toast('Commit is not in the available history.', 'error');
+      }
+      reconcileHistorySelection();
+      render();
+    }
+    return;
+  }
+  if (message.type === 'historySearchError' && surface === 'history') {
+    if (message.requestId !== ui.historySearchRequestId || message.root !== ui.snapshot?.root) return;
+    ui.historySearchLoading = false;
+    ui.graphLoadingMore = false;
+    ui.historySearchError = message.message;
+    toast(`History search failed: ${message.message}`, 'error');
+    render();
+    return;
+  }
   if (message.type === 'reuseCommitMessage' && surface === 'changes') {
     if (ui.commitMessage !== message.expectedDraft) {
       toast('Draft changed while choosing a message. Choose again to replace it.', 'error');
@@ -2324,12 +3014,17 @@ window.addEventListener('message', (event) => {
     return;
   }
   if (message.type === 'revealCommit' && surface === 'history') {
+    // A Blame jump needs the detail pane even if the user left History in focus mode.
+    ui.historyFocusMode = false;
     ui.graphBranchFilter = '';
     ui.graphPathFilter = '';
-    ui.graphQuery = '';
+    ui.graphQuery = message.hash;
     ui.graphAuthorFilter = '';
     ui.graphAgeFilter = 'all';
-    selectCommit(message.hash, { focus: true });
+    ui.pendingRevealHash = message.hash;
+    persist();
+    render();
+    requestHistorySearch(true, 0);
   }
   if (message.type === 'applyPathFilter') {
     ui.graphPathFilter = message.path || '';
@@ -2383,8 +3078,15 @@ window.addEventListener('message', (event) => {
   if (message.type === 'snapshot') {
     const fingerprint = JSON.stringify(message.payload);
     if (fingerprint === lastSnapshot && !ui.historyRefLoading && !ui.graphLoadingMore) return;
+    if (ui.commitReviewOpen && lastSnapshot && fingerprint !== lastSnapshot) {
+      ui.commitReviewOpen = false;
+      toast('Repository changed during review. Check the selected files again.', 'error');
+    }
     const previousRoot = ui.snapshot?.root;
+    const previousBranch = ui.snapshot?.branch;
     const nextRoot = message.payload.root;
+    if (ui.workflow?.kind === 'stashDetails' && ui.workflow.error && message.payload.operation?.files.length) closeWorkflow();
+    if (ui.workflow && (ui.workflow.root !== nextRoot || ui.workflow.kind === 'compare' && ui.workflow.payload && ui.workflow.payload.currentOid !== message.payload.headOid)) closeWorkflow();
     if (previousRoot && previousRoot !== nextRoot) saveRepositoryState(previousRoot);
     if (previousRoot !== nextRoot) {
       const nextState = repositoryStates[nextRoot] || (!previousRoot ? legacyRepositoryState : undefined) || {};
@@ -2393,9 +3095,22 @@ window.addEventListener('message', (event) => {
     lastSnapshot = fingerprint;
     ui.emptyMessage = undefined;
     ui.snapshot = message.payload;
+    if (ui.pushReview) {
+      const p = ui.pushReview.preview;
+      const branch = message.payload.branches.find((candidate) => candidate.name === p.branch && !candidate.remote);
+      const upstream = message.payload.branches.find((candidate) => candidate.name === p.upstream);
+      if (!branch || branch.oid && branch.oid !== p.head || upstream?.oid && upstream.oid !== p.upstreamOid || branch.upstream && branch.upstream !== p.upstream) {
+        respondPushReview('cancel');
+        toast('Branch changed. Reopen Push to review the latest commits.', 'error');
+      }
+    }
+    if (previousRoot === nextRoot && previousBranch !== message.payload.branch) clearRecentCommitPreview(true);
+    else if (ui.recentSelectedHash && !recentCommits(message.payload).some((commit) => commit.hash === ui.recentSelectedHash)) clearRecentCommitPreview();
     ui.graphLoadingMore = false;
     ui.historyRefLoading = false;
-    if (ui.selectedCommitHash && !message.payload.commits.some((commit) => commit.hash === ui.selectedCommitHash)) {
+    if (surface === 'history' && historySearchActive() && ui.historySearch?.key !== historySearchKey()) requestHistorySearch(true, 0);
+    if (ui.selectedCommitHash && !message.payload.commits.some((commit) => commit.hash === ui.selectedCommitHash) &&
+        !ui.historySearch?.commits.some((commit) => commit.hash === ui.selectedCommitHash)) {
       clearTimeout(commitDetailTimer);
       ui.selectedCommitHash = undefined;
       ui.focusedCommitHash = undefined;
@@ -2409,21 +3124,22 @@ window.addEventListener('message', (event) => {
     if (!valid.has(ui.focusedPath)) ui.focusedPath = message.payload.changes[0]?.path;
     persist();
     render();
-    restoreGraphScroll(ui.graphScrollTop);
-    requestOlderHistoryForHash();
-    if (ui.branchMotion && message.payload.branch === ui.branchMotion.branch) {
-      if (!window.matchMedia('(prefers-reduced-motion: reduce)').matches) {
-        const { x, y } = ui.branchMotion;
-        app.querySelector('.branch-pill')?.animate([
-          { transform: `translate(${x}px, ${y}px) scale(.96)`, opacity: .55 },
-          { transform: 'translate(0, 0) scale(1)', opacity: 1 }
-        ], { duration: 260, easing: 'cubic-bezier(.2,.8,.2,1)' });
-      }
-      ui.branchMotion = undefined;
+    if (previousRoot !== nextRoot) restoreGraphScroll(ui.graphScrollTop);
+    if (ui.pendingRevealHash && message.payload.commits.some((commit) => commit.hash === ui.pendingRevealHash)) {
+      const hash = ui.pendingRevealHash;
+      ui.pendingRevealHash = undefined;
+      selectCommit(hash, { focus: true });
+    } else if (ui.pendingRevealHash && !historySearchActive() && !message.payload.commitsHasMore) {
+      ui.pendingRevealHash = undefined;
+      toast('Commit is not in the available history.', 'error');
     }
+    if (ui.pendingRevealHash && !historySearchActive()) requestOlderHistoryForHash();
   }
   if (message.type === 'empty') {
     persist();
+    ui.pushReview = undefined;
+    clearPushCommitPreview(true);
+    clearRecentCommitPreview(true);
     ui.snapshot = undefined;
     ui.emptyMessage = message.message;
     ui.graphLoadingMore = false;
@@ -2438,18 +3154,30 @@ window.addEventListener('message', (event) => {
     ui.operationKind = message.phase === 'loading' ? message.kind : undefined;
     if (message.phase === 'loading') ui.pullMenuOpen = false;
     if (message.phase === 'success' && message.clearsCommit) { ui.commitMessage = ''; ui.selected.clear(); persist(); }
-    toast(message.message, message.phase);
+    if (!message.feedbackSurface || message.feedbackSurface === surface) toast(message.message, message.phase);
+    if (message.kind === 'stash' && message.phase !== 'loading' && ui.workflow && (!message.feedbackSurface || message.feedbackSurface === surface)) {
+      if (message.phase === 'success') { ui.stashMessage = ''; requestWorkflow('stashes'); }
+      else { ui.workflow.error = message.message; ui.workflow.loading = false; }
+    }
     render();
     if (message.phase === 'success' && message.clearsCommit) {
       const textarea = app.querySelector('#commit-message');
       if (textarea) textarea.value = '';
     }
-    if (message.phase === 'error') ui.branchMotion = undefined;
   }
   if (message.type === 'syncStatus') {
     ui.syncPhase = message.phase;
     ui.lastFetchedAt = message.lastFetchedAt;
     ui.syncError = message.error;
+    render();
+  }
+  if (message.type === 'recentCommitDetails' || message.type === 'recentCommitDetailsError') {
+    const hash = message.payload?.hash || message.hash;
+    if (message.root !== ui.snapshot?.root || message.requestId !== ui.recentRequestId || hash !== ui.recentSelectedHash) return;
+    ui.recentDetailsLoading = false;
+    ui.recentDetailsError = message.type === 'recentCommitDetailsError' ? message.message || 'Unable to load changed files.' : undefined;
+    ui.recentDetails = message.type === 'recentCommitDetails' ? message.payload : undefined;
+    if (ui.recentDetails) ui.recentDetailsCache.set(hash, ui.recentDetails);
     render();
   }
   if (message.type === 'commitDetails') {
@@ -2471,6 +3199,12 @@ window.addEventListener('message', (event) => {
 
 document.addEventListener('keydown', (event) => {
   if (event.key !== 'Escape') return;
+  if (ui.workflow) { event.preventDefault(); closeWorkflow(); return; }
+  if (ui.pushReview) {
+    event.preventDefault();
+    respondPushReview('cancel');
+    return;
+  }
   if (activeLogResize) {
     event.preventDefault();
     finishLogResize(false);
@@ -2533,6 +3267,18 @@ document.addEventListener('keydown', (event) => {
     app.querySelector('[data-action="pull-menu"]')?.focus();
     return;
   }
+  if (ui.commitReviewOpen) {
+    event.preventDefault();
+    handleAction('close-commit-review');
+    return;
+  }
+  if (ui.toolbarMenuOpen) {
+    event.preventDefault();
+    ui.toolbarMenuOpen = false;
+    render();
+    app.querySelector('[data-action="toolbar-more"]')?.focus();
+    return;
+  }
   if (ui.listMenuId) {
     event.preventDefault();
     const id = ui.listMenuId;
@@ -2561,6 +3307,17 @@ document.addEventListener('keydown', (event) => {
   app.querySelector('[data-action="branches"]')?.focus();
 });
 
+document.addEventListener('keydown', (event) => {
+  if (event.key !== 'Tab' || !ui.pushReview && !ui.workflow) return;
+  const buttons = [...app.querySelectorAll(`${ui.workflow ? '.workflow-dialog' : '.push-review-dialog'} :is(button, input):not(:disabled)`)];
+  if (!buttons.length) return;
+  const first = buttons[0], last = buttons.at(-1);
+  if (event.shiftKey && document.activeElement === first || !event.shiftKey && document.activeElement === last || !buttons.includes(document.activeElement)) {
+    event.preventDefault();
+    (event.shiftKey ? last : first).focus();
+  }
+});
+
 function closeContextMenusOutside(target) {
   const element = target instanceof Element ? target : target?.parentElement;
   let closed = false;
@@ -2586,6 +3343,11 @@ document.addEventListener('pointerdown', (event) => {
 
 document.addEventListener('click', (event) => {
   if (closeContextMenusOutside(event.target)) return;
+  if (ui.toolbarMenuOpen && !event.target.closest('.commit-toolbar-more')) {
+    ui.toolbarMenuOpen = false;
+    render();
+    return;
+  }
   if (ui.pullMenuOpen && !event.target.closest('.sync-action-wrap')) {
     ui.pullMenuOpen = false;
     render();
@@ -2599,6 +3361,8 @@ document.addEventListener('click', (event) => {
 setInterval(() => {
   if (ui.snapshot && ui.lastFetchedAt && ui.syncPhase !== 'fetching') render();
 }, 60000);
+
+window.addEventListener('resize', positionPullMenu);
 
 post('ready', { historyRef: surface === 'history' ? ui.graphBranchFilter : undefined });
 render();

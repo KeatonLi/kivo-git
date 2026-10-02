@@ -3,7 +3,8 @@ import { promisify } from 'node:util';
 import path from 'node:path';
 import { ChangelistStore } from './ChangelistStore';
 import { parsePorcelainV2 } from './statusParser';
-import type { BranchSummary, CommitDetails, CommitFile, CommitSummary, GitRef, LineBlame, PullStrategy, RepositorySnapshot } from './types';
+import { GitWorkflows } from './GitWorkflows';
+import type { BranchSummary, CommitDetails, CommitFile, CommitSummary, GitRef, LineBlame, PullStrategy, PushPreview, RepositorySnapshot } from './types';
 
 const execFileAsync = promisify(execFile);
 
@@ -16,13 +17,22 @@ export function pullArgs(strategy: PullStrategy): string[] {
 export class GitClient {
   private store?: ChangelistStore;
   private historyCache?: { key: string; commits: CommitSummary[]; hasMore: boolean };
+  private recentCache?: { head: string; commits: CommitSummary[] };
+  private outgoingCache = new Map<string, Promise<Set<string>>>();
 
-  constructor(readonly workspaceRoot: string) {}
+  readonly workflows: GitWorkflows;
+  constructor(readonly workspaceRoot: string) {
+    this.workflows = new GitWorkflows(workspaceRoot, (args, options) => this.run(args, undefined, options));
+  }
+
+  isChangelistStorageFile(filePath: string): boolean {
+    return this.store?.isStorageFile(filePath) ?? false;
+  }
 
   private async run(
     args: string[],
     maxBuffer = 8 * 1024 * 1024,
-    options: { timeout?: number; env?: NodeJS.ProcessEnv } = {}
+    options: { timeout?: number; env?: NodeJS.ProcessEnv; signal?: AbortSignal } = {}
   ): Promise<string> {
     try {
       const result = await execFileAsync('git', args, {
@@ -30,11 +40,13 @@ export class GitClient {
         encoding: 'utf8',
         maxBuffer,
         timeout: options.timeout,
+        signal: options.signal,
         env: { ...process.env, GIT_OPTIONAL_LOCKS: '0', ...options.env }
       });
       return result.stdout;
     } catch (error) {
       const detail = error as Error & { stderr?: string };
+      if (detail.name === 'AbortError') throw detail;
       throw new Error(detail.stderr?.trim() || detail.message);
     }
   }
@@ -46,14 +58,20 @@ export class GitClient {
     this.store = new ChangelistStore(gitDirectory);
   }
 
+  async changedFilesCount(): Promise<number> {
+    const output = await this.run(['status', '--porcelain=v2', '-z', '--untracked-files=all']);
+    return parsePorcelainV2(output).changes.length;
+  }
+
   async snapshot(commitLimit = 80, historyRef?: string): Promise<RepositorySnapshot> {
     if (!this.store) await this.initialize();
-    const [statusOutput, branches, tags, topLevel, identity] = await Promise.all([
+    const [statusOutput, branches, tags, topLevel, identity, operation] = await Promise.all([
       this.run(['status', '--porcelain=v2', '--branch', '-z', '--untracked-files=all']),
       this.getBranches(),
       this.getTags(),
       this.run(['rev-parse', '--show-toplevel']),
-      this.getCommitIdentity()
+      this.getCommitIdentity(),
+      this.workflows.operationState()
     ]);
     const parsed = parsePorcelainV2(statusOutput);
     const root = topLevel.trim();
@@ -63,35 +81,75 @@ export class GitClient {
     const exactRef = selectedBranch
       ? `refs/${selectedBranch.remote ? 'remotes' : 'heads'}/${selectedBranch.name}`
       : selectedTag ? `refs/tags/${selectedTag.name}` : undefined;
-    const commitWindow = await this.getCommits(currentBranch, commitLimit, exactRef);
+    const [commitWindow, recentCommits] = await Promise.all([
+      this.getCommits(currentBranch, commitLimit, exactRef),
+      this.getRecentCommits(parsed.headOid)
+    ]);
+    const headBranch = branches.find((branch) => branch.current && !branch.remote);
+    const historyBranch = historyRef ? selectedBranch?.remote ? undefined : selectedBranch : headBranch;
+    const [commitsWithPushState, recentWithPushState] = await Promise.all([
+      this.markOutgoingCommits(commitWindow.commits, historyBranch, branches),
+      this.markOutgoingCommits(recentCommits, headBranch, branches, parsed.headOid)
+    ]);
     return {
       repositoryName: path.basename(root),
       root,
       identity,
+      operation,
       ...parsed,
       changelists: await this.store!.group(parsed.changes),
       branches,
       tags,
-      commits: commitWindow.commits,
+      commits: commitsWithPushState,
+      recentCommits: recentWithPushState,
       commitsHasMore: commitWindow.hasMore
     };
+  }
+
+  private async markOutgoingCommits(commits: CommitSummary[], branch: BranchSummary | undefined, branches: BranchSummary[], head = branch?.oid): Promise<CommitSummary[]> {
+    const upstream = branches.find((candidate) => candidate.name === branch?.upstream);
+    if (!head || !branch?.upstream || !upstream?.oid || head === upstream.oid || !commits.length) return commits;
+    const key = `${head}\0${upstream.oid}`;
+    let query = this.outgoingCache.get(key);
+    if (!query) {
+      query = this.run(['rev-list', head, `^${upstream.oid}`]).then((output) => new Set(output.trim().split(/\s+/).filter(Boolean)));
+      if (this.outgoingCache.size >= 8) this.outgoingCache.delete(this.outgoingCache.keys().next().value!);
+      this.outgoingCache.set(key, query);
+    }
+    const outgoing = await query.catch((error: unknown) => { this.outgoingCache.delete(key); throw error; });
+    // Keep raw history caches unchanged so moving the tracking ref clears old marks.
+    return commits.map((commit) => outgoing.has(commit.hash) ? { ...commit, unpushedTo: branch.upstream } : commit);
+  }
+
+  private async getRecentCommits(head?: string): Promise<CommitSummary[]> {
+    if (!head) return [];
+    if (this.recentCache?.head === head) return this.recentCache.commits;
+    const output = await this.run(['log', head, '--topo-order', '-n', '5', '--date=iso-strict', '-z', '--pretty=format:%H%x1f%h%x1f%P%x1f%an%x1f%aI%x1f%s%x1e']);
+    const commits = this.layoutCommits(this.parseCommitLog(output, new Map()));
+    this.recentCache = { head, commits };
+    return commits;
   }
 
   private async getBranches(): Promise<BranchSummary[]> {
     const output = await this.run([
       'for-each-ref',
-      '--format=%(refname)\t%(refname:short)\t%(HEAD)\t%(upstream:short)\t%(upstream:trackshort)',
+      '--format=%(refname)\t%(refname:short)\t%(HEAD)\t%(upstream:short)\t%(upstream:trackshort)\t%(objectname)\t%(upstream:track)',
       'refs/heads',
       'refs/remotes'
     ]);
     return output.split('\n').filter(Boolean).map((line) => {
-      const [refname = '', name = '', head = '', upstream = '', tracking = ''] = line.split('\t');
+      const [refname = '', name = '', head = '', upstream = '', tracking = '', oid = '', trackCounts = ''] = line.split('\t');
+      const ahead = /\bahead (\d+)/.exec(trackCounts);
+      const behind = /\bbehind (\d+)/.exec(trackCounts);
       return {
         name,
+        oid,
         current: head === '*',
         remote: refname.startsWith('refs/remotes/'),
         upstream: upstream || undefined,
-        tracking: tracking || undefined
+        tracking: tracking || undefined,
+        ahead: upstream && trackCounts !== '[gone]' ? Number(ahead?.[1] || 0) : undefined,
+        behind: upstream && trackCounts !== '[gone]' ? Number(behind?.[1] || 0) : undefined
       };
     }).filter((branch) => !branch.name.endsWith('/HEAD'));
   }
@@ -119,10 +177,62 @@ export class GitClient {
       return empty;
     }
     const refs = await this.getRefs(currentBranch);
-    const output = await this.run(['log', ...(exactRef ? [exactRef] : head.trim() ? ['--all', 'HEAD'] : ['--all']), '--topo-order', '-n', String(safeLimit + 1), '--date=iso-strict', '--name-only', '-z', '--pretty=format:%H%x1f%h%x1f%P%x1f%an%x1f%aI%x1f%s%x1e']);
+    const output = await this.run(['log', ...(exactRef ? [exactRef] : head.trim() ? ['--exclude=refs/stash', '--all', 'HEAD'] : ['--exclude=refs/stash', '--all']), '--topo-order', '-n', String(safeLimit + 1), '--date=iso-strict', '--name-only', '-z', '--pretty=format:%H%x1f%h%x1f%P%x1f%an%x1f%aI%x1f%s%x1e']);
+    const commits = this.parseCommitLog(output, refs);
+    const result = { key, commits: this.layoutCommits(commits.slice(0, safeLimit)), hasMore: commits.length > safeLimit };
+    this.historyCache = result;
+    return result;
+  }
+
+  /** Search the complete ref history in Git, then page the matching results. */
+  async searchCommits(filters: { query?: string; author?: string; age?: string; path?: string; ref?: string }, limit = 80): Promise<{ commits: CommitSummary[]; hasMore: boolean }> {
+    const safeLimit = Math.max(1, Math.floor(limit));
+    const branches = await this.getBranches();
+    const tags = await this.getTags();
+    const selectedBranch = branches.find((branch) => branch.name === filters.ref);
+    const selectedTag = tags.find((tag) => tag.name === filters.ref);
+    const exactRef = selectedBranch
+      ? `refs/${selectedBranch.remote ? 'remotes' : 'heads'}/${selectedBranch.name}`
+      : selectedTag ? `refs/tags/${selectedTag.name}` : undefined;
+    if (filters.ref && !exactRef) return { commits: [], hasMore: false };
+    const query = (filters.query || '').trim();
+    const author = (filters.author || '').trim();
+    const pathFilter = (filters.path || '').trim();
+    const ageDays = ({ '7d': 7, '30d': 30, '90d': 90 } as Record<string, number>)[filters.age || ''] || 0;
+    const head = (await this.run(['rev-parse', '--verify', 'HEAD']).catch(() => '')).trim();
+    if (!head && !branches.length && !tags.length) return { commits: [], hasMore: false };
+    const args = ['log', ...(exactRef ? [exactRef] : head ? ['--exclude=refs/stash', '--all', 'HEAD'] : ['--exclude=refs/stash', '--all']), '--topo-order', '-n', String(safeLimit + 1), '--date=iso-strict', '--name-only', '-z', '--pretty=format:%H%x1f%h%x1f%P%x1f%an%x1f%aI%x1f%s%x1e'];
+    if (author) args.push(`--author=${author}`);
+    if (ageDays) args.push(`--since=${new Date(Date.now() - ageDays * 86400000).toISOString()}`);
+    let hashSearch = false;
+    if (/^[0-9a-f]{7,40}$/i.test(query)) {
+      const resolved = (await this.run(['rev-parse', '--verify', '--quiet', `${query}^{commit}`]).catch(() => '')).trim();
+      if (resolved) {
+        if (exactRef && !(await this.run(['merge-base', '--is-ancestor', resolved, exactRef]).then(() => true).catch(() => false))) {
+          return { commits: [], hasMore: false };
+        }
+        args.splice(1, exactRef ? 1 : head ? 3 : 2, resolved);
+        args.push('-1');
+        hashSearch = true;
+      }
+    }
+    if (query && !hashSearch) args.push('--regexp-ignore-case', '--fixed-strings', `--grep=${query}`);
+    if (pathFilter) {
+      // In the default pathspec mode, * also matches directory separators.
+      const escaped = pathFilter.replace(/[\\*?\[\]]/g, (character) => `\\${character}`);
+      args.push('--', `:(icase)*${escaped}*`);
+    }
+    const output = await this.run(args);
+    const refs = await this.getRefs(branches.find((branch) => branch.current && !branch.remote)?.name);
+    const matches = this.parseCommitLog(output, refs);
+    const displayedBranch = filters.ref ? selectedBranch?.remote ? undefined : selectedBranch : branches.find((branch) => branch.current && !branch.remote);
+    return { commits: await this.markOutgoingCommits(this.layoutCommits(matches.slice(0, safeLimit)), displayedBranch, branches), hasMore: matches.length > safeLimit };
+  }
+
+  private parseCommitLog(output: string, refs: Map<string, GitRef[]>): CommitSummary[] {
     const recordPattern = /([0-9a-f]{40})\x1f([0-9a-f]{7,40})\x1f([^\x1f]*)\x1f([^\x1f]*)\x1f([^\x1f]*)\x1f([^\x1e]*)\x1e/g;
     const matches = [...output.matchAll(recordPattern)];
-    const commits = matches.map((match, index) => {
+    return matches.map((match, index) => {
       const hash = match[1] ?? '';
       const shortHash = match[2] ?? '';
       const parentText = match[3] ?? '';
@@ -133,8 +243,8 @@ export class GitClient {
       const end = matches[index + 1]?.index ?? output.length;
       const paths = output.slice(start, end)
         .replace(/^\n+/, '')
+        .replace(/\n+$/, '')
         .split('\0')
-        .map((filePath) => filePath.trim())
         .filter(Boolean);
       return {
         hash,
@@ -150,9 +260,6 @@ export class GitClient {
         parentLanes: []
       };
     });
-    const result = { key, commits: this.layoutCommits(commits.slice(0, safeLimit)), hasMore: commits.length > safeLimit };
-    this.historyCache = result;
-    return result;
   }
 
   private async getRefs(currentBranch?: string): Promise<Map<string, GitRef[]>> {
@@ -281,23 +388,81 @@ export class GitClient {
   }
 
   async commit(message: string, paths: string[]): Promise<void> {
+    if (typeof message !== 'string' || !Array.isArray(paths) || paths.some((file) => typeof file !== 'string' || !file || file.includes('\0'))) {
+      throw new Error('Invalid commit selection. Refresh and select the files again.');
+    }
     const trimmed = message.trim();
     if (!trimmed) throw new Error('Write a commit message first.');
     if (!paths.length) throw new Error('Select at least one changed file.');
-    const untracked = parsePorcelainV2(await this.run(['status', '--porcelain=v2', '-z', '--untracked-files=all']))
-      .changes.filter((change) => change.kind === 'untracked' && paths.includes(change.path)).map((change) => change.path);
-    if (untracked.length) await this.run(['add', '--', ...untracked]);
-    await this.run(['commit', '--only', '-m', trimmed, '--', ...paths]);
+    const changes = parsePorcelainV2(await this.run(['status', '--porcelain=v2', '-z', '--untracked-files=all'])).changes;
+    const byPath = new Map(changes.map((change) => [change.path, change]));
+    if (changes.some((change) => change.kind === 'conflict')) throw new Error('Resolve merge conflicts before committing.');
+    const selected = [...new Set(paths)].map((file) => {
+      const change = byPath.get(file);
+      if (!change) throw new Error(`The selected file is no longer changed: ${file}. Refresh and try again.`);
+      return change;
+    });
+    const untracked = selected.filter((change) => change.kind === 'untracked').map((change) => change.path);
+    const commitPaths = [...new Set(selected.flatMap((change) => change.originalPath && change.indexStatus === 'R'
+      ? [change.originalPath, change.path] : [change.path]))];
+    let added = false;
+    try {
+      if (untracked.length) {
+        await this.run(['--literal-pathspecs', 'add', '--', ...untracked]);
+        added = true;
+      }
+      await this.run(['--literal-pathspecs', 'commit', '--only', '-m', trimmed, '--', ...commitPaths]);
+    } catch (error) {
+      // These paths were absent from the index before this operation. Remove only
+      // those entries; never reset unrelated staged work or touch working files.
+      if (added) {
+        try {
+          await this.run(['update-index', '--force-remove', '--', ...untracked]);
+        } catch (restoreError) {
+          throw new Error(`${error instanceof Error ? error.message : String(error)}\nCould not restore newly staged files. Review the index before retrying: ${restoreError instanceof Error ? restoreError.message : String(restoreError)}`);
+        }
+      }
+      throw error;
+    }
   }
 
-  async checkout(branchName: string, remote: boolean): Promise<void> {
+  async restoreFilesToHead(paths: string[]): Promise<void> {
+    if (!paths.length || paths.some((file) => typeof file !== 'string' || !file || file.includes('\0'))) {
+      throw new Error('Select changed files to roll back.');
+    }
+    await this.run(['--literal-pathspecs', 'restore', '--source=HEAD', '--staged', '--worktree', '--', ...new Set(paths)]);
+  }
+
+  async unstageNewFiles(paths: string[]): Promise<void> {
+    if (!paths.length || paths.some((file) => typeof file !== 'string' || !file || file.includes('\0'))) {
+      throw new Error('Select new files to roll back.');
+    }
+    await this.run(['--literal-pathspecs', 'update-index', '--force-remove', '--', ...new Set(paths)]);
+  }
+
+  private async checkoutArgs(branchName: string, remote: boolean): Promise<string[]> {
+    const branches = await this.getBranches();
+    if (!branches.some(branch => branch.name === branchName && branch.remote === remote)) throw new Error('This branch no longer exists. Refresh and try again.');
     if (!remote) {
-      await this.run(['switch', branchName]);
-      return;
+      return ['switch', branchName];
     }
     const slash = branchName.indexOf('/');
     const localName = slash >= 0 ? branchName.slice(slash + 1) : branchName;
-    await this.run(['switch', '--track', '-c', localName, branchName]);
+    const local = branches.find(branch => !branch.remote && branch.name === localName);
+    if (local && local.upstream !== branchName) throw new Error(`${localName} already exists and tracks a different branch. Choose its local branch explicitly.`);
+    return local ? ['switch', localName] : ['switch', '--track', '-c', localName, branchName];
+  }
+
+  async checkout(branchName: string, remote: boolean): Promise<void> {
+    if (await this.workflows.operationState()) throw new Error('Finish the current Git operation or conflicts before switching branches.');
+    await this.run(await this.checkoutArgs(branchName, remote));
+  }
+
+  async stashAndCheckout(branchName: string, remote: boolean): Promise<void> {
+    const args = await this.checkoutArgs(branchName, remote);
+    const saved = await this.workflows.saveStash(`Kivo Git: before switching to ${branchName}`);
+    try { await this.run(args); }
+    catch (error) { throw new Error(`${error instanceof Error ? error.message : String(error)}\nYour changes remain saved in stash ${saved.slice(0, 8)}. Open Stashes to restore them.`); }
   }
 
   /**
@@ -366,7 +531,110 @@ export class GitClient {
       : {});
   }
   async pull(strategy: PullStrategy = 'ff-only'): Promise<void> { await this.run(pullArgs(strategy)); }
-  async push(): Promise<void> { await this.run(['push']); }
+
+  async setUpstream(remoteBranch: string): Promise<void> {
+    const branch = (await this.run(['symbolic-ref', '--quiet', '--short', 'HEAD']).catch(() => '')).trim();
+    if (!branch) throw new Error('Switch to a local branch before setting an upstream.');
+    const known = await this.getBranches();
+    if (!known.some((candidate) => candidate.remote && candidate.name === remoteBranch)) {
+      throw new Error('The selected remote branch is no longer available. Fetch and try again.');
+    }
+    await this.run(['branch', `--set-upstream-to=refs/remotes/${remoteBranch}`, branch]);
+  }
+
+  /** Update one non-current local branch without switching HEAD or touching the worktree. */
+  async updateLocalBranch(branch: string): Promise<void> {
+    const ref = `refs/heads/${branch}`;
+    const oldOid = (await this.run(['show-ref', '--verify', '--hash', ref]).catch(() => '')).trim();
+    if (!oldOid) throw new Error(`Local branch ${branch} no longer exists. Refresh and try again.`);
+    const current = (await this.run(['symbolic-ref', '--quiet', 'HEAD']).catch(() => '')).trim();
+    if (current === ref) throw new Error('Use Pull to update the checked-out branch.');
+    const [remote, mergeRef, upstreamRef] = await Promise.all([
+      this.run(['config', '--get', `branch.${branch}.remote`]).catch(() => ''),
+      this.run(['config', '--get', `branch.${branch}.merge`]).catch(() => ''),
+      this.run(['rev-parse', '--symbolic-full-name', `${branch}@{upstream}`]).catch(() => '')
+    ]);
+    const remoteName = remote.trim();
+    const sourceRef = mergeRef.trim();
+    const trackingRef = upstreamRef.trim();
+    if (!remoteName || remoteName === '.' || !sourceRef.startsWith('refs/heads/') ||
+        !trackingRef.startsWith('refs/remotes/')) {
+      throw new Error(`Branch ${branch} has no remote upstream. Set its tracking branch first.`);
+    }
+    // Fetch only this upstream; other local branches and remote-tracking refs stay untouched.
+    await this.run(['fetch', '--no-tags', remoteName, `+${sourceRef}:${trackingRef}`]);
+    const nextOid = (await this.run(['rev-parse', '--verify', trackingRef])).trim();
+    if (nextOid === oldOid) return;
+    try {
+      await this.run(['merge-base', '--is-ancestor', oldOid, nextOid]);
+    } catch {
+      throw new Error(`${branch} has local commits that diverge from ${trackingRef}. Review its history before updating.`);
+    }
+    if ((await this.run(['show-ref', '--verify', '--hash', ref])).trim() !== oldOid) {
+      throw new Error(`${branch} changed during the update. Refresh and try again.`);
+    }
+    // `branch -f` refuses a branch checked out in any worktree.
+    await this.run(['branch', '-f', branch, nextOid]);
+  }
+  async pushPreview(): Promise<PushPreview> {
+    const branch = (await this.run(['symbolic-ref', '--quiet', '--short', 'HEAD']).catch(() => '')).trim();
+    if (!branch) throw new Error('Create or switch to a branch before pushing from detached HEAD.');
+    return this.pushBranchPreview(branch);
+  }
+
+  async pushBranchPreview(branch: string): Promise<PushPreview> {
+    if (!branch || branch.startsWith('-') || /[\r\n]/.test(branch)) throw new Error('Choose a valid local branch.');
+    const ref = `refs/heads/${branch}`;
+    if (!(await this.run(['show-ref', '--verify', '--hash', ref]).catch(() => '')).trim()) throw new Error(`Local branch ${branch} no longer exists.`);
+    const upstreamExpression = `${branch}@{upstream}`;
+    const [remote, mergeRef, upstream, head] = await Promise.all([
+      this.run(['config', '--get', `branch.${branch}.remote`]).catch(() => ''),
+      this.run(['config', '--get', `branch.${branch}.merge`]).catch(() => ''),
+      this.run(['rev-parse', '--abbrev-ref', '--symbolic-full-name', upstreamExpression]).catch(() => ''),
+      this.run(['rev-parse', '--verify', ref])
+    ]);
+    const remoteName = remote.trim();
+    const targetBranch = mergeRef.trim().replace(/^refs\/heads\//, '');
+    if (!remoteName || remoteName === '.' || !mergeRef.trim().startsWith('refs/heads/') || !targetBranch || !upstream.trim()) {
+      throw new Error('This branch has no pushable upstream. Configure its remote tracking branch before pushing.');
+    }
+    const [upstreamOid, counts, commitsOutput, filesOutput] = await Promise.all([
+      this.run(['rev-parse', upstreamExpression]),
+      this.run(['rev-list', '--left-right', '--count', `${ref}...${upstreamExpression}`]),
+      this.run(['log', `${upstreamExpression}..${ref}`, '-n', '12', '--format=%H%x1f%s']),
+      this.run(['diff', '--name-only', '-z', `${upstreamExpression}..${ref}`])
+    ]);
+    const [ahead = 0, behind = 0] = counts.trim().split(/\s+/).map(Number);
+    return {
+      branch, upstream: upstream.trim(), upstreamOid: upstreamOid.trim(), remote: remoteName, targetBranch, head: head.trim(),
+      ahead, behind,
+      commits: commitsOutput.split('\n').filter(Boolean).map((entry) => {
+        const [hash = '', subject = ''] = entry.split('\x1f');
+        return { hash, subject };
+      }),
+      fileCount: filesOutput.split('\0').filter(Boolean).length
+    };
+  }
+
+  async push(expected?: PushPreview): Promise<void> {
+    const current = await this.pushPreview();
+    await this.performPush(current, expected);
+  }
+
+  async pushBranch(branch: string, expected?: PushPreview): Promise<void> {
+    if (expected && expected.branch !== branch) throw new Error('The selected branch changed during push review.');
+    const current = await this.pushBranchPreview(branch);
+    await this.performPush(current, expected);
+  }
+
+  private async performPush(current: PushPreview, expected?: PushPreview): Promise<void> {
+    if (expected && (current.head !== expected.head || current.upstreamOid !== expected.upstreamOid || current.remote !== expected.remote || current.targetBranch !== expected.targetBranch || current.ahead !== expected.ahead || current.behind !== expected.behind)) {
+      throw new Error('The branch or outgoing commits changed during push review. Open the preview again.');
+    }
+    if (!current.ahead) throw new Error('There are no outgoing commits to push.');
+    if (current.behind) throw new Error('The branch is behind its upstream. Fetch and review before pushing.');
+    await this.run(['push', '--porcelain', current.remote, `refs/heads/${current.branch}:refs/heads/${current.targetBranch}`]);
+  }
 
   async showHeadFile(filePath: string): Promise<string> {
     try {
@@ -408,9 +676,9 @@ export class GitClient {
     }).filter((entry) => /^[0-9a-f]{40}$/.test(entry.hash));
   }
 
-  async blameLine(filePath: string, line: number): Promise<LineBlame> {
+  async blameLine(filePath: string, line: number, options: { timeout?: number; signal?: AbortSignal } = {}): Promise<LineBlame> {
     if (!Number.isInteger(line) || line < 1) throw new Error('Choose a valid line in the editor.');
-    const output = await this.run(['blame', '--line-porcelain', '-L', `${line},${line}`, '--', filePath]);
+    const output = await this.run(['blame', '--line-porcelain', '-L', `${line},${line}`, '--', filePath], 8 * 1024 * 1024, options);
     const [header = '', ...metadata] = output.split('\n');
     const match = /^([0-9a-f]+)\s+\d+\s+\d+(?:\s+\d+)?$/.exec(header.trim());
     if (!match) throw new Error(`Git did not return blame information for ${filePath}:${line}.`);
