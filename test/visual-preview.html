@@ -147,7 +147,7 @@
           if (message.type === 'searchHistory') {
             const { query = '', author = '', path = '', age = 'all' } = message.filters || {};
             const needle = query.trim().toLowerCase();
-            const matches = fixture.commits.filter((commit) => {
+            const matches = (window.__completeHistory || fixture.commits).filter((commit) => {
               const text = [commit.subject, commit.author, commit.hash, commit.shortHash].join(' ').toLowerCase();
               return (!needle || text.includes(needle)) && (!author || commit.author.includes(author)) &&
                 (!path || commit.paths.some((file) => file.toLowerCase().includes(path.toLowerCase()))) &&
@@ -159,14 +159,14 @@
           if (message.type === 'commitDetails' || message.type === 'recentCommitDetails' || message.type === 'pushCommitDetails') {
             if (message.type === 'recentCommitDetails' && window.__holdRecentDetails) return;
             if (message.type === 'pushCommitDetails' && window.__holdPushDetails) return;
-            const commit = fixture.commits.find((item) => item.hash === message.hash);
+            const commit = (window.__completeHistory || fixture.commits).find((item) => item.hash === message.hash);
             if (!commit) return;
             setTimeout(() => emit({ type: message.type, id: message.id, root: message.root, requestId: message.requestId, payload: {
               hash: commit.hash,
               subject: commit.subject,
-              body: commit.hash === fixture.commits[0].hash
+              body: commit.body ?? (commit.hash === fixture.commits[0].hash
                 ? '背景：此前 ACK 支持判断散落在多个模块。\n\n本次：新增 Provider SPI，并把云厂商差异收敛在 provider 层。'
-                : '',
+                : ''),
               author: commit.author,
               date: commit.date,
               parents: commit.parents,

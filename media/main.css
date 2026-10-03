@@ -994,7 +994,8 @@ body[data-surface="history"] .content { min-width: 0; background: var(--vscode-p
   display: flex;
   flex-direction: column;
   padding: 0;
-  overflow: hidden;
+  overflow-x: hidden;
+  overflow-y: auto;
   border-top: 0;
   border-left: 0;
   background: var(--vscode-panel-background, var(--surface-base));
@@ -1032,7 +1033,8 @@ body[data-surface="history"] .content { min-width: 0; background: var(--vscode-p
 }
 .parity-mode .commit-file .codicon { color: var(--muted); font-size: 12px; }
 .parity-mode .commit-file .status { width: 13px; font-size: 10px; }
-.parity-mode .commit-metadata { flex: 0 0 var(--commit-metadata-height, 180px); min-height: 0; max-height: none; padding: 8px 10px 11px; }
+.parity-mode .commit-metadata { flex: 0 1 var(--commit-metadata-height, 180px); min-height: 96px; max-height: none; padding: 8px 10px 11px; }
+.parity-mode .commit-metadata:focus-visible { outline: 1px solid var(--vscode-focusBorder, var(--accent)); outline-offset: -1px; }
 .parity-mode .commit-detail-head strong { white-space: normal; font-size: 11px; line-height: 1.35; }
 .parity-mode .detail-kicker { font-size: 9px; letter-spacing: 0; }
 .parity-mode .commit-detail-meta { align-items: flex-start; margin-top: 6px; font-size: 10px; }

@@ -2,6 +2,15 @@
 
 ## Unreleased
 
+## 0.5.3 - 2026-10-03
+
+- Preserve the caret, text selection and live input controls while editing Commit, History and branch searches; stop moving each keystroke to the end.
+- Synchronize edited input and select values with cleared filters without losing the commit draft or file selection.
+- Keep commit details and exact file diffs available for complete-history search results outside the initial loaded page, including loading and retry states.
+- Make all commit information reachable in short History panes with native scrolling, a shrinking metadata area and keyboard focus.
+- Restore workflow focus to its actual Stash or branch entry after closing, including nested stash views, Escape and branch comparisons.
+- Add five browser regression groups that reproduce the original failures and verify the repaired task flows.
+
 ## 0.5.2 - 2026-10-03
 
 - Match History branch names, folders and changed files to the existing commit-title typography, using one shared font family, 13px size and 450 weight.
