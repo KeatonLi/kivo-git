@@ -443,12 +443,18 @@ body.commit-panel-resizing .commit-panel-splitter::after { top: 1px; height: 3px
 .file-context-menu button kbd { margin-left: auto; color: var(--vscode-descriptionForeground, var(--muted)); font: inherit; font-size: 9px; opacity: .75; }
 .no-results, .inline-empty { color: var(--muted); padding: 8px 12px; }
 
-.empty-state { height: 100%; display: grid; align-content: center; justify-items: center; padding: 30px; text-align: center; color: var(--muted); }
+.empty-state { height: 100%; display: grid; align-content: center; justify-items: center; padding: 24px 16px; overflow-y: auto; text-align: center; color: var(--muted); }
 .empty-mark { width: 46px; height: 46px; display: grid; place-items: center; border-radius: 14px; background: var(--surface-accent); color: var(--accent); font-size: 25px; animation: float 2.4s ease-in-out infinite; }
 .empty-mark .codicon { font-size: inherit; }
 .empty-state h2 { margin: 12px 0 3px; color: var(--vscode-foreground); font-size: 14px; }
 .empty-state p { margin: 0 0 13px; }
 .empty-state button { display: inline-flex; align-items: center; gap: 5px; padding: 5px 12px; border-radius: var(--radius-sm); background: var(--vscode-button-secondaryBackground); cursor: pointer; }
+.empty-state-actions { display: flex; flex-direction: column; gap: 8px; width: 100%; max-width: 240px; }
+.empty-state-actions button { justify-content: center; color: var(--vscode-button-secondaryForeground, var(--vscode-foreground)); }
+.empty-state-actions .primary-button { background: var(--vscode-button-background); color: var(--vscode-button-foreground); }
+.empty-state-details { width: 100%; max-width: 420px; margin-top: 16px; text-align: left; font-size: 11px; }
+.empty-state-details summary { cursor: pointer; }
+.empty-state-details pre { max-height: 160px; overflow: auto; margin: 8px 0 0; white-space: pre-wrap; overflow-wrap: anywhere; font: inherit; }
 
 #toast-region { position: fixed; z-index: 20; right: 8px; bottom: 8px; max-width: calc(100vw - 16px); display: flex; flex-direction: column; align-items: flex-end; pointer-events: none; }
 .toast { width: max-content; max-width: min(360px, calc(100vw - 16px)); display: flex; align-items: center; gap: 7px; padding: 6px 8px; border: 1px solid var(--vscode-widget-border, var(--border-subtle)); border-radius: 4px; background: var(--vscode-notifications-background, var(--surface-base)); color: var(--vscode-notifications-foreground, var(--vscode-foreground)); box-shadow: var(--shadow-popover); animation: toast-in 160ms var(--ease); pointer-events: auto; font-size: 11px; line-height: 1.4; }
@@ -702,10 +708,13 @@ body[data-surface="changes"] .content { background: var(--vscode-sideBar-backgro
 }
 .parity-mode .commit-panel textarea::placeholder { color: var(--vscode-input-placeholderForeground, var(--muted)); }
 .parity-mode .commit-actions { display: flex; align-items: center; gap: 5px; margin-top: 0; }
-.parity-mode .commit-selection-status { display: flex; align-items: center; justify-content: space-between; gap: 6px; flex: 0 0 auto; color: var(--vscode-descriptionForeground); font-size: 11px; }
-.parity-mode .commit-selection-status > span { min-width: 0; overflow-wrap: anywhere; }
+.parity-mode .commit-selection-status { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 6px; flex: 0 0 auto; min-width: 0; color: var(--vscode-descriptionForeground); font-size: 10px; }
+.parity-mode .commit-selection-counts { display: flex; flex-wrap: wrap; align-items: baseline; gap: 2px 8px; flex: 1 0 100%; min-width: 0; line-height: 1.4; }
+.parity-mode .commit-selection-counts > span { overflow-wrap: anywhere; }
+.parity-mode .commit-selection-hidden { color: var(--vscode-editorWarning-foreground, #cca700); }
+.parity-mode .commit-message-heading .commit-selection-status { margin-left: auto; flex: 0 0 auto; }
 .parity-mode .commit-selection-status button { flex-shrink: 0; font-size: 11px; padding: 0 3px; }
-.parity-mode .commit-selection-actions { display: inline-flex; align-items: center; gap: 7px; flex: 0 0 auto; }
+.parity-mode .commit-selection-actions { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 7px; min-width: 0; }
 .parity-mode .commit-selection-actions .rollback-selection { color: var(--vscode-errorForeground, var(--danger)); }
 .parity-mode .commit-selection-actions .rollback-selection:disabled { opacity: .45; }
 .parity-mode .commit-selection-note { flex: 0 0 auto; font-size: 10px; line-height: 1.35; color: var(--vscode-descriptionForeground); }
@@ -1218,16 +1227,13 @@ body.commit-panel-resizing .commit-panel-splitter::before { opacity: 1; backgrou
 .parity-mode .commit-panel.message-collapsed textarea { padding-block: 0; border-block-width: 0; }
 .commit-message-heading { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 6px; min-height: 24px; }
 .parity-mode .commit-message-tool { width: 22px; height: 22px; flex: 0 0 22px; }
-.commit-message-label { padding: 0; flex: 0 0 auto; background: transparent; color: var(--vscode-foreground); font-size: 11px; font-weight: 600; cursor: text; }
+.commit-message-label { display: inline-flex; align-items: center; gap: 3px; padding: 0; flex: 0 0 auto; background: transparent; color: var(--vscode-foreground); font-size: 11px; font-weight: 600; cursor: pointer; }
+.commit-message-label .codicon { font-size: 12px; }
+.commit-message-hint { color: var(--vscode-descriptionForeground); font-size: 10px; font-weight: 400; }
 .commit-message-label:focus-visible { outline: 1px solid var(--accent); outline-offset: 2px; }
-.parity-mode .commit-message-heading .commit-selection-status { flex: 1; min-width: 120px; font-size: 10px; justify-content: flex-end; }
 .parity-mode .commit-actions > button { white-space: nowrap; }
-@media (max-width: 280px) { .parity-mode .commit-message-heading .commit-selection-status { flex-basis: 100%; min-width: 0; justify-content: space-between; } }
-.parity-mode .commit-selection-status > span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .parity-mode .commit-selection-status button { font-size: 10px; }
-.parity-mode .commit-message-heading:has(.commit-selection-note) { flex-wrap: wrap; }
 .parity-mode .commit-selection-note { font-size: 10px; }
-.parity-mode .commit-message-heading .commit-selection-note { flex-basis: 100%; }
 .parity-mode .commit-repository-label { flex: 1; width: auto; }
 .commit-header-branch { flex: 0 1 55%; display: inline-flex; align-items: center; gap: 4px; min-width: 0; padding: 2px 4px; background: transparent; color: var(--vscode-descriptionForeground); font-size: 11px; cursor: pointer; }
 .commit-header-branch .codicon { color: var(--vscode-textLink-foreground, var(--accent)); }

@@ -22,7 +22,7 @@ Kivo Git keeps a familiar two-surface workflow in VS Code: **Commit** stays in t
 - Real repository status powered by the native Git CLI
 - IDE-style named changelists with drag-and-drop assignment
 - Selective commits without forcing a staged/unstaged workflow
-- File change colors with detailed state on hover, plus the current branch's five recent commits with inline changed-file previews and date groups
+- File change colors with detailed state on hover, plus three recent commits by default and an option to show five, with inline changed-file previews and date groups
 - Consistent Unpushed highlights in Recent commits and History, with a themed push review for destination and outgoing commits
 - Expand Push review commits to inspect colored filenames and short directories, then open committed diffs while keeping the review available
 - Local and remote branch popup with checkout
@@ -34,6 +34,8 @@ Kivo Git keeps a familiar two-surface workflow in VS Code: **Commit** stays in t
 - A commit review step that lists the selected files and offers a diff shortcut for each before confirmation
 
 Commit operates on whole selected files, including their working-tree edits; the Staged filter does not turn it into an index-only commit. Unrelated staged files are preserved. Selection counts appear beside the commit form. Filtering never silently drops an existing selection: hidden selections must be reviewed by clearing the filter, or removed with **Remove hidden**, before committing. List checkboxes select matching files, while keyboard select-all and range selection use the expanded, visible rows.
+
+The **Message** heading expands or collapses the editor while retaining the draft and commit actions. Selected and hidden file counts remain readable in narrow sidebars. Without a repository, Commit offers **Open Folder**, **Clone Repository**, or **Initialize Repository** for the current folder.
 
 Changelist data is stored in the worktree's Git directory under `ideagit/changelists.json`. Writes are atomic and serialized across windows, and tracked renames retain their list assignment. Invalid data is reported without overwriting it. Locks left by a terminated local Kivo Git process are recovered automatically. If an older or unreadable `changelists.json.lock` persists, close all Kivo Git windows and verify no operation is still running before removing that lock file; keep the JSON file.
 

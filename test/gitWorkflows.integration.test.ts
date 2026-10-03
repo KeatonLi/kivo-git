@@ -11,19 +11,21 @@ async function git(root: string, ...args: string[]) { return (await execute('git
 async function repository() {
   const root = await fs.mkdtemp(path.join(os.tmpdir(), 'kivo-workflows-')); roots.push(root);
   await git(root, 'init', '-b', 'main');
+  // Keep fixture checkouts deterministic without changing the user's Git settings.
+  await git(root, 'config', 'core.autocrlf', 'false');
   await git(root, 'config', 'user.name', 'Kivo Test'); await git(root, 'config', 'user.email', 'test@example.test');
   await fs.writeFile(path.join(root, 'alpha.txt'), 'base\n'); await fs.writeFile(path.join(root, 'beta.txt'), 'other\n');
   await git(root, 'add', '.'); await git(root, 'commit', '-m', 'initial');
   return root;
 }
 async function commit(root: string, text: string) { await fs.writeFile(path.join(root, 'alpha.txt'), `${text}\n`); await git(root, 'add', '.'); await git(root, 'commit', '-m', text); }
-afterEach(async () => { await Promise.all(roots.splice(0).map(root => fs.rm(root, { force: true, recursive: true }))); });
+afterEach(async () => { await Promise.all(roots.splice(0).map(root => fs.rm(root, { force: true, recursive: true, maxRetries: 5, retryDelay: 100 }))); });
 
-describe('Git workflows in real repositories', () => {
+describe('Git workflows in real repositories', { timeout: 15_000 }, () => {
   it('compares exact branch tips, unique commits and renamed/deleted/added files without changing checkout', async () => {
     const root = await repository();
     await git(root, 'switch', '-c', 'feature'); await commit(root, 'feature edit');
-    await git(root, 'mv', 'beta.txt', 'renamed beta.txt'); await fs.writeFile(path.join(root, 'new*.txt'), 'new\n');
+    await git(root, 'mv', 'beta.txt', 'renamed beta.txt'); await fs.writeFile(path.join(root, 'new[1].txt'), 'new\n');
     await git(root, 'add', '.'); await git(root, 'commit', '-m', 'rename and add');
     await git(root, 'switch', 'main'); await commit(root, 'main edit');
     const client = new GitClient(root), result = await client.workflows.compare('refs/heads/feature');
@@ -32,7 +34,7 @@ describe('Git workflows in real repositories', () => {
     expect(result.target.commits.map(c => c.subject)).toEqual(['rename and add', 'feature edit']);
     expect(result.files).toEqual(expect.arrayContaining([
       expect.objectContaining({ path: 'renamed beta.txt', status: 'R', originalPath: 'beta.txt' }),
-      expect.objectContaining({ path: 'new*.txt', status: 'A' })
+      expect.objectContaining({ path: 'new[1].txt', status: 'A' })
     ]));
     expect(await client.showFileAtRevision(result.currentOid, 'alpha.txt')).toBe('main edit\n');
     expect(await client.showFileAtRevision(result.targetOid, 'alpha.txt')).toBe('feature edit\n');
@@ -53,19 +55,19 @@ describe('Git workflows in real repositories', () => {
     const root = await repository(), client = new GitClient(root);
     await fs.writeFile(path.join(root, 'alpha.txt'), 'staged\n'); await git(root, 'add', 'alpha.txt');
     await fs.appendFile(path.join(root, 'alpha.txt'), 'unstaged\n');
-    await fs.writeFile(path.join(root, 'new*.txt'), 'saved untracked\n');
+    await fs.writeFile(path.join(root, 'new[1].txt'), 'saved untracked\n');
     const staged = await git(root, 'show', ':alpha.txt');
     const hash = await client.workflows.saveStash('unfinished changes');
     expect(await git(root, 'status', '--porcelain')).toBe('');
     const details = await client.workflows.stashDetails(hash);
-    expect(details.files.map(f => f.path).sort()).toEqual(['alpha.txt', 'new*.txt']);
-    const file = details.files.find(f => f.path === 'new*.txt')!;
+    expect(details.files.map(f => f.path).sort()).toEqual(['alpha.txt', 'new[1].txt']);
+    const file = details.files.find(f => f.path === 'new[1].txt')!;
     expect(await client.showFileAtRevision(file.newRevision, file.path)).toBe('saved untracked\n');
     expect((await client.snapshot()).commits.map(c => c.subject)).toEqual(['initial']);
     await client.workflows.applyStash(hash);
     expect(await git(root, 'show', ':alpha.txt')).toBe(staged);
     expect(await fs.readFile(path.join(root, 'alpha.txt'), 'utf8')).toBe('staged\nunstaged\n');
-    expect(await fs.readFile(path.join(root, 'new*.txt'), 'utf8')).toBe('saved untracked\n');
+    expect(await fs.readFile(path.join(root, 'new[1].txt'), 'utf8')).toBe('saved untracked\n');
     expect((await client.workflows.stashes())[0]?.hash).toBe(hash);
     await expect(client.workflows.applyStash(hash)).rejects.toThrow('current changes');
   });

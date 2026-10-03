@@ -2,6 +2,16 @@
 
 ## Unreleased
 
+## 0.5.1 - 2026-10-03
+
+- Keep one exact host/Webview repository identity on Windows, including short-path aliases. Restore Push review, Stashes, branch comparison and Merge Editor actions, and prevent duplicate repository badge counts.
+- Clear stale Activity Bar badges when the working tree becomes clean, including after Stash save or conflict resolution.
+- Finish workflow loading with an error response when a repository becomes unavailable or a request is rejected; preserve stale-request and repository-switch guards.
+- Keep selected-file and hidden-selection counts readable in narrow sidebars, with separate actions to clear filters or remove hidden selections.
+- Add an explicit, accessible Message expand/collapse toggle without losing the draft or hiding commit actions. Preserve the default space available for changed files.
+- Guide empty workspaces to Open Folder or Clone Repository, and offer Initialize Repository for folders without Git. Keep technical errors in expandable details.
+- Make Git integration fixtures portable on Windows and independent of global line-ending settings; retain POSIX-only filename coverage on supported platforms.
+- Package and verify VSIX files on Windows without shell-specific version expansion or an external unzip command.
 - Added Track and Stage to untracked files' Commit context menu, with a fresh Git status check before staging so the action cannot silently target a file whose state changed.
 
 ## 0.5.0 - 2026-10-02

@@ -2,7 +2,7 @@
   "name": "kivo-git",
   "displayName": "Kivo Git",
   "description": "An IDEA-style Git workflow for VS Code: commit changes on the left, inspect history in the bottom Panel.",
-  "version": "0.5.0",
+  "version": "0.5.1",
   "publisher": "KeatonLi",
   "license": "MIT",
   "repository": {
@@ -50,8 +50,8 @@
     "test": "vitest run",
     "test:webview": "node scripts/test-webview.mjs",
     "test:extension": "npm run compile && node scripts/test-extension.mjs",
-    "test:vsix": "node scripts/verify-vsix.mjs kivo-git-${npm_package_version}.vsix",
-    "package": "npm run check && npm run test && npm run compile && vsce package --out kivo-git-${npm_package_version}.vsix && npm run test:vsix",
+    "test:vsix": "node scripts/verify-vsix.mjs",
+    "package": "npm run check && npm run test && npm run compile && vsce package && npm run test:vsix",
     "release": "node scripts/release.mjs"
   },
   "contributes": {
@@ -224,6 +224,7 @@
     "@vscode/vsce": "^3.2.1",
     "esbuild": "^0.25.0",
     "typescript": "^5.7.2",
-    "vitest": "^3.0.5"
+    "vitest": "^3.0.5",
+    "yauzl": "^3.4.0"
   }
 }

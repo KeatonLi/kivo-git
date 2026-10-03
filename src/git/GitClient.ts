@@ -74,7 +74,9 @@ export class GitClient {
       this.workflows.operationState()
     ]);
     const parsed = parsePorcelainV2(statusOutput);
-    const root = topLevel.trim();
+    // Use the same opaque repository identity as every host request and response.
+    // Git can rewrite Windows separators, drive casing and short-path aliases.
+    const root = this.workspaceRoot;
     const currentBranch = branches.find((branch) => branch.current && !branch.remote)?.name;
     const selectedBranch = branches.find((branch) => branch.name === historyRef);
     const selectedTag = tags.find((tag) => tag.name === historyRef);
@@ -92,7 +94,7 @@ export class GitClient {
       this.markOutgoingCommits(recentCommits, headBranch, branches, parsed.headOid)
     ]);
     return {
-      repositoryName: path.basename(root),
+      repositoryName: path.basename(topLevel.trim()),
       root,
       identity,
       operation,

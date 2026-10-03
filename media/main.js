@@ -50,6 +50,8 @@ const ui = {
   repositoryLoading: true,
   repositoryUnavailable: false,
   emptyMessage: undefined,
+  canInitializeRepository: false,
+  emptyWorkspaceName: undefined,
   selected: new Set(initialRepositoryState.selected || []),
   collapsed: new Set(initialRepositoryState.collapsed || []),
   branchOpen: false,
@@ -828,11 +830,25 @@ function recentCommitTime(date) {
     : absoluteTime(date).slice(5, 10);
 }
 
+function renderRepositoryEmpty() {
+  const hasError = Boolean(ui.emptyMessage) && !ui.repositoryUnavailable;
+  const canInitialize = ui.repositoryUnavailable && ui.canInitializeRepository;
+  const title = hasError ? 'Could not read repository' : canInitialize ? 'Set up Git for this folder' : 'Open a Git repository';
+  const description = hasError
+    ? 'Retry to read the repository. Open the details below if the problem continues.'
+    : canInitialize
+      ? `${ui.emptyWorkspaceName || 'This folder'} is not a Git repository yet. Initialize it here, or open or clone an existing repository.`
+      : 'Open a folder with a Git repository, or clone one to start reviewing changes.';
+  const actions = hasError
+    ? `<button class="primary-button" data-action="refresh">${icon('refresh')}<span>Retry</span></button>`
+    : `${canInitialize ? `<button class="primary-button" data-action="initialize-repository">${icon('repo')}<span>Initialize Repository</span></button>` : ''}<button ${canInitialize ? '' : 'class="primary-button"'} data-action="open-folder">${icon('folder-opened')}<span>Open Folder</span></button><button data-action="clone-repository">${icon('git-clone')}<span>Clone Repository</span></button>`;
+  return `<section class="empty-state" role="${hasError ? 'alert' : 'status'}"><div class="empty-mark">${icon(hasError ? 'error' : 'repo')}</div><h2>${title}</h2><p>${escapeHtml(description)}</p><div class="empty-state-actions">${actions}</div>${ui.emptyMessage ? `<details class="empty-state-details"><summary>Details</summary><pre>${escapeHtml(ui.emptyMessage)}</pre></details>` : ''}</section>`;
+}
+
 function render() {
   const s = ui.snapshot;
   if (!s) {
-    const hasError = Boolean(ui.emptyMessage) && !ui.repositoryUnavailable;
-    app.innerHTML = ui.repositoryLoading ? renderRepositoryLoading() : `<section class="empty-state" role="${hasError ? 'alert' : 'status'}"><div class="empty-mark">${icon(hasError ? 'error' : 'repo')}</div><h2>${hasError ? 'Could not read repository' : 'Open a Git repository'}</h2><p>${escapeHtml(ui.emptyMessage || 'Open a folder containing a Git repository to review changes here.')}</p><button data-action="refresh">${icon('refresh')} ${hasError ? 'Retry' : 'Refresh'}</button></section>`;
+    app.innerHTML = ui.repositoryLoading ? renderRepositoryLoading() : renderRepositoryEmpty();
     bind();
     return;
   }
@@ -1001,7 +1017,8 @@ function matchesChangeFilter(change) {
 function renderChanges(s) {
   const query = ui.changeQuery.trim().toLowerCase();
   const filtersActive = Boolean(query || ui.changeFilter !== 'all');
-  const changesByList = new Map(changeSelection().lists.map((list) => [list.id, list.changes]));
+  const selection = changeSelection();
+  const changesByList = new Map(selection.lists.map((list) => [list.id, list.changes]));
   const filteredTotal = [...changesByList.values()].reduce((count, changes) => count + changes.length, 0);
   const visiblePaths = s.changelists
     .filter((list) => !ui.collapsed.has(list.id))
@@ -1040,7 +1057,8 @@ function renderChanges(s) {
       <div class="lists commit-changes-tree" id="kivo-commit-changes">${lists}${!filteredTotal ? `<div class="commit-empty-list" role="status">${icon(filtersActive ? 'search' : 'check')}<strong>${filtersActive ? 'No matching files' : 'Working tree clean'}</strong><span>${filtersActive ? 'Try another path or clear your filters.' : 'Your changes will appear here.'}</span>${filtersActive ? '<button class="text-button" data-action="clear-change-filters">Clear filters</button>' : ''}</div>` : ''}</div>
       <div class="commit-panel-splitter" data-commit-panel-splitter role="separator" aria-label="Resize changes and commit message" aria-controls="kivo-commit-changes kivo-commit-message" aria-orientation="horizontal" aria-valuemin="${COMMIT_PANEL_MIN_HEIGHT}" aria-valuenow="${Math.round(ui.commitMessageHeight)}" tabindex="0" title="Drag to resize. Double-click to reset."></div>
       <footer class="commit-panel ${ui.commitMessageHeight === 0 ? 'message-collapsed' : ''}" id="kivo-commit-message" style="--commit-message-height:${Math.round(ui.commitMessageHeight)}px">
-      <div class="commit-message-heading"><button class="commit-message-label" data-action="edit-commit-message" aria-controls="commit-message" title="Write a commit message">Message</button><button class="idea-toolbar-button commit-message-tool" data-action="reuse-commit-message" aria-label="Reuse a recent commit message" title="Reuse a recent commit message" ${ui.busy ? 'disabled' : ''}>${icon('history')}</button><button class="idea-toolbar-button commit-message-tool" data-action="open-settings" aria-label="Kivo Git settings" title="Kivo Git settings">${icon('gear')}</button>${renderSelectionStatus()}</div>
+      <div class="commit-message-heading"><button class="commit-message-label" data-action="edit-commit-message" aria-controls="commit-message" aria-expanded="${ui.commitMessageHeight > 0}" aria-label="${ui.commitMessageHeight > 0 ? 'Collapse' : 'Expand'} commit message" title="${ui.commitMessageHeight > 0 ? 'Collapse' : 'Expand'} commit message">${icon(ui.commitMessageHeight > 0 ? 'chevron-down' : 'chevron-right')}<span>Message</span><span class="commit-message-hint" ${ui.commitMessageHeight > 0 ? 'hidden' : ''}>Expand</span></button><button class="idea-toolbar-button commit-message-tool" data-action="reuse-commit-message" aria-label="Reuse a recent commit message" title="Reuse a recent commit message" ${ui.busy ? 'disabled' : ''}>${icon('history')}</button><button class="idea-toolbar-button commit-message-tool" data-action="open-settings" aria-label="Kivo Git settings" title="Kivo Git settings">${icon('gear')}</button>${!selection.selectedChanges.length ? renderSelectionStatus() : ''}</div>
+      ${selection.selectedChanges.length ? renderSelectionStatus() : ''}
       <textarea id="commit-message" rows="3" placeholder="Commit Message" aria-label="Commit Message" style="height:var(--commit-message-height)" spellcheck="true" ${ui.operationKind === 'commit' ? 'disabled' : ''}>${escapeHtml(ui.commitMessage)}</textarea>
       <div class="commit-actions">
         <button class="primary-button ${ui.operationKind === 'commit' ? 'working' : ''}" data-action="commit" title="${escapeHtml(commitHint)} (${commandKey}+Enter)" ${!canCommit ? 'disabled' : ''}>${ui.operationKind === 'commit' ? `${icon('loading', 'codicon-modifier-spin button-spinner')}<span>Committing…</span>` : '<span>Commit</span>'}</button>
@@ -2080,10 +2098,22 @@ function applyCommitPanelHeight(splitter, height) {
   ui.commitMessageHeight = next;
   panel?.style.setProperty('--commit-message-height', `${next}px`);
   panel?.classList.toggle('message-collapsed', next === 0);
+  syncCommitMessageDisclosure(panel, next > 0);
   splitter.setAttribute('aria-valuemin', String(minimum));
   splitter.setAttribute('aria-valuemax', String(maximum));
   splitter.setAttribute('aria-valuenow', String(next));
   return next;
+}
+
+function syncCommitMessageDisclosure(panel, expanded) {
+  const toggle = panel?.querySelector('[data-action="edit-commit-message"]');
+  if (!toggle) return;
+  toggle.setAttribute('aria-expanded', String(expanded));
+  toggle.setAttribute('aria-label', `${expanded ? 'Collapse' : 'Expand'} commit message`);
+  toggle.title = `${expanded ? 'Collapse' : 'Expand'} commit message`;
+  toggle.querySelector('.codicon')?.setAttribute('class', `codicon codicon-${expanded ? 'chevron-down' : 'chevron-right'}`);
+  const hint = toggle.querySelector('.commit-message-hint');
+  if (hint) hint.hidden = expanded;
 }
 
 function finishCommitPanelResize(commit = true) {
@@ -2795,9 +2825,10 @@ function handleAction(action) {
   if (action === 'confirm-push-review') { respondPushReview('push'); return; }
   if (action === 'fetch-push-review') { respondPushReview('fetch'); return; }
   if (action === 'edit-commit-message') {
-    if (ui.commitMessageHeight < 28) applyCommitPanelHeight(app.querySelector('[data-commit-panel-splitter]'), COMMIT_PANEL_DEFAULT_HEIGHT);
+    const expand = ui.commitMessageHeight === 0;
+    applyCommitPanelHeight(app.querySelector('[data-commit-panel-splitter]'), expand ? COMMIT_PANEL_DEFAULT_HEIGHT : 0);
     persist();
-    app.querySelector('#commit-message')?.focus();
+    if (expand) app.querySelector('#commit-message')?.focus();
     return;
   }
   if (action === 'toggle-recent-count') {
@@ -2863,6 +2894,9 @@ function handleAction(action) {
     }
   }
   if (action === 'refresh') post('refresh');
+  if (action === 'open-folder') post('openFolder');
+  if (action === 'clone-repository') post('cloneRepository');
+  if (action === 'initialize-repository' && ui.repositoryUnavailable && ui.canInitializeRepository) post('initializeRepository');
   if (action === 'show-log') post('showLog');
   if (action === 'show-changes') post('showChanges');
   if (action === 'open-settings') post('openSettings');
@@ -2965,7 +2999,7 @@ function commitBlocker() {
 function renderSelectionStatus() {
   const { selectedChanges, hiddenCount } = changeSelection();
   const wholeFiles = ui.changeFilter === 'staged' || selectedChanges.some((change) => change.staged && change.workingTreeStatus !== '.');
-  return `<div class="commit-selection-status" role="status"><span title="${wholeFiles ? 'Commits include all working-tree changes in selected files.' : 'Select files to commit'}">${selectedChanges.length} ${selectedChanges.length === 1 ? 'file' : 'files'} selected${hiddenCount ? ` · ${hiddenCount} hidden by filters` : ''}</span>${selectedChanges.length ? `<div class="commit-selection-actions"><button class="text-button rollback-selection" data-action="rollback-selected" title="Restore tracked changes to HEAD; move new files to Trash" ${ui.busy || hiddenCount ? 'disabled' : ''}>Rollback…</button><button class="text-button" data-action="${hiddenCount ? 'clear-hidden-selection' : 'clear-selection'}" ${ui.busy ? 'disabled' : ''}>${hiddenCount ? 'Remove hidden' : 'Clear'}</button></div>` : ''}</div>${hiddenCount ? '<div class="commit-selection-note warning">Hidden selections must be reviewed or removed.</div>' : wholeFiles ? '<div class="commit-selection-note">Commits include all working-tree changes in selected files.</div>' : ''}`;
+  return `<div class="commit-selection-status" role="status"><div class="commit-selection-counts" title="${wholeFiles ? 'Commits include all working-tree changes in selected files.' : 'Select files to commit'}"><span class="commit-selection-total">${selectedChanges.length} ${selectedChanges.length === 1 ? 'file' : 'files'} selected</span>${hiddenCount ? `<span class="commit-selection-hidden">${hiddenCount} hidden by filters</span>` : ''}</div>${selectedChanges.length ? `<div class="commit-selection-actions"><button class="text-button rollback-selection" data-action="rollback-selected" title="Restore tracked changes to HEAD; move new files to Trash" ${ui.busy || hiddenCount ? 'disabled' : ''}>Rollback…</button>${hiddenCount ? '<button class="text-button" data-action="clear-change-filters">Clear filters</button>' : ''}<button class="text-button" data-action="${hiddenCount ? 'clear-hidden-selection' : 'clear-selection'}" ${ui.busy ? 'disabled' : ''}>${hiddenCount ? 'Remove hidden' : 'Clear'}</button></div>` : ''}</div>${hiddenCount ? '<div class="commit-selection-note warning">Hidden selections must be reviewed or removed.</div>' : wholeFiles ? '<div class="commit-selection-note">Commits include all working-tree changes in selected files.</div>' : ''}`;
 }
 
 function syncCommitActionState() {
@@ -3183,6 +3217,8 @@ window.addEventListener('message', (event) => {
   if (message.type === 'snapshot') {
     ui.repositoryLoading = false;
     ui.repositoryUnavailable = false;
+    ui.canInitializeRepository = false;
+    ui.emptyWorkspaceName = undefined;
     const fingerprint = JSON.stringify(message.payload);
     if (fingerprint === lastSnapshot && !ui.historyRefLoading && !ui.graphLoadingMore) return;
     if (ui.commitReviewOpen && lastSnapshot && fingerprint !== lastSnapshot) {
@@ -3257,6 +3293,8 @@ window.addEventListener('message', (event) => {
     ui.repositoryLoading = message.type === 'repositoryLoading';
     ui.repositoryUnavailable = message.reason === 'no-repository';
     ui.emptyMessage = ui.repositoryLoading ? undefined : message.message;
+    ui.canInitializeRepository = ui.repositoryUnavailable && message.canInitialize === true;
+    ui.emptyWorkspaceName = typeof message.workspaceName === 'string' ? message.workspaceName : undefined;
     ui.graphLoadingMore = false;
     lastSnapshot = '';
     render();

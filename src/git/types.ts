@@ -105,6 +105,7 @@ export interface ChangeList {
 export interface RepositorySnapshot {
   operation?: GitOperationState;
   repositoryName: string;
+  /** Stable host/webview identity: exactly the selected GitClient.workspaceRoot. */
   root: string;
   branch: string;
   headOid?: string;

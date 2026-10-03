@@ -19,6 +19,12 @@ npm run test:webview
 
 `npm run test:extension` launches VS Code 1.95.0 and checks extension activation, registered commands, and the Commit/History entry points. CI runs this under Xvfb. Git command behavior is exercised separately in disposable repositories by `test/gitClient.integration.test.ts`.
 
+To test against an installed VS Code instead of downloading the pinned version, set `KIVO_VSCODE_EXECUTABLE_PATH` to its executable before running the command. All Extension Host tests use a temporary, isolated profile.
+
+Git fixtures disable automatic line-ending conversion locally. Filenames with brackets and spaces run on Windows too; literal asterisks and trailing spaces are tested only on POSIX, where those filenames are supported. Repository identity tests cover Windows path spelling and separate linked worktrees; message tests also verify stale responses and repository switches.
+
+`npm run package` produces `kivo-git-<version>.vsix` and verifies its runtime assets and manifest directly as a ZIP file. No external unzip command is needed. `npm run test:vsix -- <path>` can verify a specific package.
+
 Inline blame additionally has focused controller and cache tests for cursor debounce, cancellation, stale results, unsaved edits, non-repository workspaces, and the settings toggle. The Extension Host test verifies the toggle command against VS Code's real configuration API.
 
 The VS Code Web extension host cannot run this extension as-is: Kivo Git uses Node APIs and starts local Git processes. The browser suite therefore tests the real webview front end, while the Extension Development Host suite tests VS Code integration.

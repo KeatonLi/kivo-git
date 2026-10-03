@@ -60,7 +60,8 @@ exports.run = async function run() {
     assert.ok(vscode.window.tabGroups.all.some(group => group.tabs.some(tab => tab.input instanceof vscode.TabInputTextMerge && tab.input.result.fsPath === file)), 'The native Merge Editor should open for the conflicted file.');
   } finally {
     await vscode.commands.executeCommand('workbench.action.closeAllEditors');
-    await fs.rm(root, { recursive: true, force: true });
+    // VS Code's Git extension can still have a status subprocess in this folder.
+    await fs.rm(root, { recursive: true, force: true, maxRetries: 10, retryDelay: 200 });
   }
   console.log('Kivo Git Extension Host smoke tests passed.');
 };

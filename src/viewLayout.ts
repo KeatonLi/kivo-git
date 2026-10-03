@@ -23,6 +23,7 @@ const sharedMessages = new Set([
   'stashCreate', 'stashApply', 'stashDrop',
   'openConflict', 'resolveConflict', 'continueOperation', 'abortOperation',
   'refresh',
+  'openFolder', 'cloneRepository', 'initializeRepository',
   'fetch',
   'pull',
   'push',

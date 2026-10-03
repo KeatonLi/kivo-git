@@ -17,6 +17,7 @@ type WebviewMessage =
   | { type: 'continueOperation' | 'abortOperation'; root: string; token: string }
   | { type: 'ready'; historyRef?: string }
   | { type: 'refresh' | 'fetch' | 'push' | 'loadMoreCommits' | 'showLog' | 'showChanges' | 'openSettings' }
+  | { type: 'openFolder' | 'cloneRepository' | 'initializeRepository' }
   | { type: 'setHistoryRef'; branch: string }
   | { type: 'searchHistory'; requestId: number; filters: { query?: string; author?: string; age?: string; path?: string; ref?: string }; limit: number }
   | { type: 'pull'; strategy: PullStrategy }
@@ -327,8 +328,11 @@ export class IdeaGitViewProvider implements vscode.WebviewViewProvider, vscode.T
     this.client = undefined;
     this.lastSnapshot = undefined;
     this.coordinator.reset();
-    await this.postToReadyViews({ type: 'empty', message: this.errorText(error),
-      reason: !this.selectedWorkspace() || /not a git repository/i.test(this.errorText(error)) ? 'no-repository' : 'error' });
+    const workspace = this.selectedWorkspace();
+    const message = this.errorText(error);
+    const reason = !workspace || /not a git repository/i.test(message) ? 'no-repository' : 'error';
+    await this.postToReadyViews({ type: 'empty', message, reason,
+      canInitialize: reason === 'no-repository' && workspace?.uri.scheme === 'file', workspaceName: workspace?.name });
   }
 
   private hasVisibleView(): boolean {
@@ -356,10 +360,12 @@ export class IdeaGitViewProvider implements vscode.WebviewViewProvider, vscode.T
 
   private updateBadge(): void {
     const view = this.views.get('changes');
-    if (view) view.badge = this.badgeCount ? {
+    // A zero badge replaces the old activity; some VS Code versions do not clear
+    // the previous activity when a WebviewView badge is set to undefined.
+    if (view) view.badge = {
       value: this.badgeCount,
-      tooltip: `${this.badgeCount} uncommitted ${this.badgeCount === 1 ? 'file' : 'files'} across all Git repositories. The Commit view shows the selected repository.`
-    } : undefined;
+      tooltip: this.badgeCount ? `${this.badgeCount} uncommitted ${this.badgeCount === 1 ? 'file' : 'files'} across all Git repositories. The Commit view shows the selected repository.` : ''
+    };
   }
 
   private scheduleBadgeRefresh(): void {
@@ -612,6 +618,22 @@ export class IdeaGitViewProvider implements vscode.WebviewViewProvider, vscode.T
       return;
     }
     try {
+      // Empty-state navigation must work before a Git client can be created.
+      if (message.type === 'openFolder') {
+        await vscode.commands.executeCommand('workbench.action.files.openFolder');
+        return;
+      }
+      if (message.type === 'cloneRepository') {
+        await vscode.commands.executeCommand('git.clone');
+        return;
+      }
+      if (message.type === 'initializeRepository') {
+        if (this.lastSnapshot || this.selectedWorkspace()?.uri.scheme !== 'file') return;
+        // The built-in command selects the workspace when multiple folders are open.
+        await vscode.commands.executeCommand('git.init', true);
+        await this.refresh(true);
+        return;
+      }
       const client = await this.getClient();
       switch (message.type) {
         case 'searchHistory': {
@@ -757,7 +779,12 @@ export class IdeaGitViewProvider implements vscode.WebviewViewProvider, vscode.T
           await this.openCommitDiff(client, message.hash, message.path, message.originalPath, message.kind);
           return;
         case 'workflowRequest': {
-          if (message.root !== client.workspaceRoot || !Number.isSafeInteger(message.requestId) || message.requestId < 0) return;
+          if (!Number.isSafeInteger(message.requestId) || message.requestId < 0) return;
+          if (message.root !== client.workspaceRoot) {
+            await this.postToView(surface, { type: 'workflowResult', root: message.root, requestId: message.requestId,
+              error: 'The selected repository changed. Close this view and try again.' });
+            return;
+          }
           const session = { root: client.workspaceRoot, id: message.requestId, files: [] as WorkflowFile[] };
           this.workflowSessions.set(surface, session);
           try {
@@ -929,6 +956,9 @@ export class IdeaGitViewProvider implements vscode.WebviewViewProvider, vscode.T
       }
     } catch (error) {
       const detail = this.errorText(error);
+      if (message.type === 'workflowRequest' && Number.isSafeInteger(message.requestId) && message.requestId >= 0) {
+        await this.postToView(surface, { type: 'workflowResult', root: message.root, requestId: message.requestId, error: detail });
+      }
       await this.postToView(surface, { type: 'notice', phase: 'error', message: detail });
       void vscode.window.showErrorMessage(`${IdeaGitViewProvider.productName}: ${detail}`);
     }

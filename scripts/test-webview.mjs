@@ -77,6 +77,16 @@ try {
   await page.goto(`${baseUrl}/test/visual-preview.html?surface=changes&state=no-repository`);
   await page.waitForSelector('.empty-state');
   assert.match(await page.locator('.empty-state h2').textContent(), /Open a Git repository/);
+  assert.equal(await page.locator('[data-action="initialize-repository"]').count(), 0, 'An empty window must not offer initialization.');
+  await page.locator('[data-action="open-folder"]').click();
+  await page.locator('[data-action="clone-repository"]').click();
+  assert.ok(await page.evaluate(() => window.__vscodeMessages.some(message => message.type === 'openFolder')));
+  assert.ok(await page.evaluate(() => window.__vscodeMessages.some(message => message.type === 'cloneRepository')));
+  await page.evaluate(() => emit({ type: 'empty', reason: 'no-repository', canInitialize: true, workspaceName: 'My project', message: 'fatal: not a git repository' }));
+  assert.match(await page.locator('.empty-state h2').textContent(), /Set up Git/);
+  assert.equal(await page.locator('.empty-state-details').getAttribute('open'), null, 'Technical details should start collapsed.');
+  await page.locator('[data-action="initialize-repository"]').click();
+  assert.ok(await page.evaluate(() => window.__vscodeMessages.some(message => message.type === 'initializeRepository')));
   await page.goto(`${baseUrl}/test/visual-preview.html?surface=changes&state=error`);
   await page.waitForSelector('.empty-state');
   assert.match(await page.locator('.empty-state h2').textContent(), /Could not read repository/);
@@ -227,7 +237,12 @@ try {
   assert.equal(await page.locator('#commit-message').inputValue(), 'Legacy draft');
   await page.evaluate(() => sessionStorage.removeItem('kivo-fixture-state'));
   await openSurface(page, 'surface=changes');
-  assert.ok(await page.locator('.commit-changes-tree').evaluate(element => element.clientHeight > innerHeight / 2), 'Changed files must own the majority of the default sidebar.');
+  const defaultReviewLayout = await page.locator('.commit-changes-tree').evaluate(element => ({
+    files: element.clientHeight, viewport: innerHeight,
+    form: document.querySelector('.commit-panel').getBoundingClientRect().height,
+    recent: document.querySelector('.commit-lower').getBoundingClientRect().height
+  }));
+  assert.ok(defaultReviewLayout.files > defaultReviewLayout.viewport / 2, `Changed files must own the majority of the default sidebar: ${JSON.stringify(defaultReviewLayout)}`);
   const draft = 'fix: keep this draft\n\nA longer explanation.';
   await page.locator('#commit-message').fill(draft);
   await dragVertical(page, '[data-commit-panel-splitter]', 36);
@@ -236,8 +251,11 @@ try {
   assert.equal((await page.locator('#commit-message').boundingBox()).height, 0, 'Users must be able to fully collapse the editor.');
   assert.equal(await page.locator('[data-action="commit"]').isVisible(), true, 'Collapsing Message must retain commit actions.');
   assert.equal(await page.locator('#commit-message').inputValue(), draft);
+  assert.equal(await page.locator('[data-action="edit-commit-message"]').getAttribute('aria-expanded'), 'false');
+  assert.equal(await page.getByRole('button', { name: 'Expand commit message', exact: true }).count(), 1);
   await page.locator('[data-action="edit-commit-message"]').click();
   assert.equal((await page.locator('#commit-message').boundingBox()).height, 64);
+  assert.equal(await page.locator('[data-action="edit-commit-message"]').getAttribute('aria-expanded'), 'true');
   assert.equal(await page.locator('#commit-message').evaluate(element => document.activeElement === element), true);
   const grip = await page.locator('[data-commit-panel-splitter]').boundingBox();
   const gx = grip.x + grip.width / 2, gy = grip.y + grip.height / 2;
@@ -530,6 +548,18 @@ try {
   await page.locator('#change-filter').selectOption('staged');
   assert.match(await page.locator('.commit-selection-status').textContent(), /1 hidden/);
   assert.equal(await page.locator('[data-action="commit"]').isEnabled(), false);
+  await page.setViewportSize({ width: 240, height: 420 });
+  assert.equal(await page.locator('.commit-selection-total').textContent(), '1 file selected');
+  assert.equal(await page.locator('.commit-selection-hidden').textContent(), '1 hidden by filters');
+  assert.equal(await page.locator('.commit-selection-counts').evaluate(element => {
+    const parent = element.getBoundingClientRect();
+    return [...element.children].every(child => {
+      const rect = child.getBoundingClientRect();
+      return rect.left >= parent.left && rect.right <= parent.right + 1 && child.scrollWidth <= child.clientWidth + 1;
+    });
+  }), true, 'Selected and hidden counts must remain fully readable in a narrow sidebar.');
+  assert.equal(await page.locator('.commit-selection-actions [data-action="clear-change-filters"]').count(), 1, 'Hidden selections should offer a way to restore their visibility.');
+  await page.setViewportSize({ width: 360, height: 820 });
   await page.locator('[data-action="clear-hidden-selection"]').click();
   await page.locator('[data-select-list]').check({ force: true });
   assert.equal(await page.locator('[data-select]:checked').count(), 2);

@@ -18,6 +18,8 @@ async function createRepository(): Promise<string> {
   const root = await fs.mkdtemp(path.join(os.tmpdir(), 'ideagit-test-'));
   temporaryRepositories.push(root);
   await git(root, ['init', '-b', 'main']);
+  // Keep fixture checkouts deterministic without changing the user's Git settings.
+  await git(root, ['config', 'core.autocrlf', 'false']);
   await git(root, ['config', 'user.name', 'IdeaGit Test']);
   await git(root, ['config', 'user.email', 'ideagit@example.test']);
   await fs.writeFile(path.join(root, 'alpha.txt'), 'alpha\n');
@@ -28,10 +30,36 @@ async function createRepository(): Promise<string> {
 }
 
 afterEach(async () => {
-  await Promise.all(temporaryRepositories.splice(0).map((root) => fs.rm(root, { recursive: true, force: true })));
+  await Promise.all(temporaryRepositories.splice(0).map((root) => fs.rm(root, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 })));
 });
 
-describe('GitClient integration', () => {
+// These scenarios launch many real Git processes; Windows startup cost can exceed 5s.
+describe('GitClient integration', { timeout: 15_000 }, () => {
+  it('uses each workspace path as snapshot identity for a repository and its linked worktree', async () => {
+    const root = await createRepository();
+    const linkedRoot = await fs.mkdtemp(path.join(os.tmpdir(), 'ideagit-linked-'));
+    temporaryRepositories.push(linkedRoot);
+    await git(root, ['worktree', 'add', '-b', 'feature/identity', linkedRoot]);
+    await fs.writeFile(path.join(root, 'alpha.txt'), 'main worktree edit\n');
+    await fs.writeFile(path.join(linkedRoot, 'alpha.txt'), 'linked worktree edit\n');
+    const client = new GitClient(root);
+    const linkedClient = new GitClient(linkedRoot);
+    const [snapshot, linkedSnapshot] = await Promise.all([client.snapshot(), linkedClient.snapshot()]);
+
+    expect(snapshot.root).toBe(client.workspaceRoot);
+    expect(linkedSnapshot.root).toBe(linkedClient.workspaceRoot);
+    expect(snapshot.root).not.toBe(linkedSnapshot.root);
+    for (const [current, expectedContent] of [
+      [snapshot, 'main worktree edit\n'],
+      [linkedSnapshot, 'linked worktree edit\n']
+    ] as const) {
+      expect((await fs.stat(current.root)).isDirectory()).toBe(true);
+      await fs.access(current.root);
+      expect(current.changes.map(change => change.path)).toEqual(['alpha.txt']);
+      expect(await fs.readFile(path.join(current.root, current.changes[0]!.path), 'utf8')).toBe(expectedContent);
+    }
+  });
+
   it('counts changed files once, including staged renames and untracked files', async () => {
     const root = await createRepository();
     const client = new GitClient(root);
@@ -54,7 +82,17 @@ describe('GitClient integration', () => {
     expect(await fs.readFile(path.join(root, 'new.txt'), 'utf8')).toBe('keep this file\n');
   });
 
-  it('commits literal wildcard filenames without including matching unrelated files', async () => {
+  it('commits literal bracket filenames without including matching unrelated files', async () => {
+    const root = await createRepository();
+    await fs.writeFile(path.join(root, 'file[1].txt'), 'selected\n');
+    await fs.writeFile(path.join(root, 'file1.txt'), 'not selected\n');
+    await git(root, ['add', 'file1.txt']);
+    await new GitClient(root).commit('literal path', ['file[1].txt']);
+    expect(await git(root, ['show', '--format=', '--name-only', 'HEAD'])).toBe('file[1].txt');
+    expect(await git(root, ['diff', '--cached', '--name-only'])).toBe('file1.txt');
+  });
+
+  it.skipIf(process.platform === 'win32')('commits literal asterisk filenames without including matching unrelated files', async () => {
     const root = await createRepository();
     await fs.writeFile(path.join(root, 'file*.txt'), 'selected\n');
     await fs.writeFile(path.join(root, 'file-other.txt'), 'not selected\n');
@@ -153,7 +191,18 @@ describe('GitClient integration', () => {
     expect((await client.searchCommits({ query: 'recent' }, 12)).commits).toHaveLength(8);
   });
 
-  it('preserves leading and trailing whitespace in committed file paths', async () => {
+  it('preserves leading whitespace and spaces in committed file paths', async () => {
+    const root = await createRepository();
+    const filename = ' leading and internal spaces.txt';
+    await fs.writeFile(path.join(root, filename), 'literal filename\n');
+    await git(root, ['add', '--', filename]);
+    await git(root, ['commit', '-m', 'unusual path']);
+    const client = new GitClient(root);
+    expect((await client.snapshot()).commits[0]?.paths).toContain(filename);
+    expect((await client.searchCommits({ path: 'leading and internal' })).commits[0]?.paths).toContain(filename);
+  });
+
+  it.skipIf(process.platform === 'win32')('preserves leading and trailing whitespace in committed file paths', async () => {
     const root = await createRepository();
     const filename = ' leading and trailing .txt ';
     await fs.writeFile(path.join(root, filename), 'literal filename\n');
@@ -317,7 +366,7 @@ describe('GitClient integration', () => {
     await git(root, ['add', 'alpha.txt']);
     await git(root, ['commit', '-m', 'local work']);
 
-    await git(peer, ['clone', '--branch', 'main', remote, '.']);
+    await git(peer, ['clone', '--config', 'core.autocrlf=false', '--branch', 'main', remote, '.']);
     await git(peer, ['config', 'user.name', 'IdeaGit Peer']);
     await git(peer, ['config', 'user.email', 'peer@example.test']);
     await fs.writeFile(path.join(peer, 'remote.txt'), 'remote commit\n');
@@ -401,7 +450,7 @@ describe('GitClient integration', () => {
     await git(root, ['push', '-u', 'origin', 'feature/selected']);
     await git(root, ['switch', 'main']);
     await git(root, ['branch', '--track', 'feature/untouched', 'origin/main']);
-    await git(peer, ['clone', '--branch', 'feature/selected', remote, '.']);
+    await git(peer, ['clone', '--config', 'core.autocrlf=false', '--branch', 'feature/selected', remote, '.']);
     await git(peer, ['config', 'user.name', 'IdeaGit Peer']);
     await git(peer, ['config', 'user.email', 'peer@example.test']);
     await fs.writeFile(path.join(peer, 'remote.txt'), 'upstream commit\n');
@@ -431,7 +480,7 @@ describe('GitClient integration', () => {
     await git(root, ['remote', 'add', 'origin', remote]);
     await git(root, ['switch', '-c', 'feature/diverged']);
     await git(root, ['push', '-u', 'origin', 'feature/diverged']);
-    await git(peer, ['clone', '--branch', 'feature/diverged', remote, '.']);
+    await git(peer, ['clone', '--config', 'core.autocrlf=false', '--branch', 'feature/diverged', remote, '.']);
     await git(peer, ['config', 'user.name', 'IdeaGit Peer']);
     await git(peer, ['config', 'user.email', 'peer@example.test']);
     await fs.writeFile(path.join(peer, 'remote.txt'), 'remote\n');

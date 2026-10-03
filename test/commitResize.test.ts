@@ -9,7 +9,7 @@ async function resize() {
   const editor = { getBoundingClientRect: () => ({ height: editorHeight }) };
   const tree = { clientHeight: 300 };
   const panel = { getBoundingClientRect: () => ({ height: editorHeight + 66 }),
-    querySelector: () => editor, classList: { toggle: vi.fn() },
+    querySelector: (selector: string) => selector === '#commit-message' ? editor : undefined, classList: { toggle: vi.fn() },
     style: { setProperty: (key: string, value: string) => { if (key === '--commit-message-height') editorHeight = parseFloat(value); } } };
   const chrome = [34, 31, 28, 12].map(height => ({ getBoundingClientRect: () => ({ height }) }));
   const content = { clientHeight: 600, children: [...chrome, tree, panel], querySelector: (selector: string) => selector === '.commit-panel' ? panel : selector === '#commit-message' ? editor : tree };
@@ -23,7 +23,7 @@ async function resize() {
     document: { body: { classList: { add: vi.fn(), remove: vi.fn() } } }, persist: vi.fn() };
   const source = await readFile('media/main.js', 'utf8');
   const ast = ts.createSourceFile('main.js', source, ts.ScriptTarget.Latest, true, ts.ScriptKind.JS);
-  const names = new Set(['commitPanelBounds', 'applyCommitPanelHeight', 'startCommitPanelResize', 'finishCommitPanelResize']);
+  const names = new Set(['commitPanelBounds', 'applyCommitPanelHeight', 'syncCommitMessageDisclosure', 'startCommitPanelResize', 'finishCommitPanelResize']);
   runInNewContext(ast.statements.filter(node => ts.isFunctionDeclaration(node) && node.name && names.has(node.name.text)).map(node => node.getText(ast)).join('\n'), context);
   context.startCommitPanelResize({ currentTarget: splitter, button: 0, pointerId: 1, clientY: 200, preventDefault() {} });
   return { context, height: () => editorHeight, move: (clientY: number) => listeners.get('pointermove')?.({ pointerId: 1, clientY }), cancel: () => listeners.get('pointercancel')?.({ pointerId: 1 }), finish: () => listeners.get('pointerup')?.({ pointerId: 1 }) };
