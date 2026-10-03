@@ -2,6 +2,12 @@
 
 ## Unreleased
 
+## 0.5.2 - 2026-10-03
+
+- Match History branch names, folders and changed files to the existing commit-title typography, using one shared font family, 13px size and 450 weight.
+- Use the same list typography in Commit and the branch picker; enlarge parent-directory labels and reclaim file-row space for clearer sidebar review.
+- Document 42 experience acceptance cases and the remaining interaction and layout issues found during review.
+
 ## 0.5.1 - 2026-10-03
 
 - Keep one exact host/Webview repository identity on Windows, including short-path aliases. Restore Push review, Stashes, branch comparison and Merge Editor actions, and prevent duplicate repository badge counts.

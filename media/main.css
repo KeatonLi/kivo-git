@@ -22,6 +22,9 @@
   --kivo-accent: color-mix(in srgb, var(--accent) 72%, var(--kivo-cyan));
   --kivo-accent-soft: color-mix(in srgb, var(--kivo-accent) 11%, transparent);
   --kivo-line: color-mix(in srgb, var(--kivo-accent) 34%, var(--vscode-panel-border));
+  --kivo-list-font-family: -apple-system, BlinkMacSystemFont, "SF Pro Text", "Segoe UI Variable Text", "Segoe UI", sans-serif;
+  --kivo-list-font-size: 13px;
+  --kivo-list-font-weight: 450;
 }
 
 * { box-sizing: border-box; }
@@ -753,7 +756,7 @@ body[data-surface="history"] .content { min-width: 0; background: var(--vscode-p
 .parity-mode .graph-view { min-width: 0; background: var(--vscode-panel-background, var(--surface-base)); }
 .parity-mode .log-workspace {
   --idea-row: 30px;
-  font-family: -apple-system, BlinkMacSystemFont, "SF Pro Text", "Segoe UI Variable Text", "Segoe UI", sans-serif;
+  font-family: var(--kivo-list-font-family);
   flex: 1;
   min-height: 0;
   display: grid;
@@ -809,8 +812,8 @@ body[data-surface="history"] .content { min-width: 0; background: var(--vscode-p
   gap: 4px;
   padding: 0 6px;
   color: var(--vscode-foreground);
-  font-size: 11px;
-  font-weight: 500;
+  font-size: var(--kivo-list-font-size);
+  font-weight: var(--kivo-list-font-weight);
 }
 .parity-mode button.log-branch-folder { width: 100%; border: 0; border-radius: 0; background: transparent; text-align: left; cursor: pointer; }
 .parity-mode button.log-branch-folder:hover,
@@ -852,8 +855,8 @@ body[data-surface="history"] .content { min-width: 0; background: var(--vscode-p
 .parity-mode .log-branch-tree { padding-top: 2px; }
 .parity-mode .log-branch-group { margin: 0 0 3px; }
 .parity-mode .log-branch-group-title { min-height: 27px; color: var(--muted); font-size: 11px; font-weight: 500; }
-.parity-mode .log-branch-row { min-height: 27px; font-size: 12px; }
-.parity-mode .log-branch-row > span:not(.codicon) { font-size: 12px; }
+.parity-mode .log-branch-row { min-height: 28px; font-size: var(--kivo-list-font-size); font-weight: var(--kivo-list-font-weight); }
+.parity-mode .log-branch-row > span:not(.codicon) { font-size: inherit; }
 .parity-mode .log-branch-entry { display: flex; align-items: center; min-width: 0; }
 .parity-mode .log-branch-entry .log-branch-row { flex: 1 1 auto; width: 0; }
 .parity-mode .log-branch-update { flex: 0 0 24px; height: 25px; display: grid; place-items: center; border-radius: 3px; background: transparent; color: var(--vscode-textLink-foreground, var(--accent)); cursor: pointer; opacity: 0; }
@@ -863,8 +866,8 @@ body[data-surface="history"] .content { min-width: 0; background: var(--vscode-p
 .parity-mode .log-branch-update:hover:not(:disabled),
 .parity-mode .log-branch-update:focus-visible { outline: none; background: var(--vscode-toolbar-hoverBackground); }
 .parity-mode .log-branch-update:disabled { opacity: .35; }
-.parity-mode .branch-popup { font-family: -apple-system, BlinkMacSystemFont, "SF Pro Text", "Segoe UI Variable Text", "Segoe UI", sans-serif; }
-.parity-mode .branch-popup .branch-row { font-size: 12px; }
+.parity-mode .branch-popup { font-family: var(--kivo-list-font-family); }
+.parity-mode .branch-popup .branch-row { font-size: var(--kivo-list-font-size); font-weight: var(--kivo-list-font-weight); }
 .parity-mode .branch-popup .branch-popup-group h3 { font-size: 12px; letter-spacing: 0; }
 .parity-mode .log-branch-row.current > .codicon { color: var(--vscode-textLink-foreground, var(--accent)); }
 .parity-mode .log-branch-row .branch-sync-indicator { flex: 0 0 auto; display: inline-flex; align-items: center; gap: 2px; overflow: visible; }
@@ -884,7 +887,7 @@ body[data-surface="history"] .content { min-width: 0; background: var(--vscode-p
 .parity-mode .log-branch-search input { font-size: 12px; }
 .parity-mode .log-branch-group-title { font-size: 12px; }
 .parity-mode .log-branch-group-title > small { font-size: 10px; }
-.parity-mode .log-branch-row > span:not(.codicon) { font-size: 12px; }
+.parity-mode .log-branch-row > span:not(.codicon):not(.branch-sync-indicator) { font-size: inherit; }
 .parity-mode .log-filter-bar { min-height: 46px; padding-top: 8px; padding-bottom: 8px; }
 .parity-mode .log-filter-bar .graph-search { height: 30px; font-size: 12px; }
 .parity-mode .log-filter-bar .graph-search input { font-size: 12px; }
@@ -951,7 +954,7 @@ body[data-surface="history"] .content { min-width: 0; background: var(--vscode-p
   animation: none;
   transition: background 100ms ease, color 100ms ease;
 }
-.parity-mode .graph-row { font-size: 13px; }
+.parity-mode .graph-row { font-size: var(--kivo-list-font-size); }
 .parity-mode .graph-row:hover { background: var(--vscode-list-hoverBackground); }
 .parity-mode .graph-row.selected { box-shadow: none; background: var(--idea-selection); color: var(--idea-selection-foreground); }
 .parity-mode .graph-row.selected .log-author,
@@ -967,7 +970,7 @@ body[data-surface="history"] .content { min-width: 0; background: var(--vscode-p
 .parity-mode .log-date { padding-left: 8px; font-size: 11px; font-variant-numeric: tabular-nums; }
 .parity-mode .log-date { text-align: left; }
 .parity-mode .graph-commit { gap: 5px; padding: 0 6px; }
-.parity-mode .graph-commit strong { font-size: 13px; font-weight: 450; letter-spacing: 0; }
+.parity-mode .graph-commit strong { font-size: var(--kivo-list-font-size); font-weight: var(--kivo-list-font-weight); letter-spacing: 0; }
 .parity-mode .log-meta { font-size: 11px; }
 .parity-mode .graph-ref { max-width: 120px; padding: 0 2px; border: 0; border-radius: 0; background: transparent; line-height: 15px; font-size: 10px; }
 .parity-mode .graph-ref.local.current { background: transparent; }
@@ -1005,28 +1008,30 @@ body[data-surface="history"] .content { min-width: 0; background: var(--vscode-p
   border-bottom: 1px solid var(--vscode-panel-border, var(--border-subtle));
 }
 .parity-mode .commit-files-panel { flex: 1 1 auto; min-height: 96px; padding: 5px 7px 8px; border-bottom: 0; }
-.parity-mode .details-section-heading { min-height: 24px; font-size: 11px; font-weight: 600; }
+.parity-mode .details-section-heading { min-height: 26px; font-size: 12px; font-weight: 500; }
 .parity-mode .commit-files { gap: 0; margin-top: 2px; }
 .parity-mode .commit-file-folder {
-  min-height: 22px;
+  min-height: 26px;
   display: flex;
   align-items: center;
   gap: 3px;
   padding: 0 4px 0 calc(4px + var(--tree-indent, 0px));
   color: var(--vscode-foreground);
-  font-size: 10px;
+  font-size: var(--kivo-list-font-size);
+  font-weight: var(--kivo-list-font-weight);
 }
 .parity-mode .commit-file-folder span { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .parity-mode .commit-file-folder .codicon { color: var(--muted); font-size: 12px; }
 .parity-mode .commit-file {
-  min-height: 26px;
+  min-height: 28px;
   gap: 4px;
   padding: 0 4px 0 calc(5px + var(--tree-indent, 0px));
   border-radius: 2px;
-  font-size: 11px;
+  font-size: var(--kivo-list-font-size);
+  font-weight: var(--kivo-list-font-weight);
 }
 .parity-mode .commit-file .codicon { color: var(--muted); font-size: 12px; }
-.parity-mode .commit-file .status { width: 11px; font-size: 8px; }
+.parity-mode .commit-file .status { width: 13px; font-size: 10px; }
 .parity-mode .commit-metadata { flex: 0 0 var(--commit-metadata-height, 180px); min-height: 0; max-height: none; padding: 8px 10px 11px; }
 .parity-mode .commit-detail-head strong { white-space: normal; font-size: 11px; line-height: 1.35; }
 .parity-mode .detail-kicker { font-size: 9px; letter-spacing: 0; }
@@ -1176,7 +1181,7 @@ body.vscode-high-contrast-light .file-row.selected { outline: 1px solid var(--vs
 
 /* Commit workspace: focused actions above, context below. */
 .parity-mode .changes-content {
-  font-family: var(--vscode-font-family, "Segoe UI Variable Text", "Segoe UI", sans-serif);
+  font-family: var(--kivo-list-font-family);
   background: var(--vscode-sideBar-background, var(--surface-base));
 }
 .parity-mode .commit-upper {
@@ -1192,11 +1197,12 @@ body.vscode-high-contrast-light .file-row.selected { outline: 1px solid var(--vs
 .parity-mode .commit-upper .commit-panel { background: transparent; }
 .parity-mode .commit-upper .commit-changes-heading { font-size: 12px; letter-spacing: .025em; }
 .parity-mode .commit-upper .list-name,
-.parity-mode .commit-upper .file-main { font-size: 13px; }
-.parity-mode .commit-upper .file-parent { font-size: 10px; }
+.parity-mode .commit-upper .file-main { font-size: var(--kivo-list-font-size); }
+.parity-mode .commit-upper .file-main { font-weight: var(--kivo-list-font-weight); }
+.parity-mode .commit-upper .file-parent { font-size: 11px; font-weight: 400; }
 .parity-mode .commit-upper .file-name { flex: 0 1 auto; }
-.parity-mode .commit-upper .file-parent { flex: 0 4 auto; max-width: 36%; }
-.parity-mode .commit-upper .file-row { border-radius: 5px; margin: 0 5px; padding-left: 12px; }
+.parity-mode .commit-upper .file-parent { flex: 0 4 auto; max-width: 40%; }
+.parity-mode .commit-upper .file-row { border-radius: 5px; margin: 0 4px; padding-left: 8px; }
 .parity-mode .commit-upper .commit-panel {
   border-top: 1px solid var(--vscode-panel-border, var(--border-subtle));
   padding: 4px 10px 8px;
