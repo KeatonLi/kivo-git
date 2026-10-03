@@ -4,6 +4,7 @@ import { createRequire } from 'node:module';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { mkdir } from 'node:fs/promises';
+import { verifyExperienceRegressions } from './webview-experience-regressions.mjs';
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const require = createRequire(import.meta.url);
@@ -40,7 +41,7 @@ async function waitForServer() {
 
 async function openSurface(page, query) {
   await page.goto(`${baseUrl}/test/visual-preview.html?${query}`);
-  await page.waitForSelector(query.includes('surface=history') ? '.log-branch-pane' : '.commit-toolbar');
+  await page.waitForSelector(query.includes('surface=history') ? '.log-workspace' : '.commit-toolbar');
 }
 
 async function dragVertical(page, selector, delta) {
@@ -70,6 +71,8 @@ try {
   page = await browser.newPage({ viewport: { width: 360, height: 820 } });
   const pageErrors = [];
   page.on('pageerror', (error) => pageErrors.push(error.message));
+
+  await verifyExperienceRegressions(page, query => openSurface(page, query));
 
   await page.goto(`${baseUrl}/test/visual-preview.html?surface=changes&state=loading`);
   await page.waitForSelector('.repository-loading');

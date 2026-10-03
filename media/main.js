@@ -752,6 +752,11 @@ function patchNode(current, desired, pool) {
     if (key) pool.delete(key);
   }
   while (current.childNodes.length > desiredChildren.length) current.lastChild.remove();
+  // The value attribute does not update a control after the user has edited it.
+  // Write only changed model values, so ordinary renders retain the live caret.
+  if ((current.nodeName === 'INPUT' && current.type !== 'file' || current.nodeName === 'SELECT') && current.value !== desired.value) {
+    current.value = desired.value;
+  }
 }
 
 function patchApp(html) {
@@ -912,10 +917,21 @@ function renderPullMenu() {
   </div>`;
 }
 
+function workflowReturnFocus() {
+  const element = document.activeElement;
+  const menu = ui.branchContextMenu;
+  const selector = menu
+    ? menu.fromPopup ? '[data-action="branches"]' : `[data-log-branch="${CSS.escape(menu.ref)}"]`
+    : element?.closest('.commit-toolbar-menu') ? '[data-action="toolbar-more"]'
+      : surface === 'changes' ? '[data-action="toolbar-more"]' : '[data-action="stashes"]';
+  return { element, selector };
+}
+
 function requestWorkflow(kind, options = {}) {
   const previous = ui.workflow;
   const requestId = ++ui.workflowRequestId;
-  ui.workflow = { kind, root: ui.snapshot.root, requestId, loading: true, tab: 'files', ...options };
+  const returnFocus = previous?.root === ui.snapshot.root ? previous.returnFocus : workflowReturnFocus();
+  ui.workflow = { kind, root: ui.snapshot.root, requestId, loading: true, tab: 'files', ...options, returnFocus };
   ui.branchOpen = false;
   ui.toolbarMenuOpen = false;
   ui.branchContextMenu = undefined;
@@ -927,11 +943,20 @@ function requestWorkflow(kind, options = {}) {
 
 function closeWorkflow() {
   if (!ui.workflow) return;
+  const origin = ui.workflow.returnFocus;
   post('closeWorkflow', { requestId: ui.workflow.requestId });
   ui.workflow = undefined;
   ui.workflowRequestId++;
   render();
-  requestAnimationFrame(() => app.querySelector('[data-action="stashes"], [data-log-branch][tabindex], .log-branch-row.current, [data-action="branch"]')?.focus());
+  requestAnimationFrame(() => {
+    if (ui.workflow) return;
+    if (document.activeElement !== document.body && document.activeElement !== document.documentElement) return;
+    const fallback = surface === 'changes' ? '[data-action="toolbar-more"]' : '[data-action="stashes"]';
+    const candidates = [origin?.element, origin?.selector && app.querySelector(origin.selector), app.querySelector(fallback)];
+    const target = candidates.find(element => element?.isConnected && element !== document.body &&
+      !element.disabled && !element.closest('[inert]') && element.getClientRects().length);
+    target?.focus({ preventScroll: true });
+  });
 }
 
 function renderWorkflowFiles(files) {
@@ -1385,9 +1410,12 @@ function renderCommitDetails(s) {
   if (!ui.selectedCommitHash) {
     return `<aside class="commit-detail commit-detail-empty" id="kivo-log-details" aria-label="Commit details">${toolbar}<div class="commit-detail-empty-copy"><div class="detail-empty-mark">${icon('git-commit')}</div><strong>Select a commit</strong><span>Its changed files and commit message appear here.</span></div></aside>`;
   }
-  const commit = s.commits.find((item) => item.hash === ui.selectedCommitHash);
-  if (!commit) return '';
-  const details = ui.commitDetails?.hash === commit.hash ? ui.commitDetails : undefined;
+  const details = ui.commitDetails?.hash === ui.selectedCommitHash ? ui.commitDetails : undefined;
+  const commit = graphCommits().find(item => item.hash === ui.selectedCommitHash)
+    || s.commits.find(item => item.hash === ui.selectedCommitHash) || details;
+  if (!commit) {
+    return `<aside class="commit-detail commit-detail-empty" id="kivo-log-details" aria-label="Commit details">${toolbar}<div class="inline-empty" role="${ui.commitDetailsError ? 'alert' : 'status'}">${ui.commitDetailsError ? `${escapeHtml(ui.commitDetailsError)} <button data-action="retry-commit">Retry</button>` : `${icon('loading', 'codicon-modifier-spin')} Loading commit details…`}</div></aside>`;
+  }
   const metadataHeight = Math.round(Math.max(COMMIT_METADATA_MIN_HEIGHT, ui.commitMetadataHeight));
   return `<aside class="commit-detail" id="kivo-log-details" aria-label="Commit details" style="--commit-metadata-height:${metadataHeight}px">
     ${toolbar}
@@ -1398,8 +1426,8 @@ function renderCommitDetails(s) {
       ${details ? `<div class="commit-files file-tree">${details.files.length ? renderCommitFileTree(buildPathTree(details.files)) : '<span class="detail-muted">No file changes reported</span>'}</div>` : ''}
     </div>
     <div class="commit-detail-splitter" data-commit-detail-splitter role="separator" aria-label="Resize changed files and commit information" aria-orientation="horizontal" aria-valuemin="${COMMIT_METADATA_MIN_HEIGHT}" aria-valuenow="${metadataHeight}" tabindex="0" title="Drag to resize. Double-click to reset."></div>
-    <div class="commit-metadata">
-      <div class="commit-detail-head"><div><span class="detail-kicker">${escapeHtml(commit.shortHash)}</span><strong>${escapeHtml(commit.subject)}</strong></div></div>
+    <div class="commit-metadata" tabindex="0" aria-label="Commit metadata">
+      <div class="commit-detail-head"><div><span class="detail-kicker">${escapeHtml(commit.shortHash || commit.hash.slice(0, 7))}</span><strong>${escapeHtml(commit.subject)}</strong></div></div>
       <div class="commit-detail-meta"><span>${escapeHtml(commit.author)} · ${absoluteTime(commit.date)}</span><code>${escapeHtml(commit.hash)}</code></div>
       <div class="commit-detail-refs">${commit.refs.map(renderRef).join('') || '<span class="detail-muted">No branch label</span>'}</div>
       ${details?.body && details.body !== details.subject ? `<p class="commit-body">${escapeHtml(details.body)}</p>` : ''}
@@ -2386,12 +2414,7 @@ function bind() {
       persist();
       requestHistorySearch();
       if (!historySearchActive()) { reconcileHistorySelection(); render(); }
-      requestAnimationFrame(() => {
-        const input = app.querySelector('#graph-search');
-        input?.focus();
-        input?.setSelectionRange(ui.graphQuery.length, ui.graphQuery.length);
-      });
-      });
+    });
   }
   const graphPath = app.querySelector('#graph-path');
   if (graphPath && !graphPath.__ideaGitListeners) {
@@ -2401,11 +2424,6 @@ function bind() {
       persist();
       requestHistorySearch();
       if (!historySearchActive()) { reconcileHistorySelection(); render(); }
-      requestAnimationFrame(() => {
-        const input = app.querySelector('#graph-path');
-        input?.focus();
-        input?.setSelectionRange(ui.graphPathFilter.length, ui.graphPathFilter.length);
-      });
     });
   }
   const graphAuthor = app.querySelector('#graph-author');
@@ -2416,11 +2434,6 @@ function bind() {
       persist();
       requestHistorySearch();
       if (!historySearchActive()) { reconcileHistorySelection(); render(); }
-      requestAnimationFrame(() => {
-        const input = app.querySelector('#graph-author');
-        input?.focus();
-        input?.setSelectionRange(ui.graphAuthorFilter.length, ui.graphAuthorFilter.length);
-      });
     });
   }
   const logBranchSearch = app.querySelector('#log-branch-search');
@@ -2431,11 +2444,6 @@ function bind() {
       ui.branchVisibleCounts = { local: BRANCH_PAGE_SIZE, remote: BRANCH_PAGE_SIZE, tags: BRANCH_PAGE_SIZE };
       persist();
       render();
-      requestAnimationFrame(() => {
-        const input = app.querySelector('#log-branch-search');
-        input?.focus();
-        input?.setSelectionRange(ui.logBranchQuery.length, ui.logBranchQuery.length);
-      });
     });
   }
   const changeSearch = app.querySelector('#change-search');
@@ -2445,11 +2453,6 @@ function bind() {
       ui.changeQuery = changeSearch.value;
       persist();
       render();
-      requestAnimationFrame(() => {
-        const input = app.querySelector('#change-search');
-        input?.focus();
-        input?.setSelectionRange(ui.changeQuery.length, ui.changeQuery.length);
-      });
     });
     changeSearch.addEventListener('keydown', (event) => {
       if (event.key !== 'Escape') return;
@@ -2770,11 +2773,6 @@ function bind() {
       ui.branchQuery = search.value;
       ui.branchPopupVisibleCounts = { local: BRANCH_PAGE_SIZE, remote: BRANCH_PAGE_SIZE };
       render();
-      requestAnimationFrame(() => {
-        const input = app.querySelector('#branch-search');
-        input?.focus();
-        input?.setSelectionRange(ui.branchQuery.length, ui.branchQuery.length);
-      });
     });
     search.addEventListener('keydown', (event) => {
       if (!['ArrowDown', 'ArrowUp'].includes(event.key)) return;

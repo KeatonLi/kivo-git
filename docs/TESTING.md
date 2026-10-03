@@ -6,6 +6,8 @@ Kivo Git has two runtime boundaries, so its tests use two different hosts.
 
 The browser suite runs the production `media/main.js` and `media/main.css` in a small VS Code message-bridge fixture. It does not require VS Code and never runs Git commands. It covers empty changelist drop affordance, incoming/outgoing counts, Fetch message delivery, selected-file commit payloads, recent-commit previews, and Unpushed markers.
 
+`scripts/webview-experience-regressions.mjs` always runs five task regressions, including when screenshot capture is disabled: middle-of-text edits and preserved selections in six search fields; clearing live filter controls without losing a draft or selected files; details and exact diff messages for the 221st commit outside an initial 80-commit snapshot; keyboard access to the body end, parents and last file in short History panes; and focus return after nested Stash views and branch comparisons. Screenshots are optional; these assertions are not.
+
 Push review checks cover destination and commit summaries, cancel/confirm/fetch replies, preserved drafts, focus containment, stale branch tips, and long destinations in narrow and short views. File previews cover lazy loading, cached reopening, retry, stale responses from other commits/reviews/repositories, filename priority, duplicate filenames in different directories, root files, renames, and diff messages. Host-side tests check one-use review IDs, exact commit membership, and isolation between repositories and surfaces. Git integration tests verify exact outgoing membership for diverged and selected branches, partial pushes, cleared marks after publishing, full hashes in previews, and revalidation of reviewed refs before a real push.
 
 ```sh
