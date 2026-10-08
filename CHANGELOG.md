@@ -2,6 +2,13 @@
 
 ## Unreleased
 
+## 0.5.4 - 2026-10-08
+
+- Show five recent commits by default, including when upgrading from a saved three-item view; remove the redundant Show 3/Show 5 control.
+- Give expanded recent-commit details more room while fitting their contents, keeping Commit actions visible in short sidebars and respecting manually resized dividers.
+- Wrap expanded commit titles to two lines, space changed-file rows more comfortably, and use one scroll area for the list and its preview.
+- Reveal the selected commit and its details when expanding lower rows by mouse or keyboard; retain cached details, loading/retry states and reduced-motion support.
+
 ## 0.5.3 - 2026-10-03
 
 - Preserve the caret, text selection and live input controls while editing Commit, History and branch searches; stop moving each keystroke to the end.

@@ -127,10 +127,10 @@ try {
   assert.equal(await page.locator('.workspace-brief').count(), 0, 'The Commit view should leave repository status to History.');
   assert.equal(await page.locator('.commit-repository-context').count(), 0, 'The lower area should show recent commits without redundant status cards.');
   assert.match(await page.locator('.commit-recent').textContent(), /Recent commits/);
-  assert.equal(await page.locator('[data-recent-commit]').count(), 3, 'Recent context should show three commits by default.');
-  await page.getByRole('button', { name: 'Show 5', exact: true }).click();
-  assert.equal(await page.locator('[data-recent-commit]').count(), 5);
-  await page.getByRole('button', { name: 'Show 3', exact: true }).click();
+  assert.equal(await page.locator('[data-recent-commit]').count(), 5, 'Recent context should show five commits by default.');
+  assert.equal(await page.locator('[data-action="toggle-recent-count"]').count(), 0, 'Five commits should not require another expansion control.');
+  const compactRecentHeight = (await page.locator('.commit-lower').boundingBox()).height;
+  assert.equal(await page.locator('#kivo-recent-list').evaluate(list => [...list.querySelectorAll('[data-recent-commit]')].every(row => row.getBoundingClientRect().bottom <= list.getBoundingClientRect().bottom)), true, 'All five recent commits must be visible in a normal sidebar.');
   assert.equal(await page.locator('.commit-recent-row.unpushed .unpushed-badge').count(), 3, 'Exact outgoing commits should have a visible marker in Recent commits.');
   assert.match(await page.locator('.commit-recent-row.unpushed .unpushed-badge').first().getAttribute('title'), /origin\/feature\/keaton\/ACKk8s/);
   assert.equal(await page.locator('.commit-header-branch span:last-child').textContent(), 'feature/keaton/ACKk8s');
@@ -156,6 +156,8 @@ try {
   await page.locator('[data-recent-commit]').first().click();
   await page.waitForSelector('[data-recent-file]');
   assert.equal(await page.locator('.commit-recent-preview').count(), 1, 'A recent commit should expand changed files in place.');
+  assert.ok((await page.locator('.commit-lower').boundingBox()).height >= compactRecentHeight + 40, 'Opening details must make additional room instead of squeezing them into the compact list.');
+  assert.equal(await page.locator('.commit-recent-preview').evaluate(preview => getComputedStyle(preview).overflowY), 'visible', 'Recent details should share one scroll area with the commits.');
   assert.equal(await page.locator('[data-recent-file]').count(), await page.evaluate(() => fixture.commits[0].paths.length));
   assert.equal(await page.locator('[data-recent-file] .preview-file-name').first().textContent(), 'EksClusterProvider.java', 'Recent files should emphasize the filename rather than starting with a long directory.');
   assert.equal(await page.locator('[data-recent-file] .preview-file-directory').first().textContent(), '…/mvp/provider');
@@ -188,6 +190,22 @@ try {
   await page.waitForSelector('[data-recent-file]');
   assert.equal(await page.locator('[data-recent-commit]').nth(1).getAttribute('aria-expanded'), 'true');
   await page.locator('[data-recent-commit]').nth(1).click();
+  assert.ok(Math.abs((await page.locator('.commit-lower').boundingBox()).height - compactRecentHeight) <= 1, 'Closing details must restore the compact content height.');
+  await page.evaluate(() => {
+    fixture.commits[4].paths = Array.from({ length: 12 }, (_, i) => `src/review/file-${i}.ts`);
+  });
+  await page.locator('[data-recent-commit]').nth(4).focus();
+  await page.keyboard.press('Enter');
+  await page.waitForSelector('[data-recent-file]');
+  await page.waitForFunction(() => {
+    const list = document.querySelector('#kivo-recent-list').getBoundingClientRect();
+    const row = document.querySelector('[data-recent-commit][aria-expanded="true"]').getBoundingClientRect();
+    const history = document.querySelector('[data-recent-history]').getBoundingClientRect();
+    return row.top >= list.top - 1 && history.bottom <= list.bottom + 1;
+  });
+  assert.equal(await page.locator('[data-recent-file]').count(), 8, 'Large commits keep the existing compact eight-file preview.');
+  assert.match(await page.locator('.commit-recent-preview').textContent(), /4 more in History/);
+  await page.locator('[data-recent-commit]').nth(4).click();
   const historyIconColor = await page.locator('.commit-toolbar [data-action="show-log"] svg').evaluate((element) => getComputedStyle(element).color);
   const branchIconColor = await page.locator('.commit-header-branch .codicon').evaluate((element) => getComputedStyle(element).color);
   assert.equal(historyIconColor, branchIconColor, 'The History shortcut should use the same normal accent as Branches.');
@@ -195,6 +213,11 @@ try {
   await page.locator('[data-commit-zone-splitter]').focus();
   await page.keyboard.press('ArrowUp');
   assert.equal(await page.locator('.changes-content.recent-resized').count(), 1, 'The split should still support manual resizing.');
+  const manualRecentHeight = (await page.locator('.commit-lower').boundingBox()).height;
+  await page.locator('[data-recent-commit]').first().click();
+  assert.ok(Math.abs((await page.locator('.commit-lower').boundingBox()).height - manualRecentHeight) <= 1, 'Opening details must respect a manually resized split.');
+  await page.locator('[data-recent-commit]').first().click();
+  await page.locator('[data-commit-zone-splitter]').focus();
   await page.keyboard.press('Home');
   assert.equal(await page.locator('.changes-content.recent-resized').count(), 0, 'Resetting the split should restore automatic sizing.');
   for (const viewport of [{ width: 240, height: 420 }, { width: 360, height: 1000 }]) {
@@ -213,6 +236,21 @@ try {
     assert.equal(await page.locator('.commit-actions').evaluate(element => [...element.querySelectorAll('button')].every(button => button.scrollHeight <= button.clientHeight && button.scrollWidth <= button.clientWidth)), true, 'Commit button labels must fit without wrapping or clipping.');
     assert.equal(layout.horizontalOverflow, false, 'The sidebar must not scroll horizontally.');
     assert.ok(layout.lowerHeight <= 288, 'Tall sidebars must not stretch the recent list into unused space.');
+    await page.locator('[data-recent-commit]').nth(4).click();
+    await page.locator('[data-recent-history]').focus();
+    await page.waitForFunction(() => {
+      const list = document.querySelector('#kivo-recent-list').getBoundingClientRect();
+      const link = document.querySelector('[data-recent-history]').getBoundingClientRect();
+      return link.top >= list.top - 1 && link.bottom <= list.bottom + 1;
+    });
+    assert.equal(await page.locator('.commit-actions').evaluate(actions => actions.getBoundingClientRect().bottom <= innerHeight), true, 'Expanded details must leave Commit actions visible in short sidebars.');
+    assert.equal(await page.locator('[data-recent-history]').evaluate(link => {
+      const list = document.querySelector('#kivo-recent-list').getBoundingClientRect();
+      const bounds = link.getBoundingClientRect();
+      return bounds.top >= list.top - 1 && bounds.bottom <= list.bottom + 1;
+    }), true, 'The last preview action must be reachable by keyboard without a nested scroll area.');
+    assert.equal(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth), true);
+    await page.locator('[data-recent-commit]').nth(4).click();
   }
   await page.setViewportSize({ width: 360, height: 820 });
   await page.waitForFunction(() => Math.round(document.querySelector('#commit-message').getBoundingClientRect().height) === 64);
@@ -233,11 +271,12 @@ try {
   await page.waitForSelector('.commit-panel');
   assert.ok(Math.abs((await page.locator('#commit-message').boundingBox()).height - resizedHeight) <= 2, 'A resized message area must survive Webview reloads.');
   assert.equal(await page.locator('#commit-message').inputValue(), 'Preserve draft during resize');
-  await page.evaluate(() => sessionStorage.setItem('kivo-fixture-state', JSON.stringify({ commitPanelHeight: 260, commitMessage: 'Legacy draft' })));
+  await page.evaluate(() => sessionStorage.setItem('kivo-fixture-state', JSON.stringify({ commitPanelHeight: 260, commitMessage: 'Legacy draft', recentCommitsExpanded: false })));
   await page.reload();
   await page.waitForSelector('.commit-panel');
   assert.equal(Math.round((await page.locator('#commit-message').boundingBox()).height), 64, 'Upgrade must reset the old panel height while keeping the draft.');
   assert.equal(await page.locator('#commit-message').inputValue(), 'Legacy draft');
+  assert.equal(await page.locator('[data-recent-commit]').count(), 5, 'Upgrade must show five commits even when the previous release saved its three-item default.');
   await page.evaluate(() => sessionStorage.removeItem('kivo-fixture-state'));
   await openSurface(page, 'surface=changes');
   const defaultReviewLayout = await page.locator('.commit-changes-tree').evaluate(element => ({
@@ -245,7 +284,7 @@ try {
     form: document.querySelector('.commit-panel').getBoundingClientRect().height,
     recent: document.querySelector('.commit-lower').getBoundingClientRect().height
   }));
-  assert.ok(defaultReviewLayout.files > defaultReviewLayout.viewport / 2, `Changed files must own the majority of the default sidebar: ${JSON.stringify(defaultReviewLayout)}`);
+  assert.ok(defaultReviewLayout.files >= defaultReviewLayout.viewport * .4 && defaultReviewLayout.files > defaultReviewLayout.form && defaultReviewLayout.files > defaultReviewLayout.recent, `Changed files must remain the largest default sidebar area with five recent commits: ${JSON.stringify(defaultReviewLayout)}`);
   const draft = 'fix: keep this draft\n\nA longer explanation.';
   await page.locator('#commit-message').fill(draft);
   await dragVertical(page, '[data-commit-panel-splitter]', 36);

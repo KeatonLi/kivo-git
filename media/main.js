@@ -80,7 +80,6 @@ const ui = {
   commitZonePercent: clamp(Number(initialRepositoryState.commitZonePercent) || COMMIT_ZONE_DEFAULT_PERCENT, 50, 90),
   commitZoneResized: hasCustomCommitSplit(initialRepositoryState),
   recentCommitsCollapsed: initialRepositoryState.recentCommitsCollapsed === true,
-  recentCommitsExpanded: initialRepositoryState.recentCommitsExpanded === true,
   changesScrollTop: Number(initialRepositoryState.changesScrollTop) || 0,
   recentScrollTop: Number(initialRepositoryState.recentScrollTop) || 0,
   recentSelectedHash: undefined,
@@ -258,7 +257,6 @@ function serializeRepositoryState() {
     commitZonePercent: ui.commitZonePercent,
     commitZoneResized: ui.commitZoneResized,
     recentCommitsCollapsed: ui.recentCommitsCollapsed,
-    recentCommitsExpanded: ui.recentCommitsExpanded,
     changesScrollTop: ui.changesScrollTop,
     recentScrollTop: ui.recentScrollTop,
     branchGroupsExpanded: ui.branchGroupsExpanded,
@@ -319,7 +317,6 @@ function restoreRepositoryState(root, state = {}) {
   ui.commitZonePercent = clamp(Number(state.commitZonePercent) || COMMIT_ZONE_DEFAULT_PERCENT, 50, 90);
   ui.commitZoneResized = hasCustomCommitSplit(state);
   ui.recentCommitsCollapsed = state.recentCommitsCollapsed === true;
-  ui.recentCommitsExpanded = state.recentCommitsExpanded === true;
   ui.changesScrollTop = Number(state.changesScrollTop) || 0;
   ui.recentScrollTop = Number(state.recentScrollTop) || 0;
   clearRecentCommitPreview(true);
@@ -1092,7 +1089,7 @@ function renderChanges(s) {
       </footer>
     </div>
     ${ui.recentCommitsCollapsed ? '' : `<div class="commit-zone-splitter" data-commit-zone-splitter role="separator" aria-label="Resize changes and recent commits" aria-controls="kivo-commit-upper kivo-commit-lower" aria-orientation="horizontal" aria-valuenow="${ui.commitZonePercent}" aria-valuemin="50" aria-valuemax="90" tabindex="0" title="Drag to resize. Double-click to fit recent commits to content."></div>`}
-    <div class="commit-lower" id="kivo-commit-lower">
+    <div class="commit-lower ${ui.recentSelectedHash ? 'recent-preview-open' : ''}" id="kivo-commit-lower">
       ${renderRecentCommits(s)}
     </div>
     ${renderFileContextMenu()}`;
@@ -1218,6 +1215,21 @@ function selectRecentCommit(hash, retry = false) {
     if (ui.recentDetailsLoading) post('recentCommitDetails', { hash, root: ui.snapshot.root, requestId: ui.recentRequestId });
   }
   render();
+  if (ui.recentSelectedHash === hash) requestAnimationFrame(() => revealRecentCommit(hash));
+}
+
+function revealRecentCommit(hash) {
+  if (ui.recentSelectedHash !== hash || ui.recentCommitsCollapsed) return;
+  const list = app.querySelector('#kivo-recent-list');
+  const entry = list?.querySelector(`[data-recent-commit="${CSS.escape(hash)}"]`)?.closest('.commit-recent-entry');
+  if (!entry || !list.clientHeight) return;
+  const bounds = list.getBoundingClientRect();
+  const focused = document.activeElement;
+  const target = entry.contains(focused) && !focused.matches('[data-recent-commit]') ? focused : entry;
+  const item = target.getBoundingClientRect();
+  if (item.top < bounds.top || item.height > list.clientHeight) list.scrollTop += item.top - bounds.top;
+  else if (item.bottom > bounds.bottom) list.scrollTop += item.bottom - bounds.bottom;
+  ui.recentScrollTop = list.scrollTop;
 }
 
 function recentCommits(s) { return (s.recentCommits || s.commits || []).slice(0, 5); }
@@ -1237,8 +1249,7 @@ function renderRecentCommitPreview(commit) {
 }
 
 function renderRecentCommits(s) {
-  const all = recentCommits(s);
-  const commits = all.slice(0, ui.recentCommitsExpanded ? 5 : 3);
+  const commits = recentCommits(s);
   return `<section class="commit-recent" aria-label="Recent commits">
     <div class="commit-lower-heading"><button class="commit-recent-toggle" data-action="toggle-recent-commits" aria-label="${ui.recentCommitsCollapsed ? 'Expand' : 'Collapse'} recent commits" aria-expanded="${!ui.recentCommitsCollapsed}" aria-controls="kivo-recent-list">${icon(ui.recentCommitsCollapsed ? 'chevron-right' : 'chevron-down')}<span>Recent commits</span></button><button class="commit-recent-view-all" data-action="show-log" aria-label="Show all commit history">View all</button></div>
     <div class="commit-recent-list" id="kivo-recent-list" ${ui.recentCommitsCollapsed ? 'hidden' : ''}>${commits.length ? commits.map((commit) => {
@@ -1248,7 +1259,7 @@ function renderRecentCommits(s) {
       return `<div class="commit-recent-entry" data-hash="${escapeHtml(commit.hash)}"><button class="commit-recent-row ${commit.unpushedTo ? 'unpushed' : ''}" data-recent-commit="${escapeHtml(commit.hash)}" aria-expanded="${expanded}" ${expanded ? `aria-controls="recent-${escapeHtml(commit.hash)}"` : ''} title="${expanded ? 'Hide' : 'Show'} changed files · ${escapeHtml(commit.subject)}">
         <span class="commit-recent-node" aria-hidden="true"></span><span class="commit-recent-copy"><strong title="${escapeHtml(commit.subject)}">${escapeHtml(commit.subject)}</strong><span class="commit-recent-meta"><code>${escapeHtml(commit.shortHash)}</code>${renderUnpushedBadge(commit)}<span class="commit-recent-author" title="${escapeHtml(commit.author)}">${escapeHtml(commit.author)}</span><time datetime="${escapeHtml(commit.date)}" title="${timestamp}">${escapeHtml(time)}</time></span></span>
       </button>${expanded ? renderRecentCommitPreview(commit) : ''}</div>`;
-    }).join('') : '<div class="commit-recent-empty" role="status">No commits yet. Your first commit will appear here.</div>'}</div>${all.length > 3 && !ui.recentCommitsCollapsed ? `<button class="commit-recent-count-toggle text-button" data-action="toggle-recent-count">${ui.recentCommitsExpanded ? 'Show 3' : 'Show 5'}</button>` : ''}
+    }).join('') : '<div class="commit-recent-empty" role="status">No commits yet. Your first commit will appear here.</div>'}</div>
   </section>`;
 }
 
@@ -2829,13 +2840,6 @@ function handleAction(action) {
     if (expand) app.querySelector('#commit-message')?.focus();
     return;
   }
-  if (action === 'toggle-recent-count') {
-    ui.recentCommitsExpanded = !ui.recentCommitsExpanded;
-    if (!ui.recentCommitsExpanded && !recentCommits(ui.snapshot).slice(0, 3).some(commit => commit.hash === ui.recentSelectedHash)) clearRecentCommitPreview();
-    persist(); render();
-    app.querySelector('[data-action="toggle-recent-count"]')?.focus();
-    return;
-  }
   if (action === 'clear-change-filters') {
     ui.changeQuery = ''; ui.changeFilter = 'all'; persist(); render();
     app.querySelector('#change-search')?.focus();
@@ -3330,6 +3334,7 @@ window.addEventListener('message', (event) => {
     ui.recentDetails = message.type === 'recentCommitDetails' ? message.payload : undefined;
     if (ui.recentDetails) ui.recentDetailsCache.set(hash, ui.recentDetails);
     render();
+    requestAnimationFrame(() => revealRecentCommit(hash));
   }
   if (message.type === 'commitDetails') {
     if (message.payload?.hash !== ui.selectedCommitHash) return;
