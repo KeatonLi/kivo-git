@@ -1292,7 +1292,7 @@ body.commit-zone-resizing, body.commit-zone-resizing * { cursor: row-resize !imp
 .parity-mode .commit-lower {
   flex: 0 1 auto;
   min-height: 33px;
-  max-height: min(148px, 24%, max(33px, calc(100% - 350px)));
+  max-height: min(224px, 32%, max(33px, calc(100% - 300px)));
   display: flex;
   flex-direction: column;
   overflow: hidden;
@@ -1300,6 +1300,7 @@ body.commit-zone-resizing, body.commit-zone-resizing * { cursor: row-resize !imp
   scrollbar-width: thin;
 }
 .parity-mode .recent-resized .commit-upper { flex: 0 0 auto; }
+.parity-mode .commit-lower.recent-preview-open { max-height: min(420px, 48%, max(80px, calc(100% - 300px))); }
 .parity-mode .recent-resized .commit-lower { flex: 1 1 0; max-height: none; }
 .parity-mode .recent-collapsed .commit-lower { flex: 0 0 33px; max-height: 33px; border-top: 1px solid var(--vscode-panel-border, var(--border-subtle)); }
 .parity-mode .commit-recent { min-height: 0; display: flex; flex-direction: column; }
@@ -1347,6 +1348,7 @@ body.commit-zone-resizing, body.commit-zone-resizing * { cursor: row-resize !imp
 .parity-mode .commit-recent-row[aria-expanded="true"] { background: var(--vscode-list-hoverBackground, var(--idea-hover)); }
 .parity-mode .commit-recent-copy { min-width: 0; display: flex; flex-direction: column; gap: 0; }
 .parity-mode .commit-recent-copy strong { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 12px; line-height: 16px; font-weight: 550; }
+.parity-mode .commit-recent-row[aria-expanded="true"] .commit-recent-copy strong { display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 2; white-space: normal; overflow-wrap: anywhere; }
 .parity-mode .commit-recent-meta { min-width: 0; display: flex; align-items: baseline; gap: 6px; color: var(--vscode-descriptionForeground, var(--muted)); font-size: 10px; line-height: 1.3; }
 .parity-mode .commit-recent-meta code { display: none; flex: 0 0 auto; padding: 0; border: 0; background: transparent; color: inherit; font: 10px var(--vscode-editor-font-family, Consolas, monospace); }
 .parity-mode .commit-recent-author { min-width: 0; flex: 1 1 auto; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
@@ -1355,9 +1357,9 @@ body.commit-zone-resizing, body.commit-zone-resizing * { cursor: row-resize !imp
 .parity-mode .commit-recent-branch span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .parity-mode .commit-recent-branch .codicon { font-size: 11px; }
 .parity-mode .commit-recent-date { padding: 4px 5px 2px; color: var(--vscode-descriptionForeground, var(--muted)); font-size: 10px; font-variant-numeric: tabular-nums; }
-.parity-mode .commit-recent-preview { margin: 2px 5px 7px 24px; padding: 2px 0 4px 8px; border-left: 1px solid var(--vscode-panel-border, var(--border-subtle)); }
+.parity-mode .commit-recent-preview { margin: 4px 5px 8px 24px; padding: 4px 0 6px 10px; border-left: 1px solid color-mix(in srgb, var(--vscode-textLink-foreground, var(--accent)) 45%, var(--vscode-panel-border, var(--border-subtle))); }
 .parity-mode .commit-recent-status, .parity-mode .commit-recent-file-count { padding: 4px 0; font-size: 10px; color: var(--vscode-descriptionForeground, var(--muted)); overflow-wrap: anywhere; }
-.parity-mode .commit-recent-file { display: flex; width: 100%; min-width: 0; align-items: center; gap: 5px; padding: 4px 2px; text-align: left; background: transparent; cursor: pointer; font-size: 11px; }
+.parity-mode .commit-recent-file { display: flex; width: 100%; min-width: 0; min-height: 28px; align-items: center; gap: 5px; padding: 5px 3px; border-radius: 3px; text-align: left; background: transparent; cursor: pointer; font-size: 11px; }
 .preview-file-copy { min-width: 0; flex: 1; display: grid; grid-template-columns: minmax(0, 1fr); align-items: baseline; gap: 7px; }
 .preview-file-copy.has-directory { grid-template-columns: minmax(0, max-content) minmax(0, 1fr); }
 .preview-file-name { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-weight: 500; }
@@ -1600,8 +1602,6 @@ body.commit-zone-resizing, body.commit-zone-resizing * { cursor: row-resize !imp
   .commit-review-dialog footer button { width: 100%; }
 }
 
-.parity-mode .commit-recent-count-toggle { flex: 0 0 18px; align-self: flex-end; padding: 0 12px 2px; font-size: 10px; }
-.parity-mode .commit-recent-preview { max-height: 150px; overflow-y: auto; overscroll-behavior: contain; }
-.parity-mode .push-review-dialog, .parity-mode .branch-popup { animation: panel-appear 140ms ease-out; }
+.parity-mode .push-review-dialog, .parity-mode .branch-popup, .parity-mode .commit-recent-preview { animation: panel-appear 140ms ease-out; }
 @keyframes panel-appear { from { opacity: 0; transform: translateY(3px); } to { opacity: 1; transform: translateY(0); } }
-@media (prefers-reduced-motion: reduce) { .parity-mode .push-review-dialog, .parity-mode .branch-popup { animation: none; } }
+@media (prefers-reduced-motion: reduce) { .parity-mode .push-review-dialog, .parity-mode .branch-popup, .parity-mode .commit-recent-preview { animation: none; } }
