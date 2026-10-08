@@ -1104,15 +1104,31 @@ export class IdeaGitViewProvider implements vscode.WebviewViewProvider, vscode.T
     const previous = this.pushReview.current;
     this.pushReview.clear();
     if (previous) await this.postToView(previous.surface, { type: 'pushReviewClosed', id: previous.id });
-    const preview = branch ? await client.pushBranchPreview(branch) : await client.pushPreview();
-    if (requestId !== this.pushPreviewRequestId || generation !== this.syncGeneration || this.selectedWorkspace()?.uri.fsPath !== client.workspaceRoot) return false;
-    if (!preview.ahead) {
-      void vscode.window.showInformationMessage('There are no outgoing commits to push.');
-      return false;
+    const isCurrent = () => requestId === this.pushPreviewRequestId && generation === this.syncGeneration && this.selectedWorkspace()?.uri.fsPath === client.workspaceRoot;
+    await this.postToView(surface, { type: 'pushPreparing', root: client.workspaceRoot, requestId, active: true });
+    try {
+      const target = await client.pushTarget(branch);
+      if (!isCurrent()) return false;
+      let remote = target.remote;
+      if (!remote) {
+        const choice = await vscode.window.showQuickPick(target.remotes.map((name) => ({ label: name })), {
+          title: `Publish ${target.branch}`, placeHolder: 'Choose the remote for this branch'
+        });
+        if (!choice || !isCurrent()) return false;
+        remote = choice.label;
+      }
+      const preview = branch ? await client.pushBranchPreview(target.branch, remote) : await client.pushPreview(remote);
+      if (!isCurrent() || preview.branch !== target.branch) return false;
+      if (!preview.ahead && !preview.publish && !preview.setUpstream) {
+        void vscode.window.showInformationMessage('There are no outgoing commits to push.');
+        return false;
+      }
+      const review = this.pushReview.open({ surface, root: client.workspaceRoot, preview, afterCommit, branch });
+      await this.postToView(surface, { type: 'pushReview', ...review });
+      return true;
+    } finally {
+      await this.postToView(surface, { type: 'pushPreparing', root: client.workspaceRoot, requestId, active: false });
     }
-    const review = this.pushReview.open({ surface, root: client.workspaceRoot, preview, afterCommit, branch });
-    await this.postToView(surface, { type: 'pushReview', ...review });
-    return true;
   }
 
   private async respondPushReview(client: GitClient, surface: KivoSurface, message: Extract<WebviewMessage, { type: 'respondPushReview' }>): Promise<void> {
@@ -1125,7 +1141,7 @@ export class IdeaGitViewProvider implements vscode.WebviewViewProvider, vscode.T
     if (message.choice === 'fetch') { await this.fetchAndReview(client, surface); return; }
     if (review.preview.behind || review.rejection) return;
     const { preview, branch } = review;
-    const pushed = await this.operation('push', 'Pushing…', () => branch ? client.pushBranch(branch, preview) : client.push(preview), 'Push complete', false, surface);
+    const pushed = await this.operation('push', preview.publish ? 'Publishing branch…' : 'Pushing…', () => branch ? client.pushBranch(branch, preview) : client.push(preview), preview.setUpstream ? `Tracking ${preview.remote}/${preview.targetBranch}` : 'Push complete', false, surface);
     if (!pushed && /rejected|non-fast-forward|fetch first|failed to push/i.test(this.syncError || '')) {
       if (this.selectedWorkspace()?.uri.fsPath !== client.workspaceRoot) return;
       const rejected = this.pushReview.open({ ...review, rejection: 'The remote rejected this push. Fetch the latest commits and review the branch before pushing again.' });

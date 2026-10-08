@@ -391,9 +391,103 @@ try {
   await openSurface(page, 'surface=changes&state=no-upstream');
   assert.equal(await page.locator('.unpushed-badge').count(), 0, 'Without a tracking branch, the UI should not guess which commits are unpushed.');
   assert.equal(await page.locator('[data-action="pull-menu"]').isEnabled(), false, 'Pull without a tracking branch should explain why it cannot run.');
+  assert.equal(await page.locator('.commit-toolbar [data-action="push"]').isEnabled(), true, 'A local branch must be publishable before it has an upstream or outgoing count.');
+  assert.match(await page.locator('.commit-publish-hint').textContent(), /Local branch.*no upstream/);
+  assert.equal(await page.locator('.publish-branch-button').evaluate(button => {
+    const icon = button.querySelector('.codicon').getBoundingClientRect();
+    const label = button.querySelector('span:last-child').getBoundingClientRect();
+    return icon.right <= label.left && Math.abs(icon.top + icon.height / 2 - label.top - label.height / 2) <= 1;
+  }), true, 'Publish icon and label should share one compact toolbar row.');
+  await page.locator('#commit-message').fill('Keep my publication draft');
+  await page.locator('[data-select]').first().check({ force: true });
+  await page.locator('[data-action="commit-and-push"]').click();
+  assert.match(await page.locator('.commit-review-push').textContent(), /review where to publish this branch/);
+  await page.getByRole('button', { name: 'Back', exact: true }).click();
+  await page.locator('.commit-toolbar [data-action="push"]').click();
+  await page.getByRole('dialog', { name: 'Publish branch', exact: true }).waitFor();
+  assert.match(await page.locator('.push-publish-note').textContent(), /Creates this remote branch.*upstream/);
+  assert.match(await page.locator('.push-review-empty').textContent(), /No new commits.*still be created/);
+  assert.equal(await page.locator('[data-action="confirm-push-review"]').isEnabled(), true, 'Publishing creates a branch even with zero new commits.');
+  assert.equal(await page.locator('.push-review-warning').count(), 0, 'An unpublished branch is ordinary state, not a push failure.');
+  await page.locator('[data-action="cancel-push-review"]').last().click();
+  assert.equal(await page.evaluate(() => fixture.upstream), '', 'Cancel must not establish tracking.');
+  assert.equal(await page.locator('#commit-message').inputValue(), 'Keep my publication draft');
+  assert.equal(await page.locator('[data-select]:checked').count(), 1);
   await page.locator('[data-action="toolbar-more"]').click();
   await page.locator('[data-toolbar-action="configure-upstream"]').click();
   assert.ok(await page.evaluate(() => window.__vscodeMessages.some((message) => message.type === 'configureUpstream')), 'An untracked branch should offer a direct setup action.');
+
+  await openSurface(page, 'surface=changes&state=publish-ready');
+  await page.locator('.commit-toolbar [data-action="push"]').click();
+  await page.getByRole('dialog', { name: 'Publish branch', exact: true }).waitFor();
+  assert.match(await page.locator('.push-route-target').textContent(), /origin\/feature\/keaton\/ACKk8s/);
+  assert.match(await page.locator('.push-review-summary').textContent(), /3 commits to push.*12 files on branch/);
+  assert.equal(await page.locator('.push-review-commit').count(), 3);
+  for (const viewport of [{ width: 240, height: 420 }, { width: 360, height: 820 }]) {
+    await page.setViewportSize(viewport);
+    assert.equal(await page.locator('[data-action="confirm-push-review"]').evaluate(element => {
+      const rect = element.getBoundingClientRect();
+      return rect.bottom <= innerHeight && rect.left >= 0 && rect.right <= innerWidth;
+    }), true, 'Publication confirmation must stay visible on a short, narrow sidebar.');
+    assert.equal(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth), true);
+  }
+  if (process.env.KIVO_CAPTURE_DIR) {
+    await mkdir(process.env.KIVO_CAPTURE_DIR, { recursive: true });
+    await page.screenshot({ path: path.join(process.env.KIVO_CAPTURE_DIR, '22-publish-branch.png'), animations: 'disabled' });
+  }
+  await page.locator('[data-action="confirm-push-review"]').click();
+  assert.equal(await page.locator('.commit-publish-hint').count(), 0, 'Successful publication should clear the no-upstream hint.');
+  assert.equal(await page.locator('.publish-branch-button').count(), 0);
+  assert.equal(await page.evaluate(() => fixture.upstream), 'origin/feature/keaton/ACKk8s');
+
+  await openSurface(page, 'surface=changes&state=upstream-gone');
+  assert.match(await page.locator('.commit-publish-hint').textContent(), /Remote branch missing/);
+  assert.equal(await page.locator('.commit-toolbar [data-action="push"]').isEnabled(), true);
+  assert.equal(await page.locator('[data-action="pull-menu"]').isEnabled(), false);
+
+  await openSurface(page, 'surface=changes&state=no-remote');
+  assert.match(await page.locator('.commit-publish-hint').textContent(), /No remote configured.*add a Git remote/);
+
+  await openSurface(page, 'surface=changes&state=no-upstream');
+  await page.evaluate(() => { window.__holdPushReview = true; });
+  await page.locator('.commit-toolbar [data-action="push"]').click();
+  assert.equal(await page.locator('.commit-toolbar [data-action="push"]').isEnabled(), false);
+  assert.equal(await page.locator('.commit-toolbar [data-action="push"] .codicon-loading').count(), 1, 'Inspecting the publication destination should show progress.');
+  await page.evaluate(() => {
+    emit({ type: 'pushPreparing', root: fixture.root, requestId: 7, active: true });
+    emit({ type: 'pushPreparing', root: fixture.root, requestId: 6, active: false });
+  });
+  assert.equal(await page.locator('.commit-toolbar [data-action="push"]').isEnabled(), false, 'An older response cannot stop a newer destination check.');
+  await page.evaluate(() => emit({ type: 'pushPreparing', root: fixture.root, requestId: 7, active: false }));
+  assert.equal(await page.locator('.commit-toolbar [data-action="push"]').isEnabled(), true, 'Failed or cancelled destination checks restore Publish.');
+  await page.evaluate(() => emit({ type: 'pushReview', id: 8, root: fixture.root, afterCommit: false,
+    preview: { branch: fixture.branch, upstream: `origin/${fixture.branch}`, remote: 'origin', targetBranch: fixture.branch,
+      head: fixture.commits[0].hash, upstreamOid: fixture.commits[0].hash, publish: false, setUpstream: true,
+      ahead: 0, behind: 0, fileCount: 0, commits: [] } }));
+  await page.getByRole('dialog', { name: 'Connect branch', exact: true }).waitFor();
+  assert.match(await page.locator('.push-publish-note').textContent(), /Uses the existing remote branch/);
+  assert.match(await page.locator('[data-action="confirm-push-review"]').textContent(), /Set upstream/);
+  await page.keyboard.press('Escape');
+
+  await page.setViewportSize({ width: 1200, height: 500 });
+  await openSurface(page, 'surface=history&state=no-upstream');
+  const unpublishedCurrent = page.locator('.log-branch-row.current');
+  assert.match(await unpublishedCurrent.locator('.branch-publish-status').textContent(), /No upstream/);
+  await unpublishedCurrent.click({ button: 'right' });
+  assert.match(await page.locator('[data-branch-context-action="push"]').textContent(), /Publish Branch/);
+  assert.equal(await page.locator('[data-branch-context-action="update"]').count(), 0);
+  await page.locator('[data-branch-context-action="push"]').click();
+  await page.getByRole('dialog', { name: 'Publish branch', exact: true }).waitFor();
+  await page.keyboard.press('Escape');
+  const unpublishedOther = 'feature/team/analytics-uv-pv';
+  await page.locator(`[data-log-branch="${unpublishedOther}"]`).click({ button: 'right' });
+  await page.locator('[data-branch-context-action="push"]').click();
+  await page.getByRole('dialog', { name: 'Publish branch', exact: true }).waitFor();
+  assert.match(await page.locator('.push-review-route').textContent(), /feature\/team\/analytics-uv-pv/);
+  assert.ok(await page.evaluate(branch => window.__vscodeMessages.some(message => message.type === 'pushBranch' && message.branch === branch), unpublishedOther));
+  assert.equal(await unpublishedCurrent.getAttribute('data-log-branch'), 'feature/keaton/ACKk8s');
+
+  await page.setViewportSize({ width: 360, height: 820 });
 
   await openSurface(page, 'surface=changes&state=push-ready');
   await page.locator('#commit-message').fill('Keep my next commit draft');

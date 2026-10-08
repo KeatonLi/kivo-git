@@ -90,7 +90,18 @@ describe('History branch status', () => {
   it('does not claim a remote difference for an untracked or clean current branch', async () => {
     const untracked = await renderBranches({ ...snapshot, upstream: '', behind: 0, ahead: 0 });
     expect(untracked.match(/data-log-branch="main"[^>]*>(.*?)<\/button>/)?.[1]).not.toContain('branch-sync-indicator');
+    expect(untracked).toContain('No upstream branch. Right-click to publish this local branch.');
     const clean = await renderBranches({ ...snapshot, behind: 0, ahead: 0 });
     expect(clean.match(/data-log-branch="main"[^>]*>(.*?)<\/button>/)?.[1]).not.toContain('branch-sync-indicator');
+  });
+
+  it('explains a missing upstream and removes the Update action for a deleted remote branch', async () => {
+    const html = await renderBranches({ ...snapshot, upstreamGone: true, branches: [
+      ...snapshot.branches,
+      { name: 'deleted', current: false, remote: false, upstream: 'origin/deleted', upstreamGone: true }
+    ] });
+    expect(html).toContain('Remote branch is missing. Right-click to publish it again.');
+    expect(html).toContain('Remote missing');
+    expect(html).not.toContain('data-update-branch="deleted"');
   });
 });

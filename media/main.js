@@ -112,6 +112,7 @@ const ui = {
   commitMessage: initialRepositoryState.commitMessage || '',
   commitReviewOpen: false,
   pushReview: undefined,
+  pushPreparing: undefined,
   pushSelectedHash: undefined,
   pushDetails: undefined,
   pushDetailsLoading: false,
@@ -298,6 +299,7 @@ function restoreRepositoryState(root, state = {}) {
   ui.commitMessage = state.commitMessage || '';
   ui.commitReviewOpen = false;
   ui.pushReview = undefined;
+  ui.pushPreparing = undefined;
   clearPushCommitPreview(true);
   ui.commitReviewAndPush = false;
   ui.graphQuery = state.graphQuery || '';
@@ -1001,18 +1003,20 @@ function renderCommitRepository(s) {
 function renderCommitToolbar(s) {
   const syncing = ui.syncPhase === 'fetching';
   const fetchIcon = syncing || ui.operationKind === 'fetch' ? 'loading' : 'refresh';
-  const hasUpstream = Boolean(s.upstream);
+  const hasUpstream = Boolean(s.upstream) && !s.upstreamGone;
+  const canPublish = !hasUpstream && s.branch !== '(detached)';
+  const preparing = ui.pushPreparing?.active;
   const pullTitle = hasUpstream
     ? s.behind ? `Pull ${s.behind} known incoming commit${s.behind === 1 ? '' : 's'} (checks remote)` : 'Pull from upstream (checks remote for new commits)'
-    : 'Set an upstream branch before pulling';
-  const pushTitle = s.ahead ? `Push ${s.ahead} outgoing commit${s.ahead === 1 ? '' : 's'}` : 'No commits to push';
+    : s.upstreamGone ? 'Remote branch is missing. Publish it again before pulling.' : 'Publish or set an upstream branch before pulling';
+  const pushTitle = preparing ? 'Checking push destination…' : canPublish ? s.upstreamGone ? 'Publish this branch again; its remote branch is missing' : 'Publish this local branch and set its upstream' : s.ahead ? `Push ${s.ahead} outgoing commit${s.ahead === 1 ? '' : 's'}` : 'No commits to push';
   return `<header class="commit-toolbar" aria-label="Commit tool window actions" aria-busy="${syncing}">
     <button class="idea-toolbar-button" data-action="refresh" aria-label="Refresh changes" title="Refresh changes" ${ui.busy ? 'disabled' : ''}>${icon('refresh')}</button>
     <div class="sync-action-wrap compact-sync-action">
     <button class="idea-toolbar-button ${s.behind ? 'has-count incoming-count' : ''}" data-action="pull-menu" aria-label="${escapeHtml(pullTitle)}" title="${escapeHtml(pullTitle)}" aria-haspopup="menu" aria-expanded="${ui.pullMenuOpen}" ${!hasUpstream || ui.busy || syncing ? 'disabled' : ''}>${icon('arrow-down')}${s.behind ? `<span class="tool-count">${s.behind}</span>` : ''}</button>
       ${renderPullMenu()}
     </div>
-    <button class="idea-toolbar-button ${s.ahead ? 'has-count outgoing-count' : ''}" data-action="push" aria-label="${escapeHtml(pushTitle)}" title="${escapeHtml(pushTitle)}" ${!hasUpstream || !s.ahead || ui.busy || syncing ? 'disabled' : ''}>${icon('arrow-up')}${s.ahead ? `<span class="tool-count">${s.ahead}</span>` : ''}</button>
+    <button class="idea-toolbar-button ${canPublish ? 'publish-branch-button' : s.ahead ? 'has-count outgoing-count' : ''}" data-action="push" aria-label="${escapeHtml(pushTitle)}" title="${escapeHtml(pushTitle)}" ${!canPublish && (!hasUpstream || !s.ahead) || ui.busy || syncing || preparing ? 'disabled' : ''}>${icon(preparing ? 'loading' : canPublish ? 'cloud-upload' : 'arrow-up', preparing ? 'codicon-modifier-spin' : '')}${canPublish ? '<span>Publish…</span>' : s.ahead ? `<span class="tool-count">${s.ahead}</span>` : ''}</button>
     <button class="idea-toolbar-button" data-action="show-log" aria-label="Open Kivo Git History in bottom Panel" title="Open History in bottom Panel">${kivoIcon('graph', 'kivo-toolbar-mark')}</button>
     <span class="toolbar-spacer"></span>
     <button class="idea-toolbar-button" data-action="search-changes" aria-label="${ui.changeSearchOpen ? 'Close changed-file search' : 'Search changed files'}" title="${ui.changeSearchOpen ? 'Close changed-file search' : 'Search changed files'}" aria-expanded="${ui.changeSearchOpen}">${icon(ui.changeSearchOpen ? 'close' : 'search')}</button>
@@ -1073,6 +1077,7 @@ function renderChanges(s) {
     <div class="commit-upper" id="kivo-commit-upper" ${ui.commitZoneResized && !ui.recentCommitsCollapsed ? `style="flex-basis:${ui.commitZonePercent}%"` : ''}>
       ${renderCommitRepository(s)}
       ${renderCommitToolbar(s)}
+      ${s.branch !== '(detached)' && (!s.upstream || s.upstreamGone) ? `<div class="commit-publish-hint" role="status">${icon('cloud')}${escapeHtml(s.upstreamGone ? 'Remote branch missing · publish it again' : s.remotes?.length === 0 ? 'No remote configured · add a Git remote to publish' : 'Local branch · no upstream yet')}</div>` : ''}
       ${renderConflictState(s)}
       <div class="commit-changes-heading" role="heading" aria-level="2"><span class="changes-heading-label">${kivoIcon('changes', 'changes-heading-icon')}<span>Changes</span></span><small>${filtersActive ? `${filteredTotal}/${s.changes.length}` : s.changes.length} ${s.changes.length === 1 ? 'file' : 'files'}</small></div>
       ${ui.changeSearchOpen ? `<div class="commit-change-search"><input id="change-search" type="search" aria-label="Search changed files by path or status" placeholder="Path or status…" value="${escapeHtml(ui.changeQuery)}"><select id="change-filter" aria-label="Filter changed files by type or Git state"><option value="all" ${ui.changeFilter === 'all' ? 'selected' : ''}>All changes</option><option value="staged" ${ui.changeFilter === 'staged' ? 'selected' : ''}>Staged</option><option value="worktree" ${ui.changeFilter === 'worktree' ? 'selected' : ''}>Working tree</option><option value="modified" ${ui.changeFilter === 'modified' ? 'selected' : ''}>Modified</option><option value="added" ${ui.changeFilter === 'added' ? 'selected' : ''}>Added</option><option value="deleted" ${ui.changeFilter === 'deleted' ? 'selected' : ''}>Deleted</option><option value="renamed" ${ui.changeFilter === 'renamed' ? 'selected' : ''}>Renamed</option><option value="untracked" ${ui.changeFilter === 'untracked' ? 'selected' : ''}>Untracked</option><option value="conflict" ${ui.changeFilter === 'conflict' ? 'selected' : ''}>Conflicts</option></select><kbd>Esc</kbd></div>` : ''}
@@ -1098,7 +1103,7 @@ function renderChanges(s) {
 function renderCommitReview(s) {
   const { selectedChanges } = changeSelection();
   const partial = selectedChanges.filter((change) => change.indexStatus !== '.' && change.workingTreeStatus !== '.').length;
-  const destination = ui.commitReviewAndPush ? `<p class="commit-review-push">After committing, you will review the push to <strong>${escapeHtml(s.upstream || 'the configured upstream')}</strong>.</p>` : '';
+  const destination = ui.commitReviewAndPush ? `<p class="commit-review-push">${!s.upstream || s.upstreamGone ? 'Commit locally, then review where to publish this branch and set its upstream.' : `After committing, you will review the push to <strong>${escapeHtml(s.upstream)}</strong>.`}</p>` : '';
   return `<div class="commit-review-overlay"><div class="commit-review-scrim" data-action="close-commit-review"></div>
     <section class="commit-review-dialog" role="dialog" aria-modal="true" aria-labelledby="commit-review-title" aria-describedby="commit-review-description">
       <header><div><small>BEFORE COMMIT</small><h2 id="commit-review-title">Review ${selectedChanges.length} selected ${selectedChanges.length === 1 ? 'file' : 'files'}</h2></div><button class="idea-toolbar-button" data-action="close-commit-review" aria-label="Close commit review" title="Close review">${icon('close')}</button></header>
@@ -1116,20 +1121,24 @@ function renderPushReview(s) {
   const review = ui.pushReview;
   const p = review.preview;
   const blocked = Boolean(p.behind || review.rejection);
+  const connecting = p.setUpstream && !p.publish;
+  const confirmLabel = p.publish ? 'Publish branch' : connecting ? p.ahead ? 'Push and set upstream' : 'Set upstream' : `Push ${p.ahead} ${p.ahead === 1 ? 'commit' : 'commits'}`;
   const warning = review.rejection || (p.behind ? `${p.behind} incoming ${p.behind === 1 ? 'commit' : 'commits'}. Fetch and review the branch before pushing.` : '');
   return `<div class="push-review-overlay"><div class="push-review-scrim" data-action="cancel-push-review"></div>
     <section class="push-review-dialog" role="dialog" aria-modal="true" aria-labelledby="push-review-title" aria-describedby="push-review-description">
-      <header><div><small>${icon('repo')} ${escapeHtml(s.repositoryName)}</small><h2 id="push-review-title">${icon('arrow-up')} ${review.rejection ? 'Push rejected' : 'Push commits'}</h2></div><button data-action="cancel-push-review" aria-label="Close push review" title="Close">${icon('close')}</button></header>
+      <header><div><small>${icon('repo')} ${escapeHtml(s.repositoryName)}</small><h2 id="push-review-title">${icon(p.publish ? 'cloud-upload' : 'arrow-up')} ${review.rejection ? 'Push rejected' : p.publish ? 'Publish branch' : connecting ? 'Connect branch' : 'Push commits'}</h2></div><button data-action="cancel-push-review" aria-label="Close push review" title="Close">${icon('close')}</button></header>
       <div class="push-review-body"><p id="push-review-description">${review.afterCommit ? 'Commit saved locally. Review the destination.' : 'Review the destination and outgoing commits.'}</p>
         <div class="push-review-route"><div><span class="push-route-label">Local</span>${icon('git-branch')}<strong>${escapeHtml(p.branch)}</strong></div><div class="push-route-target"><span class="push-route-label">Remote</span>${icon('cloud')}<strong>${escapeHtml(`${p.remote}/${p.targetBranch}`)}</strong></div></div>
+        ${p.setUpstream ? `<p class="push-publish-note">${icon('git-branch')}<span>${p.publish ? 'Creates this remote branch' : 'Uses the existing remote branch'} and sets it as the local branch’s upstream.</span></p>` : ''}
         ${warning ? `<p class="push-review-warning" role="alert">${icon('warning')}<span>${escapeHtml(warning)}</span></p>` : ''}
-        <div class="push-review-summary"><span><b>${p.ahead}</b> ${p.ahead === 1 ? 'commit' : 'commits'} to push</span><span><b>${p.fileCount}</b> ${p.fileCount === 1 ? 'changed file' : 'changed files'}</span></div>
+        <div class="push-review-summary"><span><b>${p.ahead}</b> ${p.ahead === 1 ? 'commit' : 'commits'} to push</span><span><b>${p.fileCount}</b> ${p.publish ? p.fileCount === 1 ? 'file on branch' : 'files on branch' : p.fileCount === 1 ? 'changed file' : 'changed files'}</span></div>
+        ${!p.ahead && p.setUpstream ? `<p class="push-review-empty">${p.publish ? 'No new commits. The remote branch will still be created at' : 'No new commits. Tracking will be set at'} <code>${escapeHtml(p.head.slice(0, 7))}</code>.</p>` : ''}
         <div class="push-review-commits" aria-label="Outgoing commits">${p.commits.map((commit) => {
           const expanded = ui.pushSelectedHash === commit.hash;
           return `<div class="push-review-entry" data-hash="${escapeHtml(commit.hash)}"><button class="push-review-commit" data-push-commit="${escapeHtml(commit.hash)}" aria-expanded="${expanded}" ${expanded ? `aria-controls="push-files-${review.id}-${escapeHtml(commit.hash)}"` : ''} title="${expanded ? 'Hide' : 'Show'} changed files · ${escapeHtml(commit.subject)}">${icon(expanded ? 'chevron-down' : 'chevron-right', 'push-commit-disclosure')}<span class="push-commit-dot" aria-hidden="true"></span><code title="${escapeHtml(commit.hash)}">${escapeHtml(commit.hash.slice(0, 7))}</code><span class="push-commit-subject">${escapeHtml(commit.subject)}</span></button>${expanded ? renderPushCommitPreview(commit) : ''}</div>`;
         }).join('')}${p.ahead > p.commits.length ? `<p class="push-review-more">+ ${p.ahead - p.commits.length} more commits</p>` : ''}</div>
       </div>
-      <footer><button class="push-review-cancel" data-action="cancel-push-review">Cancel</button><button class="primary-button" data-action="${blocked ? 'fetch-push-review' : 'confirm-push-review'}">${icon(blocked ? 'sync' : 'arrow-up')} ${blocked ? 'Fetch and Review' : `Push ${p.ahead} ${p.ahead === 1 ? 'commit' : 'commits'}`}</button></footer>
+      <footer><button class="push-review-cancel" data-action="cancel-push-review">Cancel</button><button class="primary-button" data-action="${blocked ? 'fetch-push-review' : 'confirm-push-review'}">${icon(blocked ? 'sync' : p.publish ? 'cloud-upload' : 'arrow-up')} ${blocked ? 'Fetch and Review' : confirmLabel}</button></footer>
     </section>
   </div>`;
 }
@@ -1451,7 +1460,7 @@ function renderLogBranchRow(branch, depth = 0, sync = '') {
   const kind = branch.kind === 'tag' ? 'tag' : 'branch';
   const label = branch.leaf || branch.name;
   const row = `<button class="log-branch-row ${branch.current ? 'current' : ''} ${ui.graphBranchFilter === branch.name ? 'selected' : ''}" style="--tree-indent:${depth * 13}px" data-log-branch="${escapeHtml(branch.name)}" data-branch-ref="${escapeHtml(branch.name)}" data-branch-remote="${branch.remote ? 'true' : 'false'}" data-branch-kind="${kind}" aria-pressed="${ui.graphBranchFilter === branch.name}" aria-haspopup="menu" title="Show ${escapeHtml(branch.name)} history · Right-click for ${kind} actions">${icon(branch.remote ? 'cloud' : kind === 'tag' ? 'tag' : 'git-branch')}<span>${escapeHtml(label)}</span>${sync}${branch.current ? '<small>HEAD</small>' : ''}</button>`;
-  if (branch.remote || branch.current || kind === 'tag' || !branch.upstream) return row;
+  if (branch.remote || branch.current || kind === 'tag' || !branch.upstream || branch.upstreamGone) return row;
   const title = `Update ${branch.name} from ${branch.upstream} (fast-forward only)`;
   return `<div class="log-branch-entry ${ui.graphBranchFilter === branch.name ? 'selected' : ''}">${row}<button class="log-branch-update" data-update-branch="${escapeHtml(branch.name)}" aria-label="${escapeHtml(title)}" title="${escapeHtml(title)}" ${ui.busy ? 'disabled' : ''}>${icon('arrow-down')}</button></div>`;
 }
@@ -1459,7 +1468,11 @@ function renderLogBranchRow(branch, depth = 0, sync = '') {
 function renderLogBranchSync(branch, snapshot) {
   if (branch.remote || branch.kind === 'tag') return '';
   const upstream = branch.current ? snapshot.upstream : branch.upstream;
-  if (!upstream) return '';
+  if (!upstream || branch.upstreamGone || branch.current && snapshot.upstreamGone) {
+    const gone = branch.upstreamGone || branch.current && snapshot.upstreamGone;
+    const title = gone ? 'Remote branch is missing. Right-click to publish it again.' : 'No upstream branch. Right-click to publish this local branch.';
+    return `<small class="branch-publish-status" title="${title}">${gone ? 'Remote missing' : 'No upstream'}</small>`;
+  }
   const behind = branch.current ? snapshot.behind : branch.behind;
   const ahead = branch.current ? snapshot.ahead : branch.ahead;
   const incoming = behind !== undefined ? behind > 0 : branch.tracking?.includes('<');
@@ -1514,11 +1527,13 @@ function renderBranchContextMenu() {
   const menu = ui.branchContextMenu;
   if (!menu) return '';
   const width = 264;
-  const trackedLocal = menu.kind === 'branch' && !menu.remote && ui.snapshot?.branches.some((branch) => branch.name === menu.ref && Boolean(branch.upstream));
+  const local = menu.kind === 'branch' && !menu.remote;
+  const selected = ui.snapshot?.branches.find((branch) => !branch.remote && branch.name === menu.ref);
+  const trackedLocal = local && Boolean(menu.current ? ui.snapshot?.upstream : selected?.upstream) && !(menu.current ? ui.snapshot?.upstreamGone : selected?.upstreamGone);
   const actionCount = 3 + (menu.kind === 'branch' && !menu.current ? 1 : 0)
     + (menu.kind === 'branch' && !menu.current ? 3 : 0)
     + (menu.kind === 'branch' && !menu.remote ? 1 : 0)
-    + (trackedLocal ? 2 : 0);
+    + (local ? trackedLocal ? 2 : 1 : 0);
   const height = 40 + actionCount * 27 + 12;
   const left = clamp(menu.x, 8, Math.max(8, window.innerWidth - width - 8));
   const top = clamp(menu.y, 8, Math.max(8, window.innerHeight - height - 8));
@@ -1526,7 +1541,8 @@ function renderBranchContextMenu() {
   return `<div class="context-menu branch-context-menu" data-branch-context role="menu" aria-label="Actions for ${escapeHtml(menu.ref)}" style="left:${left}px;top:${top}px">
     <div class="context-menu-title branch-context-title"><span>${icon(menu.remote ? 'cloud' : menu.kind === 'tag' ? 'tag' : 'git-branch')}</span><strong title="${escapeHtml(menu.ref)}">${escapeHtml(menu.ref)}</strong></div>
     ${menu.kind === 'branch' && !menu.current ? `<button role="menuitem" data-branch-context-action="checkout" ${ui.busy ? 'disabled' : ''}>${icon('check')}<span>Checkout</span></button>` : ''}
-    ${trackedLocal ? `<button role="menuitem" data-branch-context-action="update" ${ui.busy ? 'disabled' : ''}>${icon('arrow-down')}<span>Update from Remote</span></button><button role="menuitem" data-branch-context-action="push" ${ui.busy ? 'disabled' : ''}>${icon('arrow-up')}<span>Push…</span></button>` : ''}
+    ${trackedLocal ? `<button role="menuitem" data-branch-context-action="update" ${ui.busy ? 'disabled' : ''}>${icon('arrow-down')}<span>Update from Remote</span></button>` : ''}
+    ${local ? `<button role="menuitem" data-branch-context-action="push" ${ui.busy || ui.pushPreparing?.active ? 'disabled' : ''}>${icon(trackedLocal ? 'arrow-up' : 'cloud-upload')}<span>${trackedLocal ? 'Push…' : 'Publish Branch…'}</span></button>` : ''}
     ${menu.kind === 'branch' && !menu.current ? `<button role="menuitem" data-branch-context-action="compare" ${ui.busy ? 'disabled' : ''}>${icon('compare-changes')}<span>Compare with Current</span></button>` : ''}
     <button role="menuitem" data-branch-context-action="new" ${ui.busy ? 'disabled' : ''}>${icon('git-branch-create')}<span>New Branch from this ${refLabel}…</span></button>
     ${menu.kind === 'branch' && !menu.current ? `<button role="menuitem" data-branch-context-action="merge" ${ui.busy ? 'disabled' : ''}>${icon('git-merge')}<span>Merge into Current…</span></button>` : ''}
@@ -3025,10 +3041,6 @@ function commit(andPush = false) {
     toast(blocker, 'error');
     return;
   }
-  if (andPush && !ui.snapshot?.upstream) {
-    toast('Set an upstream before using Commit and Push. You can still commit locally.', 'error');
-    return;
-  }
   ui.commitReviewAndPush = andPush;
   ui.commitReviewOpen = true;
   render();
@@ -3077,6 +3089,12 @@ function dismissToast(element) {
 
 window.addEventListener('message', (event) => {
   const message = event.data;
+  if (message.type === 'pushPreparing') {
+    if (message.root !== ui.snapshot?.root || ui.pushPreparing?.requestId > message.requestId) return;
+    ui.pushPreparing = { requestId: message.requestId, active: message.active };
+    render();
+    return;
+  }
   if (message.type === 'workflowResult') {
     const w = ui.workflow;
     if (!w || w.requestId !== message.requestId || w.root !== message.root || ui.snapshot?.root !== message.root) return;
@@ -3289,6 +3307,7 @@ window.addEventListener('message', (event) => {
   if (message.type === 'empty' || message.type === 'repositoryLoading') {
     persist();
     ui.pushReview = undefined;
+    ui.pushPreparing = undefined;
     clearPushCommitPreview(true);
     clearRecentCommitPreview(true);
     ui.snapshot = undefined;

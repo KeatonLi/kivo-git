@@ -1,6 +1,7 @@
 import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
 import path from 'node:path';
+import { createHash } from 'node:crypto';
 import { ChangelistStore } from './ChangelistStore';
 import { parsePorcelainV2 } from './statusParser';
 import { GitWorkflows } from './GitWorkflows';
@@ -65,13 +66,14 @@ export class GitClient {
 
   async snapshot(commitLimit = 80, historyRef?: string): Promise<RepositorySnapshot> {
     if (!this.store) await this.initialize();
-    const [statusOutput, branches, tags, topLevel, identity, operation] = await Promise.all([
+    const [statusOutput, branches, tags, topLevel, identity, operation, remotes] = await Promise.all([
       this.run(['status', '--porcelain=v2', '--branch', '-z', '--untracked-files=all']),
       this.getBranches(),
       this.getTags(),
       this.run(['rev-parse', '--show-toplevel']),
       this.getCommitIdentity(),
-      this.workflows.operationState()
+      this.workflows.operationState(),
+      this.getRemotes()
     ]);
     const parsed = parsePorcelainV2(statusOutput);
     // Use the same opaque repository identity as every host request and response.
@@ -99,6 +101,8 @@ export class GitClient {
       identity,
       operation,
       ...parsed,
+      upstreamGone: headBranch?.upstreamGone,
+      remotes,
       changelists: await this.store!.group(parsed.changes),
       branches,
       tags,
@@ -149,6 +153,7 @@ export class GitClient {
         current: head === '*',
         remote: refname.startsWith('refs/remotes/'),
         upstream: upstream || undefined,
+        upstreamGone: trackCounts === '[gone]' || undefined,
         tracking: tracking || undefined,
         ahead: upstream && trackCounts !== '[gone]' ? Number(ahead?.[1] || 0) : undefined,
         behind: upstream && trackCounts !== '[gone]' ? Number(behind?.[1] || 0) : undefined
@@ -578,37 +583,81 @@ export class GitClient {
     // `branch -f` refuses a branch checked out in any worktree.
     await this.run(['branch', '-f', branch, nextOid]);
   }
-  async pushPreview(): Promise<PushPreview> {
-    const branch = (await this.run(['symbolic-ref', '--quiet', '--short', 'HEAD']).catch(() => '')).trim();
-    if (!branch) throw new Error('Create or switch to a branch before pushing from detached HEAD.');
-    return this.pushBranchPreview(branch);
+  private async getRemotes(): Promise<string[]> {
+    return (await this.run(['remote'])).split('\n').filter(Boolean);
   }
 
-  async pushBranchPreview(branch: string): Promise<PushPreview> {
+  async pushTarget(branch?: string): Promise<{ branch: string; remote?: string; targetBranch: string; remotes: string[]; setUpstream: boolean }> {
+    branch ||= (await this.run(['symbolic-ref', '--quiet', '--short', 'HEAD']).catch(() => '')).trim();
+    if (!branch) throw new Error('Create or switch to a branch before pushing from detached HEAD.');
     if (!branch || branch.startsWith('-') || /[\r\n]/.test(branch)) throw new Error('Choose a valid local branch.');
     const ref = `refs/heads/${branch}`;
     if (!(await this.run(['show-ref', '--verify', '--hash', ref]).catch(() => '')).trim()) throw new Error(`Local branch ${branch} no longer exists.`);
-    const upstreamExpression = `${branch}@{upstream}`;
-    const [remote, mergeRef, upstream, head] = await Promise.all([
+    const [remote, mergeRef, remotes] = await Promise.all([
       this.run(['config', '--get', `branch.${branch}.remote`]).catch(() => ''),
       this.run(['config', '--get', `branch.${branch}.merge`]).catch(() => ''),
-      this.run(['rev-parse', '--abbrev-ref', '--symbolic-full-name', upstreamExpression]).catch(() => ''),
-      this.run(['rev-parse', '--verify', ref])
+      this.getRemotes()
     ]);
-    const remoteName = remote.trim();
-    const targetBranch = mergeRef.trim().replace(/^refs\/heads\//, '');
-    if (!remoteName || remoteName === '.' || !mergeRef.trim().startsWith('refs/heads/') || !targetBranch || !upstream.trim()) {
-      throw new Error('This branch has no pushable upstream. Configure its remote tracking branch before pushing.');
+    if (!remotes.length) throw new Error('No Git remote is configured. Add a remote before publishing this branch.');
+    if (remote.trim() === '.') throw new Error('This branch tracks another local branch. Choose a remote tracking branch before pushing.');
+    const configured = Boolean(remote.trim() && mergeRef.trim().startsWith('refs/heads/'));
+    if (configured && !remotes.includes(remote.trim())) throw new Error(`The configured remote ${remote.trim()} no longer exists. Set a new tracking branch before pushing.`);
+    return {
+      branch, remotes, remote: configured ? remote.trim() : remotes.length === 1 ? remotes[0] : undefined,
+      targetBranch: configured ? mergeRef.trim().slice('refs/heads/'.length) : branch,
+      setUpstream: !configured
+    };
+  }
+
+  async pushPreview(remote?: string): Promise<PushPreview> {
+    const target = await this.pushTarget();
+    return this.pushBranchPreview(target.branch, remote);
+  }
+
+  async pushBranchPreview(branch: string, selectedRemote?: string): Promise<PushPreview> {
+    const target = await this.pushTarget(branch);
+    const remoteName = selectedRemote || target.remote;
+    if (!remoteName) throw new Error('Choose a remote to publish this branch.');
+    if (!target.remotes.includes(remoteName) || remoteName.startsWith('-')) throw new Error('The selected remote no longer exists. Reopen Push and choose a remote.');
+    if (!target.setUpstream && remoteName !== target.remote) throw new Error('The tracking destination changed during push review. Open the preview again.');
+    const ref = `refs/heads/${branch}`;
+    const upstreamExpression = `${branch}@{upstream}`;
+    const targetRef = `refs/heads/${target.targetBranch}`;
+    const [headOutput, upstreamOutput, cachedOid, pushUrls, fetchUrl] = await Promise.all([
+      this.run(['rev-parse', '--verify', ref]),
+      this.run(['rev-parse', '--abbrev-ref', '--symbolic-full-name', upstreamExpression]).catch(() => ''),
+      this.run(['rev-parse', '--verify', `${upstreamExpression}^{commit}`]).catch(() => ''),
+      this.run(['remote', 'get-url', '--push', '--all', remoteName]),
+      this.run(['remote', 'get-url', remoteName])
+    ]);
+    const urls = pushUrls.trim().split('\n').filter(Boolean);
+    if (urls.length !== 1) throw new Error('This remote has multiple push URLs. Choose a remote with a single push destination.');
+    const head = headOutput.trim();
+    const destinationId = createHash('sha256').update(urls[0]!).digest('hex');
+    let upstreamOid = cachedOid.trim();
+    if (target.setUpstream || !upstreamOid) {
+      // Inspect the push URL: a same-name server branch can exist even without
+      // a local tracking ref. Fetch its objects without setting local tracking.
+      const remoteRef = await this.run(['ls-remote', '--heads', '--', urls[0]!, targetRef]);
+      upstreamOid = remoteRef.split('\n').find((line) => line.split('\t')[1] === targetRef)?.split('\t')[0] || '';
+      if (upstreamOid && !(await this.run(['cat-file', '-e', `${upstreamOid}^{commit}`]).then(() => true).catch(() => false))) {
+        await this.run(['fetch', '--no-tags', '--no-write-fetch-head', '--', urls[0]!, targetRef]);
+        await this.run(['cat-file', '-e', `${upstreamOid}^{commit}`]);
+      }
     }
-    const [upstreamOid, counts, commitsOutput, filesOutput] = await Promise.all([
-      this.run(['rev-parse', upstreamExpression]),
-      this.run(['rev-list', '--left-right', '--count', `${ref}...${upstreamExpression}`]),
-      this.run(['log', `${upstreamExpression}..${ref}`, '-n', '12', '--format=%H%x1f%s']),
-      this.run(['diff', '--name-only', '-z', `${upstreamExpression}..${ref}`])
+    const publish = !upstreamOid;
+    // Cached fetch refs describe this server only when fetch and push URLs agree.
+    const range = publish ? [head, ...(fetchUrl.trim() === urls[0] ? ['--not', `--remotes=${remoteName}`] : [])] : [`${upstreamOid}..${head}`];
+    const [counts, commitsOutput, filesOutput] = await Promise.all([
+      this.run(publish ? ['rev-list', '--count', ...range] : ['rev-list', '--left-right', '--count', `${head}...${upstreamOid}`]),
+      this.run(['log', ...range, '-n', '12', '--format=%H%x1f%s']),
+      this.run(publish ? ['ls-tree', '-r', '--name-only', '-z', head] : ['diff', '--name-only', '-z', `${upstreamOid}..${head}`])
     ]);
     const [ahead = 0, behind = 0] = counts.trim().split(/\s+/).map(Number);
     return {
-      branch, upstream: upstream.trim(), upstreamOid: upstreamOid.trim(), remote: remoteName, targetBranch, head: head.trim(),
+      branch, upstream: upstreamOutput.trim() || `${remoteName}/${target.targetBranch}`, upstreamOid,
+      remote: remoteName, targetBranch: target.targetBranch, head, publish,
+      setUpstream: target.setUpstream || publish || !cachedOid.trim(), destinationId,
       ahead, behind,
       commits: commitsOutput.split('\n').filter(Boolean).map((entry) => {
         const [hash = '', subject = ''] = entry.split('\x1f');
@@ -619,23 +668,27 @@ export class GitClient {
   }
 
   async push(expected?: PushPreview): Promise<void> {
-    const current = await this.pushPreview();
+    const current = await this.pushPreview(expected?.remote);
     await this.performPush(current, expected);
   }
 
   async pushBranch(branch: string, expected?: PushPreview): Promise<void> {
     if (expected && expected.branch !== branch) throw new Error('The selected branch changed during push review.');
-    const current = await this.pushBranchPreview(branch);
+    const current = await this.pushBranchPreview(branch, expected?.remote);
     await this.performPush(current, expected);
   }
 
   private async performPush(current: PushPreview, expected?: PushPreview): Promise<void> {
-    if (expected && (current.head !== expected.head || current.upstreamOid !== expected.upstreamOid || current.remote !== expected.remote || current.targetBranch !== expected.targetBranch || current.ahead !== expected.ahead || current.behind !== expected.behind)) {
+    if (expected && (current.branch !== expected.branch || current.head !== expected.head || current.upstreamOid !== expected.upstreamOid || current.remote !== expected.remote || current.targetBranch !== expected.targetBranch || current.ahead !== expected.ahead || current.behind !== expected.behind || Boolean(current.publish) !== Boolean(expected.publish) || Boolean(current.setUpstream) !== Boolean(expected.setUpstream) || current.destinationId !== expected.destinationId)) {
       throw new Error('The branch or outgoing commits changed during push review. Open the preview again.');
     }
-    if (!current.ahead) throw new Error('There are no outgoing commits to push.');
+    if (!current.ahead && !current.publish && !current.setUpstream) throw new Error('There are no outgoing commits to push.');
     if (current.behind) throw new Error('The branch is behind its upstream. Fetch and review before pushing.');
-    await this.run(['push', '--porcelain', current.remote, `refs/heads/${current.branch}:refs/heads/${current.targetBranch}`]);
+    const targetRef = `refs/heads/${current.targetBranch}`;
+    // An empty expected OID allows creation only. A branch created on the server
+    // after review must never turn this publication into an unreviewed update.
+    await this.run(['push', '--porcelain', ...(current.setUpstream ? ['--set-upstream'] : []),
+      ...(current.publish ? [`--force-with-lease=${targetRef}:`] : []), '--', current.remote, `refs/heads/${current.branch}:${targetRef}`]);
   }
 
   async showHeadFile(filePath: string): Promise<string> {
