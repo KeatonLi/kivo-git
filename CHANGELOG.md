@@ -2,6 +2,14 @@
 
 ## Unreleased
 
+## 0.5.5 - 2026-10-08
+
+- Allow Publish from the Commit toolbar and local-branch context menus before an upstream exists, including branches with no new commits and branches not currently checked out.
+- Explain local branches without tracking and remote branches removed after Fetch; offer publication with a reviewed destination and establish tracking after a successful push.
+- Let Commit and Push commit locally and then review first publication. Show progress while inspecting the destination and preserve drafts and selected files when cancelled.
+- Choose a remote explicitly in repositories with several remotes; review existing same-name server branches, retain fast-forward checks, and reject changed commits, destinations or branches created during publication review.
+- Add real Git and browser regressions for first publication, existing and deleted remote branches, cancellation, narrow layouts and concurrent remote creation.
+
 ## 0.5.4 - 2026-10-08
 
 - Show five recent commits by default, including when upgrading from a saved three-item view; remove the redundant Show 3/Show 5 control.

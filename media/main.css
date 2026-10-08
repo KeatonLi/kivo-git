@@ -540,6 +540,10 @@ body.commit-panel-resizing .commit-panel-splitter::after { top: 1px; height: 3px
 .parity-mode .commit-toolbar [data-action="branches"]:hover:not(:disabled),
 .parity-mode .commit-toolbar [data-action="branches"]:focus-visible { color: var(--vscode-textLink-activeForeground, var(--kivo-accent)); background: color-mix(in srgb, var(--kivo-accent) 21%, transparent); }
 .parity-mode .commit-toolbar .idea-toolbar-button { color: var(--vscode-foreground); }
+.parity-mode .commit-toolbar .publish-branch-button { display: inline-flex; align-items: center; width: auto; gap: 5px; padding: 0 6px; color: var(--vscode-textLink-foreground, var(--accent)); font-size: 11px; white-space: nowrap; }
+.commit-publish-hint { display: flex; flex: 0 0 auto; align-items: center; gap: 6px; padding: 5px 12px; color: var(--muted); font-size: 10px; line-height: 1.4; overflow-wrap: anywhere; }
+.commit-publish-hint .codicon { flex: 0 0 auto; font-size: 12px; }
+.parity-mode .log-branch-row .branch-publish-status { flex: 0 0 auto; color: var(--muted); font-size: 9px; }
 .parity-mode .commit-toolbar [data-action="branches"],
 .parity-mode .commit-toolbar [data-action="show-log"] { color: var(--vscode-textLink-foreground, var(--accent)); }
 .parity-mode .idea-toolbar-button .kivo-toolbar-mark { width: 14px; height: 14px; color: inherit; stroke-width: 1.8; }
@@ -1473,6 +1477,9 @@ body.commit-zone-resizing, body.commit-zone-resizing * { cursor: row-resize !imp
 .push-route-target strong, .push-route-target .codicon { color: var(--vscode-textLink-foreground, var(--accent)); }
 .push-review-summary { display: flex; flex-wrap: wrap; gap: 6px 18px; padding: 9px 0; border-top: 1px solid var(--border-subtle); border-bottom: 1px solid var(--border-subtle); color: var(--muted); font-size: 11px; }
 .push-review-summary b { color: var(--vscode-foreground); font-weight: 600; }
+.push-review-dialog .push-publish-note { display: flex; gap: 6px; margin-bottom: 12px; padding: 8px; background: color-mix(in srgb, var(--accent) 8%, transparent); border-left: 2px solid var(--vscode-textLink-foreground, var(--accent)); border-radius: 2px; color: var(--vscode-foreground); }
+.push-publish-note .codicon { flex: 0 0 13px; color: var(--vscode-textLink-foreground, var(--accent)); }
+.push-review-dialog .push-review-empty { padding-top: 12px; }
 .push-review-commits { padding: 6px 0 0; }
 .push-review-commit { width: 100%; min-width: 0; display: grid; grid-template-columns: 12px 5px max-content minmax(0, 1fr); align-items: baseline; gap: 6px; padding: 6px 2px; font-size: 11px; line-height: 1.45; text-align: left; background: transparent; color: var(--vscode-foreground); cursor: pointer; border-radius: 3px; }
 .push-review-commit:hover, .push-review-commit[aria-expanded="true"] { background: var(--vscode-list-hoverBackground, var(--surface-soft)); }

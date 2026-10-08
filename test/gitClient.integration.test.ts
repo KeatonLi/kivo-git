@@ -29,6 +29,15 @@ async function createRepository(): Promise<string> {
   return root;
 }
 
+async function addBareRemote(root: string, name = 'origin', publishMain = true): Promise<string> {
+  const remote = await fs.mkdtemp(path.join(os.tmpdir(), 'ideagit-publish-'));
+  temporaryRepositories.push(remote);
+  await git(remote, ['init', '--bare']);
+  await git(root, ['remote', 'add', name, remote]);
+  if (publishMain) await git(root, ['push', name, 'main']);
+  return remote;
+}
+
 afterEach(async () => {
   await Promise.all(temporaryRepositories.splice(0).map((root) => fs.rm(root, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 })));
 });
@@ -702,9 +711,181 @@ describe('GitClient integration', { timeout: 15_000 }, () => {
     expect(await git(remote, ['rev-parse', 'main'])).toBe(mainHead);
   });
 
-  it('explains when a branch has no pushable upstream', async () => {
+  it('explains when no remote is configured instead of demanding a nonexistent upstream', async () => {
     const root = await createRepository();
-    await expect(new GitClient(root).pushPreview()).rejects.toThrow('no pushable upstream');
+    await expect(new GitClient(root).pushPreview()).rejects.toThrow('No Git remote is configured');
+    expect((await new GitClient(root).snapshot()).remotes).toEqual([]);
+  });
+
+  it('publishes a same-tip branch with zero new commits and establishes its upstream', async () => {
+    const root = await createRepository();
+    const remote = await addBareRemote(root);
+    await git(root, ['switch', '-c', 'release/20261008', '--no-track']);
+    const client = new GitClient(root);
+    const preview = await client.pushPreview();
+    expect(preview).toMatchObject({ branch: 'release/20261008', remote: 'origin', targetBranch: 'release/20261008', publish: true, setUpstream: true, upstreamOid: '', ahead: 0, behind: 0, fileCount: 2, commits: [] });
+    // Reviewing is read-only with respect to branch configuration and server refs.
+    await expect(git(root, ['config', '--get', 'branch.release/20261008.remote'])).rejects.toThrow();
+    await expect(git(remote, ['rev-parse', '--verify', 'release/20261008'])).rejects.toThrow();
+    await client.push(preview);
+    expect(await git(remote, ['rev-parse', 'release/20261008'])).toBe(preview.head);
+    expect(await git(root, ['rev-parse', '--abbrev-ref', 'HEAD@{upstream}'])).toBe('origin/release/20261008');
+    expect(await client.snapshot()).toMatchObject({ upstream: 'origin/release/20261008', ahead: 0, behind: 0, remotes: ['origin'] });
+  });
+
+  it('can commit selected files and publish to an empty remote with no tracking refs', async () => {
+    const root = await createRepository();
+    const remote = await addBareRemote(root, 'company', false);
+    await fs.appendFile(path.join(root, 'alpha.txt'), 'first push\n');
+    await fs.appendFile(path.join(root, 'beta.txt'), 'keep staged\n');
+    await git(root, ['add', 'beta.txt']);
+    const client = new GitClient(root);
+    await client.commit('first publication', ['alpha.txt']);
+    const preview = await client.pushPreview();
+    expect(preview).toMatchObject({ remote: 'company', targetBranch: 'main', publish: true, ahead: 2, behind: 0, fileCount: 2 });
+    expect(preview.commits[0]?.subject).toBe('first publication');
+    await client.push(preview);
+    expect(await git(remote, ['rev-parse', 'main'])).toBe(preview.head);
+    expect(await git(root, ['diff', '--cached', '--name-only'])).toBe('beta.txt');
+    expect(await git(root, ['config', '--get', 'branch.main.remote'])).toBe('company');
+  });
+
+  it('publishes another local branch without switching checkout or changing uncommitted work', async () => {
+    const root = await createRepository();
+    const remote = await addBareRemote(root);
+    await git(root, ['switch', '-c', 'feature/new', '--no-track']);
+    await fs.appendFile(path.join(root, 'alpha.txt'), 'feature\n');
+    await git(root, ['commit', '-am', 'new feature']);
+    const featureHead = await git(root, ['rev-parse', 'HEAD']);
+    await git(root, ['switch', 'main']);
+    await fs.writeFile(path.join(root, 'draft.txt'), 'keep this draft\n');
+    const client = new GitClient(root);
+    const preview = await client.pushBranchPreview('feature/new');
+    expect(preview).toMatchObject({ publish: true, ahead: 1, behind: 0 });
+    await client.pushBranch('feature/new', preview);
+    expect(await git(remote, ['rev-parse', 'feature/new'])).toBe(featureHead);
+    expect(await git(root, ['symbolic-ref', '--short', 'HEAD'])).toBe('main');
+    expect(await fs.readFile(path.join(root, 'draft.txt'), 'utf8')).toBe('keep this draft\n');
+    expect(await git(root, ['rev-parse', '--abbrev-ref', 'feature/new@{upstream}'])).toBe('origin/feature/new');
+  });
+
+  it('asks for a remote when several exist and publishes only to the selected one', async () => {
+    const root = await createRepository();
+    const origin = await addBareRemote(root);
+    const company = await addBareRemote(root, 'company');
+    await git(root, ['switch', '-c', 'feature/choose', '--no-track']);
+    const client = new GitClient(root);
+    expect(await client.pushTarget()).toMatchObject({ remotes: ['company', 'origin'], remote: undefined, targetBranch: 'feature/choose' });
+    await expect(client.pushPreview()).rejects.toThrow('Choose a remote');
+    const preview = await client.pushPreview('company');
+    await client.push(preview);
+    expect(await git(company, ['rev-parse', 'feature/choose'])).toBe(preview.head);
+    await expect(git(origin, ['rev-parse', '--verify', 'feature/choose'])).rejects.toThrow();
+    expect(await git(root, ['config', '--get', 'branch.feature/choose.remote'])).toBe('company');
+  });
+
+  it('connects to an existing same-name remote branch without mislabeling it as new', async () => {
+    const root = await createRepository();
+    const remote = await addBareRemote(root);
+    const client = new GitClient(root);
+    const preview = await client.pushPreview();
+    expect(preview).toMatchObject({ publish: false, setUpstream: true, ahead: 0, behind: 0, fileCount: 0, upstreamOid: await git(remote, ['rev-parse', 'main']) });
+    await client.push(preview);
+    expect(await git(root, ['rev-parse', '--abbrev-ref', 'HEAD@{upstream}'])).toBe('origin/main');
+  });
+
+  it('inspects the push URL and does not count fetched refs from a different server as published', async () => {
+    const root = await createRepository();
+    const fetchServer = await addBareRemote(root);
+    const pushServer = await addBareRemote(root, 'push-server', false);
+    await git(root, ['remote', 'set-url', '--push', 'origin', pushServer]);
+    const client = new GitClient(root);
+    const preview = await client.pushPreview('origin');
+    expect(preview).toMatchObject({ publish: true, setUpstream: true, targetBranch: 'main', ahead: 1 });
+    expect(preview.commits[0]?.subject).toBe('initial');
+    expect(preview.destinationId).not.toContain(pushServer);
+    await client.push(preview);
+    expect(await git(pushServer, ['rev-parse', 'main'])).toBe(preview.head);
+    expect(await git(fetchServer, ['rev-parse', 'main'])).toBe(preview.head);
+  });
+
+  it('reviews an existing server branch even when its objects and tracking ref were not fetched', async () => {
+    const root = await createRepository();
+    const remote = await addBareRemote(root);
+    await git(root, ['branch', 'feature/existing']);
+    const other = await createRepository();
+    await git(other, ['remote', 'add', 'origin', remote]);
+    await git(other, ['fetch', 'origin']);
+    await git(other, ['switch', '-c', 'feature/existing', 'origin/main']);
+    await fs.appendFile(path.join(other, 'alpha.txt'), 'on the server\n');
+    await git(other, ['commit', '-am', 'server work']);
+    await git(other, ['push', 'origin', 'feature/existing']);
+    const remoteHead = await git(remote, ['rev-parse', 'feature/existing']);
+    const client = new GitClient(root);
+    const preview = await client.pushBranchPreview('feature/existing');
+    expect(preview).toMatchObject({ publish: false, setUpstream: true, ahead: 0, behind: 1, upstreamOid: remoteHead });
+    await expect(client.pushBranch('feature/existing', preview)).rejects.toThrow('behind its upstream');
+    expect(await git(remote, ['rev-parse', 'feature/existing'])).toBe(remoteHead);
+    await expect(git(root, ['config', '--get', 'branch.feature/existing.remote'])).rejects.toThrow();
+  });
+
+  it('reports and republishes a deleted upstream using its configured branch name', async () => {
+    const root = await createRepository();
+    const remote = await addBareRemote(root);
+    await git(root, ['switch', '-c', 'local-release', '--no-track']);
+    await git(root, ['push', '-u', 'origin', 'local-release:release/20261008']);
+    await git(remote, ['update-ref', '-d', 'refs/heads/release/20261008']);
+    const client = new GitClient(root);
+    await client.fetch();
+    const snapshot = await client.snapshot();
+    expect(snapshot.upstreamGone).toBe(true);
+    expect(snapshot.branches.find((branch) => branch.name === 'local-release')).toMatchObject({ upstreamGone: true, ahead: undefined, behind: undefined });
+    const preview = await client.pushPreview();
+    expect(preview).toMatchObject({ publish: true, targetBranch: 'release/20261008', ahead: 0 });
+    await client.push(preview);
+    expect(await git(remote, ['rev-parse', 'release/20261008'])).toBe(preview.head);
+    expect((await client.snapshot()).upstreamGone).toBeUndefined();
+  });
+
+  it('invalidates a publication after local commits or the remote URL change', async () => {
+    const root = await createRepository();
+    const remote = await addBareRemote(root);
+    await git(root, ['switch', '-c', 'feature/stale', '--no-track']);
+    const client = new GitClient(root);
+    const oldHeadPreview = await client.pushPreview();
+    await fs.appendFile(path.join(root, 'alpha.txt'), 'new\n');
+    await git(root, ['commit', '-am', 'new after review']);
+    await expect(client.push(oldHeadPreview)).rejects.toThrow('changed during push review');
+    const currentPreview = await client.pushPreview();
+    const replacement = await addBareRemote(root, 'replacement');
+    await git(root, ['remote', 'set-url', 'origin', replacement]);
+    await expect(client.push(currentPreview)).rejects.toThrow('changed during push review');
+    for (const server of [remote, replacement]) await expect(git(server, ['rev-parse', '--verify', 'feature/stale'])).rejects.toThrow();
+  });
+
+  it('rejects publication when the server branch appears during or after review', async () => {
+    const root = await createRepository();
+    const remote = await addBareRemote(root);
+    await git(root, ['switch', '-c', 'feature/race', '--no-track']);
+    await fs.appendFile(path.join(root, 'alpha.txt'), 'outgoing\n');
+    await git(root, ['commit', '-am', 'local only']);
+    const client = new GitClient(root);
+    const preview = await client.pushPreview();
+    const serverHead = await git(remote, ['rev-parse', 'main']);
+    await git(remote, ['update-ref', 'refs/heads/feature/race', serverHead]);
+    await expect(client.push(preview)).rejects.toThrow('changed during push review');
+    expect(await git(remote, ['rev-parse', 'feature/race'])).toBe(serverHead);
+    await git(remote, ['update-ref', '-d', 'refs/heads/feature/race']);
+    // Move the ref after performPush has revalidated, immediately before send.
+    const runner = client as unknown as { run(args: string[]): Promise<string> };
+    const originalRun = runner.run.bind(client);
+    vi.spyOn(runner, 'run').mockImplementation(async (args) => {
+      if (args[0] === 'push') await git(remote, ['update-ref', 'refs/heads/feature/race', serverHead]);
+      return originalRun(args);
+    });
+    await expect(client.push(preview)).rejects.toThrow(/failed to push|stale info/);
+    expect(await git(remote, ['rev-parse', 'feature/race'])).toBe(serverHead);
+    await expect(git(root, ['config', '--get', 'branch.feature/race.remote'])).rejects.toThrow();
   });
 
   it('tracks an active changelist and supports rename and delete lifecycle', async () => {

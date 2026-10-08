@@ -51,6 +51,7 @@
         repositoryName: 'ack-k8s',
         repositoryCount: new URLSearchParams(location.search).get('state') === 'multi' ? 2 : 1,
         root: '/workspace/ack-k8s',
+        remotes: ['origin'],
         branch: 'feature/keaton/ACKk8s',
         upstream: 'origin/feature/keaton/ACKk8s',
         ahead: 3,
@@ -104,7 +105,19 @@
         fixture.ahead = 0;
         fixture.behind = 0;
       }
-      if (new URLSearchParams(location.search).get('state') === 'no-upstream') fixture.upstream = '';
+      const fixtureState = new URLSearchParams(location.search).get('state');
+      if (['no-upstream', 'publish-ready', 'no-remote'].includes(fixtureState)) {
+        fixture.upstream = '';
+        fixture.ahead = 0;
+        fixture.behind = 0;
+      }
+      if (fixtureState === 'no-remote') fixture.remotes = [];
+      if (fixtureState === 'upstream-gone') {
+        fixture.upstreamGone = true;
+        fixture.ahead = 0;
+        fixture.behind = 0;
+        fixture.branches = fixture.branches.filter(branch => branch.name !== fixture.upstream);
+      }
       if (new URLSearchParams(location.search).get('state') === 'push-ready') fixture.behind = 0;
       if (new URLSearchParams(location.search).get('state') === 'empty') {
         fixture.changes = [];
@@ -112,6 +125,8 @@
       }
       fixture.commits.forEach((commit, index) => { if (fixture.upstream && index < fixture.ahead) commit.unpushedTo = fixture.upstream; });
       fixture.recentCommits = fixture.commits.slice(0, 5);
+      fixture.branches.find(branch => branch.current).upstream = fixture.upstream || undefined;
+      fixture.branches.find(branch => branch.current).upstreamGone = fixture.upstreamGone;
       window.__vscodeMessages = [];
       window.__pushReviewId = 0;
       function emit(data) { window.dispatchEvent(new MessageEvent('message', { data })); }
@@ -130,15 +145,34 @@
           }
           if (message.type === 'push' || message.type === 'pushBranch') {
             const branch = message.branch || fixture.branch;
-            const upstream = fixture.branches.find((item) => item.name === branch)?.upstream || fixture.upstream;
-            setTimeout(() => emit({ type: 'pushReview', id: ++window.__pushReviewId, root: fixture.root,
-              afterCommit: false, preview: { branch, upstream, remote: 'origin', targetBranch: upstream.replace(/^origin\//, ''),
-                head: fixture.commits[0].hash, upstreamOid: fixture.commits[3].hash, ahead: fixture.ahead, behind: fixture.behind,
-                commits: fixture.commits.slice(0, fixture.ahead).map((commit) => ({ hash: commit.hash, subject: commit.subject })), fileCount: 8 } }), 20);
+            const selected = fixture.branches.find((item) => !item.remote && item.name === branch);
+            const upstream = selected?.upstream || (branch === fixture.branch ? fixture.upstream : undefined);
+            const publish = !upstream || selected?.upstreamGone;
+            const ahead = publish ? fixtureState === 'publish-ready' ? 3 : 0 : fixture.ahead;
+            const id = ++window.__pushReviewId;
+            emit({ type: 'pushPreparing', root: fixture.root, requestId: id, active: true });
+            if (window.__holdPushReview) return;
+            window.__activePushPreview = { branch, upstream: upstream || `origin/${branch}`, remote: 'origin', targetBranch: upstream ? upstream.replace(/^origin\//, '') : branch,
+              publish: Boolean(publish), setUpstream: Boolean(publish), head: fixture.commits[0].hash,
+              upstreamOid: publish ? '' : fixture.commits[3].hash, ahead, behind: publish ? 0 : fixture.behind,
+              commits: fixture.commits.slice(0, ahead).map((commit) => ({ hash: commit.hash, subject: commit.subject })), fileCount: publish ? 12 : 8 };
+            setTimeout(() => emit({ type: 'pushReview', id, root: fixture.root,
+              afterCommit: false, preview: window.__activePushPreview }), 20);
+            setTimeout(() => emit({ type: 'pushPreparing', root: fixture.root, requestId: id, active: false }), 20);
           }
           if (message.type === 'respondPushReview') {
             emit({ type: 'pushReviewClosed', id: message.id });
             if (message.choice === 'push') {
+              const p = window.__activePushPreview;
+              if (p?.setUpstream) {
+                const branch = fixture.branches.find(item => !item.remote && item.name === p.branch);
+                Object.assign(branch, { upstream: p.upstream, upstreamGone: undefined });
+                fixture.branches.push({ name: p.upstream, current: false, remote: true });
+                if (p.branch === fixture.branch) {
+                  fixture.upstream = p.upstream;
+                  fixture.upstreamGone = undefined;
+                }
+              }
               fixture.ahead = 0;
               fixture.commits.forEach((commit) => { delete commit.unpushedTo; });
               emit({ type: 'snapshot', payload: fixture });

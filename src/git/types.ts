@@ -15,6 +15,7 @@ export interface BranchSummary {
   current: boolean;
   remote: boolean;
   upstream?: string;
+  upstreamGone?: boolean;
   tracking?: string;
   ahead?: number;
   behind?: number;
@@ -89,6 +90,12 @@ export interface PushPreview {
   targetBranch: string;
   head: string;
   upstreamOid: string;
+  /** The destination does not yet have this branch. */
+  publish?: boolean;
+  /** Establish tracking only after the reviewed push succeeds. */
+  setUpstream?: boolean;
+  /** Opaque fingerprint, so changing a remote URL invalidates the review. */
+  destinationId?: string;
   ahead: number;
   behind: number;
   commits: Array<{ hash: string; subject: string }>;
@@ -111,6 +118,8 @@ export interface RepositorySnapshot {
   headOid?: string;
   identity?: { name: string; email: string; ready: boolean };
   upstream?: string;
+  upstreamGone?: boolean;
+  remotes?: string[];
   ahead: number;
   behind: number;
   changes: GitChange[];

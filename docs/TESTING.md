@@ -10,6 +10,8 @@ The browser suite runs the production `media/main.js` and `media/main.css` in a 
 
 Push review checks cover destination and commit summaries, cancel/confirm/fetch replies, preserved drafts, focus containment, stale branch tips, and long destinations in narrow and short views. File previews cover lazy loading, cached reopening, retry, stale responses from other commits/reviews/repositories, filename priority, duplicate filenames in different directories, root files, renames, and diff messages. Host-side tests check one-use review IDs, exact commit membership, and isolation between repositories and surfaces. Git integration tests verify exact outgoing membership for diverged and selected branches, partial pushes, cleared marks after publishing, full hashes in previews, and revalidation of reviewed refs before a real push.
 
+First-publication tests additionally cover local branches without upstreams, zero new commits, Commit and Push to an empty remote, publication without checkout, explicit remote selection, distinct fetch/push URLs, existing server branches without fetched objects, and deleted upstreams after Fetch. Real Git rejects changed publication destinations and a same-name branch created immediately before send. Browser checks cover Publish entries, connecting to an existing branch, cancellation, destination-loading replies and visible confirmation at 240px × 420px.
+
 ```sh
 npm ci
 npm install --no-save --package-lock=false playwright@1.62.1
