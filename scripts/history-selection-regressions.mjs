@@ -50,6 +50,7 @@ export async function verifyHistorySelection(page, openSurface) {
         assert.match(await page.locator('[data-commit-context-action="cherry-pick"]').textContent(), /4 Commits/);
         await capture(page, '26-history-multi-select.png');
         await page.keyboard.press('Escape');
+        assert.equal(await page.evaluate(() => document.activeElement?.dataset.commit), hashes[1], 'Closing the menu must restore its row before the next keyboard action.');
         await row(page, hashes[0]).focus();
         await page.keyboard.press('Shift+ArrowDown');
         assert.equal(await selected(page).count(), 2);

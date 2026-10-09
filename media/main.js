@@ -3567,7 +3567,7 @@ document.addEventListener('keydown', (event) => {
     const hash = ui.commitContextMenu.hash;
     ui.commitContextMenu = undefined;
     render();
-    requestAnimationFrame(() => [...app.querySelectorAll('[data-commit]')].find((row) => row.dataset.commit === hash)?.focus());
+    [...app.querySelectorAll('[data-commit]')].find((row) => row.dataset.commit === hash)?.focus({ preventScroll: true });
     return;
   }
   if (ui.fileContextMenu) {
