@@ -21,7 +21,7 @@ const sharedMessages = new Set([
   'ready',
   'workflowRequest', 'closeWorkflow', 'openWorkflowDiff',
   'stashCreate', 'stashApply', 'stashDrop',
-  'openConflict', 'resolveConflict', 'continueOperation', 'abortOperation',
+  'openConflict', 'resolveConflict', 'continueOperation', 'abortOperation', 'skipOperation',
   'refresh',
   'openFolder', 'cloneRepository', 'initializeRepository',
   'fetch',
@@ -66,6 +66,7 @@ const messagesBySurface: Record<KivoSurface, ReadonlySet<string>> = {
     'moveFiles'
   ]),
   history: new Set([
+    'cherryPick',
     'searchHistory',
     'loadMoreCommits',
     'setHistoryRef',

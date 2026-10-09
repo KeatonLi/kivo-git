@@ -2,19 +2,20 @@ import * as vscode from 'vscode';
 import path from 'node:path';
 import { FileIconThemeResolver, type WebviewFileIcon } from './FileIconThemeResolver';
 import { GitClient } from './git/GitClient';
-import type { CommitDetails, PullStrategy, RepositorySnapshot, WorkflowFile } from './git/types';
+import type { CherryPickPreview, CommitDetails, PullStrategy, RepositorySnapshot, WorkflowFile } from './git/types';
 import { SnapshotCoordinator } from './SnapshotCoordinator';
 import { PushReviewSession } from './PushReviewSession';
 import { isMessageAllowedOnSurface, KivoViewTypes, type KivoSurface, surfaceForViewType } from './viewLayout';
 
 type WebviewMessage =
-  | { type: 'workflowRequest'; root: string; requestId: number; kind: 'compare' | 'stashes' | 'stashDetails'; branch?: string; remote?: boolean; hash?: string }
+  | { type: 'workflowRequest'; root: string; requestId: number; kind: 'compare' | 'stashes' | 'stashDetails' | 'cherryPick'; branch?: string; remote?: boolean; hash?: string; hashes?: string[] }
+  | { type: 'cherryPick'; root: string; requestId: number }
   | { type: 'closeWorkflow'; requestId: number }
   | { type: 'openWorkflowDiff'; root: string; requestId: number; path: string }
   | { type: 'stashCreate'; root: string; message: string }
   | { type: 'stashApply' | 'stashDrop'; root: string; hash: string }
   | { type: 'openConflict' | 'resolveConflict'; root: string; path: string }
-  | { type: 'continueOperation' | 'abortOperation'; root: string; token: string }
+  | { type: 'continueOperation' | 'abortOperation' | 'skipOperation'; root: string; token: string }
   | { type: 'ready'; historyRef?: string }
   | { type: 'refresh' | 'fetch' | 'push' | 'loadMoreCommits' | 'showLog' | 'showChanges' | 'openSettings' }
   | { type: 'openFolder' | 'cloneRepository' | 'initializeRepository' }
@@ -62,7 +63,7 @@ type WebviewMessage =
   | { type: 'deleteChangelist'; id: string; name: string }
   | { type: 'setActiveChangelist'; id: string }
   | { type: 'moveFiles'; paths: string[]; listId: string };
-type OperationKind = 'commit' | 'checkout' | 'branch' | 'tag' | 'changelist' | 'move' | 'track' | 'rollback' | 'fetch' | 'pull' | 'push' | 'identity' | 'stash' | 'conflict';
+type OperationKind = 'commit' | 'checkout' | 'branch' | 'tag' | 'changelist' | 'move' | 'track' | 'rollback' | 'fetch' | 'pull' | 'push' | 'identity' | 'stash' | 'conflict' | 'cherry-pick';
 type WebviewRepositorySnapshot = RepositorySnapshot & { fileIcons: Record<string, WebviewFileIcon>; repositoryCount: number; allRepositoryChanges: number };
 const HISTORY_PAGE_SIZE = 80;
 
@@ -93,7 +94,7 @@ export class IdeaGitViewProvider implements vscode.WebviewViewProvider, vscode.T
   private operationId = 0;
   private operationRunning = false;
   private readonly pushReview = new PushReviewSession();
-  private readonly workflowSessions = new Map<KivoSurface, { root: string; id: number; files: WorkflowFile[] }>();
+  private readonly workflowSessions = new Map<KivoSurface, { root: string; id: number; files: WorkflowFile[]; cherryPick?: CherryPickPreview }>();
   private pushPreviewRequestId = 0;
   private lastFetchAttemptAt = 0;
   private lastFetchedAt?: number;
@@ -785,7 +786,7 @@ export class IdeaGitViewProvider implements vscode.WebviewViewProvider, vscode.T
               error: 'The selected repository changed. Close this view and try again.' });
             return;
           }
-          const session = { root: client.workspaceRoot, id: message.requestId, files: [] as WorkflowFile[] };
+          const session: { root: string; id: number; files: WorkflowFile[]; cherryPick?: CherryPickPreview } = { root: client.workspaceRoot, id: message.requestId, files: [] };
           this.workflowSessions.set(surface, session);
           try {
             let payload;
@@ -795,6 +796,9 @@ export class IdeaGitViewProvider implements vscode.WebviewViewProvider, vscode.T
             } else if (message.kind === 'stashDetails' && typeof message.hash === 'string') {
               payload = await client.workflows.stashDetails(message.hash);
               session.files = payload.files;
+            } else if (message.kind === 'cherryPick' && surface === 'history' && Array.isArray(message.hashes)) {
+              payload = await client.workflows.cherryPickPreview(message.hashes);
+              session.cherryPick = payload;
             } else if (message.kind === 'stashes') payload = await client.workflows.stashes();
             else throw new Error('Choose a valid Git workflow.');
             if (this.workflowSessions.get(surface) !== session || this.selectedWorkspace()?.uri.fsPath !== session.root) return;
@@ -807,6 +811,15 @@ export class IdeaGitViewProvider implements vscode.WebviewViewProvider, vscode.T
         case 'closeWorkflow':
           if (this.workflowSessions.get(surface)?.id === message.requestId) this.workflowSessions.delete(surface);
           return;
+        case 'cherryPick': {
+          const session = this.workflowSessions.get(surface);
+          if (!session?.cherryPick || session.root !== client.workspaceRoot || message.root !== session.root || message.requestId !== session.id) return;
+          this.workflowSessions.delete(surface);
+          const preview = session.cherryPick;
+          await this.operation('cherry-pick', `Cherry-picking ${preview.commits.length} commit${preview.commits.length === 1 ? '' : 's'}…`,
+            () => client.workflows.cherryPick(preview), `Cherry-picked ${preview.commits.length} commit${preview.commits.length === 1 ? '' : 's'} into ${preview.branch}`, false, surface);
+          return;
+        }
         case 'openWorkflowDiff': {
           const session = this.workflowSessions.get(surface);
           if (!session || session.root !== client.workspaceRoot || message.root !== session.root || message.requestId !== session.id) return;
@@ -849,6 +862,10 @@ export class IdeaGitViewProvider implements vscode.WebviewViewProvider, vscode.T
         case 'continueOperation':
           if (message.root !== client.workspaceRoot) return;
           await this.operation('conflict', 'Continuing Git operation…', () => client.workflows.finishOperation(message.token, 'continue'), 'Git operation continued', false, surface);
+          return;
+        case 'skipOperation':
+          if (message.root !== client.workspaceRoot) return;
+          await this.operation('conflict', 'Skipping empty commit…', () => client.workflows.finishOperation(message.token, 'skip'), 'Empty commit skipped', false, surface);
           return;
         case 'abortOperation': {
           if (message.root !== client.workspaceRoot) return;
@@ -1347,7 +1364,7 @@ export class IdeaGitViewProvider implements vscode.WebviewViewProvider, vscode.T
       this.coordinator.beginWrite();
       writeStarted = true;
       await vscode.window.withProgress({ location: vscode.ProgressLocation.SourceControl, title: `${IdeaGitViewProvider.productName}: ${label}` }, action);
-      if (kind === 'commit' || kind === 'checkout' || kind === 'pull' || kind === 'branch') this.repositoryEmitter.fire();
+      if (kind === 'commit' || kind === 'checkout' || kind === 'pull' || kind === 'branch' || kind === 'cherry-pick' || kind === 'conflict') this.repositoryEmitter.fire();
       if (kind === 'fetch') await this.setSyncState('idle', Date.now());
       else if (kind === 'pull' || kind === 'push') await this.setSyncState('idle', Date.now());
       await this.postToReadyViews({ type: 'operation', id, kind, phase: 'success', message: success, clearsCommit, feedbackSurface });

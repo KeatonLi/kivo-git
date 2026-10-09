@@ -416,7 +416,7 @@ body.commit-panel-resizing .commit-panel-splitter::after { top: 1px; height: 3px
 .branch-popup-more:focus-visible,
 .branch-load-more:hover,
 .branch-load-more:focus-visible { outline: none; background: var(--vscode-list-hoverBackground); }
-.context-menu { position: fixed; z-index: 19; padding: 3px; border: 1px solid var(--vscode-menu-border, var(--vscode-widget-border, var(--border-subtle))); border-radius: 4px; background: var(--vscode-menu-background, var(--vscode-editorWidget-background)); color: var(--vscode-menu-foreground, var(--vscode-foreground)); box-shadow: var(--shadow-popover); animation: branch-context-in 90ms ease; }
+.context-menu { position: fixed; z-index: 19; padding: 3px; border: 1px solid var(--vscode-menu-border, var(--vscode-widget-border, var(--border-subtle))); border-radius: 4px; background: var(--vscode-menu-background, var(--vscode-editorWidget-background, var(--surface-base))); color: var(--vscode-menu-foreground, var(--vscode-foreground)); box-shadow: var(--shadow-popover); animation: branch-context-in 90ms ease; }
 .branch-context-menu { width: min(248px, calc(100vw - 16px)); }
 .commit-context-menu { width: min(270px, calc(100vw - 16px)); }
 .file-context-menu { width: min(278px, calc(100vw - 16px)); }
@@ -807,6 +807,28 @@ body[data-surface="history"] .content { min-width: 0; background: var(--vscode-p
 .parity-mode .log-branch-search:focus-within { border-color: var(--accent); box-shadow: 0 0 0 1px color-mix(in srgb, var(--accent) 25%, transparent); }
 .parity-mode .log-branch-search input { min-width: 0; flex: 1; border: 0; outline: 0; background: transparent; font-size: 11px; }
 .parity-mode .log-branch-tree { flex: 1 1 auto; min-height: 0; overflow: auto; padding: 3px 4px 10px; }
+.log-current-branch { flex: 0 0 auto; padding: 7px 4px 5px; border-bottom: 1px solid var(--vscode-panel-border); }
+.log-current-branch > small { display: block; padding: 0 8px 3px; color: var(--muted); font-size: 10px; }
+.log-current-branch .log-branch-row { min-height: 28px; }
+.detached-checkout { display: flex; gap: 6px; padding: 4px 8px; color: var(--muted); }
+.history-selection-bar { display: flex; flex: 0 0 auto; align-items: center; gap: 8px; min-width: 0; min-height: 30px; padding: 2px 10px; border-bottom: 1px solid var(--vscode-panel-border); background: color-mix(in srgb, var(--accent) 9%, var(--surface-base)); font-size: 11px; }
+.history-selection-bar > span { flex: 1; }
+.history-selection-bar button { padding: 3px 7px; }
+.history-selection-bar .history-selection-action { border: 1px solid var(--vscode-button-border, transparent); border-radius: 3px; background: var(--vscode-button-secondaryBackground, color-mix(in srgb, var(--accent) 18%, var(--surface-base))); color: var(--vscode-button-secondaryForeground, var(--vscode-foreground)); cursor: pointer; }
+.history-selection-bar .history-selection-action:hover:not(:disabled) { background: var(--vscode-button-secondaryHoverBackground, color-mix(in srgb, var(--accent) 28%, var(--surface-base))); }
+.history-selection-bar .history-selection-action:disabled { opacity: .5; cursor: default; }
+.graph-row { user-select: none; }
+.commit-context-menu .commit-context-title > span { display: grid; gap: 3px; }
+.commit-context-menu .commit-context-title code { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.cherry-pick-target { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 12px; padding: 10px 12px; border: 1px solid var(--vscode-panel-border); border-radius: 5px; background: color-mix(in srgb, var(--accent) 7%, var(--surface-base)); }
+.cherry-pick-target small { flex-basis: 100%; color: var(--muted); }
+.cherry-pick-target strong { min-width: 0; overflow-wrap: anywhere; }
+.cherry-pick-target code { margin-left: auto; color: var(--muted); }
+.cherry-pick-commits { margin: 14px 0; padding-left: 26px; }
+.cherry-pick-commits li { padding: 6px 0; }
+.cherry-pick-commits li code { margin-right: 10px; color: var(--accent); }
+.cherry-pick-commits li span { overflow-wrap: anywhere; }
+.workflow-hint { color: var(--muted); font-size: 11px; }
 .parity-mode .log-branch-group { margin: 3px 0 7px; }
 .parity-mode .log-branch-group-title,
 .parity-mode .log-branch-folder {

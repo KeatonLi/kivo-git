@@ -5,6 +5,7 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { mkdir } from 'node:fs/promises';
 import { verifyExperienceRegressions } from './webview-experience-regressions.mjs';
+import { verifyHistorySelection } from './history-selection-regressions.mjs';
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const require = createRequire(import.meta.url);
@@ -73,6 +74,7 @@ try {
   page.on('pageerror', (error) => pageErrors.push(error.message));
 
   await verifyExperienceRegressions(page, query => openSurface(page, query));
+  await verifyHistorySelection(page, query => openSurface(page, query));
 
   await page.goto(`${baseUrl}/test/visual-preview.html?surface=changes&state=loading`);
   await page.waitForSelector('.repository-loading');

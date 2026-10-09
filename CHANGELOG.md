@@ -2,6 +2,15 @@
 
 ## Unreleased
 
+## 0.5.6 - 2026-10-09
+
+- Pin the actual checked-out branch above History's branch search, with HEAD and sync status. Searching or viewing another branch keeps the checkout visible without duplicating it in Local.
+- Select History commits with Ctrl/Cmd-click, Shift-click, Shift-arrow keys or right-button dragging. Preserve the full selection when opening a context menu, refreshing or scrolling virtual rows.
+- Add single and batch Cherry-pick to commit context menus and the selection bar. Review the target checkout and exact selected commits in parent-before-child order before applying.
+- Apply only the reviewed commits through one Git sequencer operation; continue after resolving conflicts, abort the entire batch or skip an empty commit. Revalidate checkout, HEAD and clean working state before writing.
+- Explain unsupported merge selections, detached checkouts, commits already in the target branch and batches above 200 commits. Clear hidden selections when navigating filters and restore focus when cancelling review.
+- Add real-Git regressions for selected-only application, ordering, stale reviews, prevalidation, conflicts and empty commits, plus browser regressions for selection, context menus and the pinned checkout.
+
 ## 0.5.5 - 2026-10-08
 
 - Allow Publish from the Commit toolbar and local-branch context menus before an upstream exists, including branches with no new commits and branches not currently checked out.

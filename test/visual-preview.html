@@ -140,7 +140,9 @@
             const stash = { hash: fixture.commits[0].hash, ref: 'stash@{0}', subject: 'On feature: unfinished UI', date: fixture.commits[0].date };
             const payload = message.kind === 'compare' ? { currentName: fixture.branch, targetName: message.branch, currentOid: fixture.commits[0].hash, targetOid: fixture.commits[1].hash,
               current: { count: 1, commits: [fixture.commits[0]] }, target: { count: 2, commits: fixture.commits.slice(1, 3) }, files: [file] }
-              : message.kind === 'stashes' ? [stash] : { ...stash, files: [file, { ...file, path: 'new.txt', status: 'A' }] };
+              : message.kind === 'cherryPick' ? { branch: fixture.branch, head: fixture.headOid || fixture.commits[0].hash,
+                commits: fixture.commits.filter(commit => message.hashes.includes(commit.hash)).reverse() }
+                : message.kind === 'stashes' ? [stash] : { ...stash, files: [file, { ...file, path: 'new.txt', status: 'A' }] };
             setTimeout(() => emit({ type: 'workflowResult', root: message.root, requestId: message.requestId, payload }), 20);
           }
           if (message.type === 'push' || message.type === 'pushBranch') {
