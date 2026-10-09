@@ -1574,7 +1574,7 @@ function renderLogBranchPane(s) {
     </section>`;
   };
   return `<aside class="log-branch-pane" id="kivo-log-branches" aria-label="History branches">
-    ${current ? `<section class="log-current-branch" aria-label="Current checkout"><small>Current checkout</small>${renderLogBranchRow(current, 0, renderLogBranchSync(current, s))}</section>` : `<div class="log-current-branch"><small>Current checkout</small><span class="detached-checkout">${icon('git-commit')} Detached HEAD</span></div>`}
+    <section class="log-current-branch" aria-label="Current checkout"><small>Current checkout</small>${current ? renderLogBranchRow(current, 0, renderLogBranchSync(current, s)) : `<span class="detached-checkout">${icon(s.branch === '(detached)' ? 'git-commit' : 'git-branch')} ${escapeHtml(s.branch === '(detached)' ? 'Detached HEAD' : s.branch)}</span>`}</section>
     <label class="log-branch-search">${icon('search')}<input id="log-branch-search" aria-label="Branch or tag" placeholder="Branch or tag" value="${escapeHtml(ui.logBranchQuery)}"></label>
     <div class="log-branch-tree">
       ${group('local', 'Local', local, query ? 'No matching local branches' : 'No other local branches')}

@@ -99,6 +99,15 @@ describe('History branch status', () => {
     expect(html).not.toContain('No other local branches');
   });
 
+  it('distinguishes an unborn local checkout from Detached HEAD', async () => {
+    const unborn = await renderBranches({ ...snapshot, branches: [], tags: [] });
+    expect(unborn).toContain('aria-label="Current checkout"');
+    expect(unborn).toContain('<icon name="git-branch"> main');
+    expect(unborn).not.toContain('Detached HEAD');
+    const detached = await renderBranches({ ...snapshot, branch: '(detached)', branches: [], tags: [] });
+    expect(detached).toContain('<icon name="git-commit"> Detached HEAD');
+  });
+
   it('does not claim a remote difference for an untracked or clean current branch', async () => {
     const untracked = await renderBranches({ ...snapshot, upstream: '', behind: 0, ahead: 0 });
     expect(untracked.match(/data-log-branch="main"[^>]*>(.*?)<\/button>/)?.[1]).not.toContain('branch-sync-indicator');
