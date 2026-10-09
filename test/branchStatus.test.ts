@@ -3,14 +3,14 @@ import path from 'node:path';
 import { runInNewContext } from 'node:vm';
 import { describe, expect, it } from 'vitest';
 
-async function renderBranches(snapshot: Record<string, unknown>, phase = 'idle'): Promise<string> {
+async function renderBranches(snapshot: Record<string, unknown>, phase = 'idle', query = ''): Promise<string> {
   const source = await readFile(path.join(process.cwd(), 'media', 'main.js'), 'utf8');
   const start = source.indexOf('function renderLogBranchRow(');
   const end = source.indexOf('\nfunction renderBranchContextMenu(', start);
   return runInNewContext(`${source.slice(start, end)}\nrenderLogBranchPane(snapshot)`, {
     snapshot,
     ui: {
-      logBranchQuery: '', graphBranchFilter: undefined, syncPhase: phase,
+      logBranchQuery: query, graphBranchFilter: 'other', syncPhase: phase,
       branchGroupsExpanded: { local: true, remote: true, tags: false },
       branchVisibleCounts: { local: 36, remote: 36, tags: 36 }
     },
@@ -32,11 +32,13 @@ const snapshot = {
 };
 
 describe('History branch status', () => {
-  it('puts the current branch first in Local with sync state beside it', async () => {
+  it('pins the checkout above the search with sync state beside it', async () => {
     const html = await renderBranches(snapshot);
     expect(html).not.toContain('HEAD (Current Branch)');
     expect(html).not.toContain('branch-pane-footer');
     expect(html.indexOf('data-log-branch="main"')).toBeLessThan(html.indexOf('data-log-branch="other"'));
+    expect(html.indexOf('data-log-branch="main"')).toBeLessThan(html.indexOf('id="log-branch-search"'));
+    expect(html.match(/data-log-branch="main"/g)).toHaveLength(1);
     expect(html).toContain('2 incoming, 3 outgoing · origin/main');
     expect(html).toContain('class="branch-sync-indicator"');
     expect(html).toContain('class="branch-sync-count branch-sync-incoming"><icon name="arrow-down"><b>2</b>');
@@ -44,6 +46,16 @@ describe('History branch status', () => {
     expect(html).toContain('Incoming commits, 0 outgoing · origin/other');
     expect(html).toContain('data-update-branch="other"');
     expect(html).not.toContain('data-update-branch="main"');
+  });
+
+  it('keeps the actual checkout visible while another branch or a missing branch is searched', async () => {
+    for (const query of ['other', 'no-such-branch']) {
+      const html = await renderBranches(snapshot, 'idle', query);
+      expect(html).toContain('aria-label="Current checkout"');
+      expect(html.match(/data-log-branch="main"/g)).toHaveLength(1);
+      expect(html.indexOf('data-log-branch="main"')).toBeLessThan(html.indexOf('id="log-branch-search"'));
+      expect(html).toContain('2 incoming, 3 outgoing · origin/main');
+    }
   });
 
   it('shows a direction for each changed local branch and leaves clean and remote branches plain', async () => {
@@ -85,6 +97,15 @@ describe('History branch status', () => {
   it('does not insert an empty Local placeholder when there is no local branch', async () => {
     const html = await renderBranches({ ...snapshot, branches: snapshot.branches.filter((branch) => branch.remote) });
     expect(html).not.toContain('No other local branches');
+  });
+
+  it('distinguishes an unborn local checkout from Detached HEAD', async () => {
+    const unborn = await renderBranches({ ...snapshot, branches: [], tags: [] });
+    expect(unborn).toContain('aria-label="Current checkout"');
+    expect(unborn).toContain('<icon name="git-branch"> main');
+    expect(unborn).not.toContain('Detached HEAD');
+    const detached = await renderBranches({ ...snapshot, branch: '(detached)', branches: [], tags: [] });
+    expect(detached).toContain('<icon name="git-commit"> Detached HEAD');
   });
 
   it('does not claim a remote difference for an untracked or clean current branch', async () => {

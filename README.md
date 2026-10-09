@@ -47,6 +47,8 @@ Changelist data is stored in the worktree's Git directory under `ideagit/changel
 - Incremental history loading with branch, author, time-window, and text filters
 - A draggable branch-tree / history divider with keyboard resizing and saved per-view width
 - Keyboard-first navigation with roving focus, instant selection, and lazy detail loading
+- Current checkout pinned above the branch search, even while filtering or viewing another branch
+- Multiple commit selection with Ctrl/Cmd-click, Shift-click, Shift-arrow keys or right-button dragging
 - A remembered focus mode that expands the commit graph; Blame navigation restores the detail pane automatically
 
 ### Inline blame
@@ -57,6 +59,8 @@ Inline blame is on by default. Run **Kivo Git: Toggle Inline Blame** from the Co
 
 ### Branch comparison, stashes and conflicts
 
+- Select commits in History, right-click and choose **Cherry-pick…**. Review the actual target checkout and selected commits before confirming; only selected commits are applied in parent-before-child order. Commit or stash unfinished work first. Batches support up to 200 ordinary commits; merge commits require choosing a mainline parent and are currently unavailable.
+- After a Cherry-pick conflict, resolve and stage the files, then **Continue** the remaining batch. **Abort** returns to the start of the whole batch. An empty commit offers **Skip empty commit** when there are no staged changes.
 - Right-click another local or remote branch and choose **Compare with Current**. File diffs compare the two branch tips; the two commit tabs show commits unique to each side (up to 80 per side). Opening a diff retains the comparison. No checkout is needed.
 - Open **Stashes** from History's action rail or Commit's **More actions** menu. Save staged/unstaged work and untracked files, preview saved files, and restore their original staged state into a clean working tree. Restoration keeps the saved copy; deletion is a separate confirmed action. Ignored files are left in place.
 - Switching branches with unfinished work offers **Stash and Switch** or **Switch with Changes**. A failed switch keeps the saved stash available for recovery.

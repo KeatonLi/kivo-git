@@ -2,7 +2,7 @@ import { promises as fs } from 'node:fs';
 import { createHash } from 'node:crypto';
 import path from 'node:path';
 import { parsePorcelainV2 } from './statusParser';
-import type { BranchComparison, GitOperationState, StashDetails, StashEntry, WorkflowFile } from './types';
+import type { BranchComparison, CherryPickPreview, GitOperationState, StashDetails, StashEntry, WorkflowFile } from './types';
 
 type Runner = (args: string[], options?: { env?: NodeJS.ProcessEnv }) => Promise<string>;
 
@@ -52,6 +52,41 @@ export class GitWorkflows {
     ]);
     return { currentName: name, targetName: ref.replace(/^refs\/(heads|remotes|tags)\//, ''), currentOid, targetOid,
       current, target, files: this.parseFiles(diff, currentOid, targetOid) };
+  }
+
+  async cherryPickPreview(hashes: string[]): Promise<CherryPickPreview> {
+    if (!Array.isArray(hashes) || !hashes.length || hashes.length > 200 || hashes.some(hash => typeof hash !== 'string' || !/^(?:[0-9a-f]{40}|[0-9a-f]{64})$/.test(hash))) {
+      throw new Error('Select between 1 and 200 valid commits.');
+    }
+    const selected = [...new Set(hashes)];
+    if (await this.operationState()) throw new Error('Finish the current Git operation before cherry-picking commits.');
+    if ((await this.changes()).length) throw new Error('Commit or stash your current changes before cherry-picking commits.');
+    const branch = (await this.run(['symbolic-ref', '--short', '-q', 'HEAD']).catch(() => '')).trim();
+    if (!branch) throw new Error('Checkout a local branch before cherry-picking commits.');
+    const head = (await this.run(['rev-parse', '--verify', 'HEAD'])).trim();
+    for (const hash of selected) {
+      const commit = (await this.run(['rev-parse', '--verify', '--end-of-options', `${hash}^{commit}`])).trim();
+      if (commit !== hash) throw new Error('Select commit objects from History.');
+    }
+    const output = await this.run(['log', '--no-walk=unsorted', '-z', '--format=%H%x1f%P%x1f%s', ...selected, '--']);
+    const commits = output.split('\0').filter(Boolean).map(entry => {
+      const [hash = '', parentString = '', ...subject] = entry.split('\x1f');
+      return { hash: hash.trim(), parents: parentString.split(' ').filter(Boolean), subject: subject.join('\x1f') };
+    });
+    if (commits.length !== selected.length) throw new Error('Some selected commits are no longer available. Refresh History.');
+    if (commits.some(commit => commit.parents.length > 1)) throw new Error('Merge commits need a mainline parent. Select ordinary commits to cherry-pick.');
+    const order = (await this.run(['rev-list', '--topo-order', '--reverse', ...selected, '--not', head, '--'])).trim().split('\n').filter(hash => selected.includes(hash));
+    if (order.length !== selected.length) throw new Error('Some selected commits are already in the current branch. Select commits from another branch.');
+    return { branch, head, commits: order.map(hash => commits.find(commit => commit.hash === hash)!) };
+  }
+
+  async cherryPick(expected: CherryPickPreview): Promise<void> {
+    const current = await this.cherryPickPreview(expected.commits.map(commit => commit.hash));
+    if (current.branch !== expected.branch || current.head !== expected.head || current.commits.some((commit, index) => commit.hash !== expected.commits[index]?.hash)) {
+      throw new Error('The current branch or selected commits changed. Review the cherry-pick again.');
+    }
+    // One sequencer operation keeps Continue, Skip and Abort valid for the entire batch.
+    await this.run(['cherry-pick', '--no-walk=unsorted', ...current.commits.map(commit => commit.hash)], { env: { GIT_EDITOR: 'true' } });
   }
 
   async stashes(): Promise<StashEntry[]> {
@@ -124,7 +159,8 @@ export class GitWorkflows {
     const kind = rebaseMerge || rebaseApply ? 'rebase' : merge ? 'merge' : cherryPick ? 'cherry-pick' : revert ? 'revert' : files.length ? 'conflicts' : undefined;
     if (!kind) return undefined;
     const token = createHash('sha256').update([kind, merge, rebaseMerge, rebaseApply, cherryPick, revert, head].join('\0')).digest('hex');
-    return { kind, token, files };
+    const canSkip = kind === 'cherry-pick' && !files.length && await this.run(['diff', '--cached', '--quiet']).then(() => true).catch(() => false);
+    return { kind, token, files, ...(canSkip ? { canSkip: true } : {}) };
   }
 
   async resolveConflict(filePath: string): Promise<void> {
@@ -137,10 +173,11 @@ export class GitWorkflows {
     await this.run(['--literal-pathspecs', 'add', '--', filePath]);
   }
 
-  async finishOperation(token: string, action: 'continue' | 'abort'): Promise<void> {
+  async finishOperation(token: string, action: 'continue' | 'abort' | 'skip'): Promise<void> {
     const state = await this.operationState();
     if (!state || state.token !== token || state.kind === 'conflicts') throw new Error('The Git operation changed. Refresh and review its current state.');
     if (action === 'continue' && state.files.length) throw new Error('Resolve and stage all conflicted files before continuing.');
+    if (action === 'skip' && !state.canSkip) throw new Error('Only an empty cherry-pick with no staged changes can be skipped.');
     await this.run([state.kind, `--${action}`], { env: { GIT_EDITOR: 'true', GIT_SEQUENCE_EDITOR: 'true' } });
   }
 }

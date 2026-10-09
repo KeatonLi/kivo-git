@@ -144,4 +144,10 @@ export interface BranchComparison {
 }
 export interface StashEntry { hash: string; ref: string; date: string; subject: string }
 export interface StashDetails extends StashEntry { files: WorkflowFile[] }
-export interface GitOperationState { kind: 'merge' | 'rebase' | 'cherry-pick' | 'revert' | 'conflicts'; token: string; files: string[] }
+export interface CherryPickPreview {
+  branch: string;
+  head: string;
+  commits: Array<{ hash: string; subject: string; parents: string[] }>;
+}
+
+export interface GitOperationState { kind: 'merge' | 'rebase' | 'cherry-pick' | 'revert' | 'conflicts'; token: string; files: string[]; canSkip?: boolean }

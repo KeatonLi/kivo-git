@@ -137,6 +137,9 @@ const ui = {
   graphScrollTop: Number(initialRepositoryState.graphScrollTop) || 0,
   pullMenuOpen: false,
   selectedCommitHash: initialRepositoryState.selectedCommitHash,
+  selectedCommitHashes: new Set(initialRepositoryState.selectedCommitHashes || (initialRepositoryState.selectedCommitHash ? [initialRepositoryState.selectedCommitHash] : [])),
+  commitSelectionAnchor: initialRepositoryState.commitSelectionAnchor || initialRepositoryState.selectedCommitHash,
+  commitRangeDragging: false,
   focusedCommitHash: initialRepositoryState.focusedCommitHash || initialRepositoryState.selectedCommitHash,
   commitDetailsDismissed: initialRepositoryState.commitDetailsDismissed || false,
   commitDetails: undefined,
@@ -264,6 +267,8 @@ function serializeRepositoryState() {
     collapsedLogBranchFolders: [...ui.collapsedLogBranchFolders],
     graphScrollTop: ui.graphScrollTop,
     selectedCommitHash: ui.selectedCommitHash,
+    selectedCommitHashes: [...ui.selectedCommitHashes],
+    commitSelectionAnchor: ui.commitSelectionAnchor,
     focusedCommitHash: ui.focusedCommitHash,
     commitDetailsDismissed: ui.commitDetailsDismissed
   };
@@ -340,6 +345,9 @@ function restoreRepositoryState(root, state = {}) {
   ui.historySearchLimit = 80;
   clearTimeout(historySearchTimer);
   ui.selectedCommitHash = state.selectedCommitHash;
+  ui.selectedCommitHashes = new Set(state.selectedCommitHashes || (state.selectedCommitHash ? [state.selectedCommitHash] : []));
+  ui.commitSelectionAnchor = state.commitSelectionAnchor || state.selectedCommitHash;
+  ui.commitRangeDragging = false;
   ui.focusedCommitHash = state.focusedCommitHash || state.selectedCommitHash;
   ui.commitDetailsDismissed = state.commitDetailsDismissed || false;
   ui.commitDetails = undefined;
@@ -408,6 +416,9 @@ function graphCommits() {
 function reconcileHistorySelection() {
   if (surface !== 'history' || !ui.snapshot || ui.historyRefLoading || ui.historySearchLoading) return;
   const commits = graphCommits();
+  const visibleHashes = new Set(commits.map(commit => commit.hash));
+  ui.selectedCommitHashes = new Set([...ui.selectedCommitHashes].filter(hash => visibleHashes.has(hash)));
+  if (!visibleHashes.has(ui.commitSelectionAnchor)) ui.commitSelectionAnchor = undefined;
   if (commits.some((commit) => commit.hash === ui.selectedCommitHash)) {
     if (!ui.commitDetails && !ui.commitDetailsLoading && !ui.commitDetailsError && !ui.commitDetailsDismissed) {
       ui.commitDetailsLoading = true;
@@ -417,6 +428,8 @@ function reconcileHistorySelection() {
   }
   clearTimeout(commitDetailTimer);
   ui.selectedCommitHash = undefined;
+  ui.selectedCommitHashes.clear();
+  ui.commitSelectionAnchor = undefined;
   ui.focusedCommitHash = undefined;
   ui.commitDetails = undefined;
   ui.commitDetailsError = undefined;
@@ -424,6 +437,8 @@ function reconcileHistorySelection() {
   if (!ui.commitDetailsDismissed && commits[0]) {
     ui.selectedCommitHash = commits[0].hash;
     ui.focusedCommitHash = commits[0].hash;
+    ui.selectedCommitHashes.add(commits[0].hash);
+    ui.commitSelectionAnchor = commits[0].hash;
     ui.commitDetailsLoading = true;
     postCommitDetails(commits[0].hash, false);
   }
@@ -436,6 +451,8 @@ function setHistoryRef(branch) {
   ui.historyRefLoading = true;
   clearTimeout(commitDetailTimer);
   ui.selectedCommitHash = undefined;
+  ui.selectedCommitHashes.clear();
+  ui.commitSelectionAnchor = undefined;
   ui.focusedCommitHash = undefined;
   ui.commitDetails = undefined;
   ui.commitDetailsLoading = false;
@@ -625,24 +642,55 @@ function revealGraphCommit(hash) {
   return ui.graphScrollTop;
 }
 
-function selectCommit(hash, { focus = false, immediate = true } = {}) {
+function selectCommit(hash, { focus = false, immediate = true, toggle = false, range = false, preserveSelection = false } = {}) {
   if (!hash) return;
+  const commits = graphCommits();
+  if (!commits.some(commit => commit.hash === hash)) return;
+  if (range) {
+    const anchor = commits.findIndex(commit => commit.hash === ui.commitSelectionAnchor);
+    const end = commits.findIndex(commit => commit.hash === hash);
+    if (!toggle) ui.selectedCommitHashes.clear();
+    if (anchor < 0) ui.commitSelectionAnchor = hash;
+    for (const commit of commits.slice(Math.min(anchor < 0 ? end : anchor, end), Math.max(anchor < 0 ? end : anchor, end) + 1)) ui.selectedCommitHashes.add(commit.hash);
+  } else if (toggle) {
+    ui.selectedCommitHashes.has(hash) ? ui.selectedCommitHashes.delete(hash) : ui.selectedCommitHashes.add(hash);
+    ui.commitSelectionAnchor = hash;
+  } else if (!preserveSelection) {
+    ui.selectedCommitHashes = new Set([hash]);
+    ui.commitSelectionAnchor = hash;
+  }
+  const activeHash = ui.selectedCommitHashes.has(hash) ? hash : commits.find(commit => ui.selectedCommitHashes.has(commit.hash))?.hash;
   const revealScrollTop = focus ? revealGraphCommit(hash) : undefined;
-  ui.selectedCommitHash = hash;
+  const detailsChanged = ui.selectedCommitHash !== activeHash;
+  ui.selectedCommitHash = activeHash;
   ui.focusedCommitHash = hash;
-  ui.commitDetails = undefined;
-  ui.commitDetailsError = undefined;
-  ui.commitDetailsLoading = true;
-  ui.commitDetailsDismissed = false;
+  if (detailsChanged) {
+    clearTimeout(commitDetailTimer);
+    ui.commitDetails = undefined;
+    ui.commitDetailsError = undefined;
+  }
+  ui.commitDetailsLoading = Boolean(activeHash && (detailsChanged || !ui.commitDetails));
+  ui.commitDetailsDismissed = !activeHash;
   persist();
   render();
-  if (focus) requestAnimationFrame(() => {
+  if (focus) {
     restoreGraphScroll(revealScrollTop);
     const row = [...app.querySelectorAll('[data-commit]')].find((item) => item.dataset.commit === hash);
-    row?.focus();
+    row?.focus({ preventScroll: true });
     row?.scrollIntoView({ block: 'nearest' });
-  });
-  postCommitDetails(hash, immediate);
+  }
+  if (activeHash && (detailsChanged || !ui.commitDetails)) postCommitDetails(activeHash, immediate);
+}
+
+function selectedHistoryCommits() {
+  return graphCommits().filter(commit => ui.selectedCommitHashes.has(commit.hash));
+}
+
+function cherryPickUnavailable() {
+  const selected = selectedHistoryCommits();
+  return ui.busy ? 'A Git operation is running' : ui.snapshot.operation ? 'Finish the current Git operation first'
+    : ui.snapshot.branch === '(detached)' ? 'Checkout a local branch first' : selected.length > 200 ? 'Select at most 200 commits'
+      : selected.some(commit => commit.parents.length > 1) ? 'Merge commits need a mainline parent; select ordinary commits' : !selected.length ? 'Select commits first' : '';
 }
 
 function changeSelection() {
@@ -767,6 +815,7 @@ function patchApp(html) {
   target.innerHTML = html;
   const graphList = app.querySelector('[data-graph-list]');
   const sameRepository = app.querySelector('[data-root]')?.dataset.root === ui.snapshot?.root;
+  const focusedCommit = sameRepository && document.activeElement?.closest('[data-commit]')?.dataset.commit;
   const reading = sameRepository ? ['#kivo-commit-changes', '#kivo-recent-list'].map(selector => {
     const list = app.querySelector(selector);
     return { list, top: list?.scrollTop || 0, anchor: captureReadingAnchor(list, '[data-path], [data-hash]') };
@@ -783,6 +832,10 @@ function patchApp(html) {
     }
   }
   patchNode(app, target, pool);
+  if (focusedCommit && document.activeElement === document.body) {
+    const row = app.querySelector(`[data-commit="${CSS.escape(focusedCommit)}"]`);
+    if (row && !row.closest('[inert]')) row.focus({ preventScroll: true });
+  }
   // DOM changes must not rewind a newer wheel/trackpad position on a later frame.
   if (graphList?.isConnected && Math.abs(graphList.scrollTop - ui.graphScrollTop) > .5) graphList.scrollTop = ui.graphScrollTop;
   for (const { list, top, anchor } of reading) {
@@ -919,7 +972,7 @@ function renderPullMenu() {
 function workflowReturnFocus() {
   const element = document.activeElement;
   const menu = ui.branchContextMenu;
-  const selector = menu
+  const selector = ui.commitContextMenu ? `[data-commit="${CSS.escape(ui.commitContextMenu.hash)}"]` : menu
     ? menu.fromPopup ? '[data-action="branches"]' : `[data-log-branch="${CSS.escape(menu.ref)}"]`
     : element?.closest('.commit-toolbar-menu') ? '[data-action="toolbar-more"]'
       : surface === 'changes' ? '[data-action="toolbar-more"]' : '[data-action="stashes"]';
@@ -934,9 +987,10 @@ function requestWorkflow(kind, options = {}) {
   ui.branchOpen = false;
   ui.toolbarMenuOpen = false;
   ui.branchContextMenu = undefined;
+  ui.commitContextMenu = undefined;
   ui.commitReviewOpen = false;
   render();
-  post('workflowRequest', { kind, root: ui.workflow.root, requestId, branch: options.branch, remote: options.remote, hash: options.hash });
+  post('workflowRequest', { kind, root: ui.workflow.root, requestId, branch: options.branch, remote: options.remote, hash: options.hash, hashes: options.hashes });
   if (!previous) requestAnimationFrame(() => app.querySelector('.workflow-dialog header button')?.focus());
 }
 
@@ -967,9 +1021,14 @@ function renderWorkflowFiles(files) {
 
 function renderWorkflow(s) {
   const w = ui.workflow, p = w.payload;
-  let title = w.kind === 'compare' ? 'Compare branches' : w.kind === 'stashes' ? 'Stashes' : 'Saved changes';
+  let title = w.kind === 'cherryPick' ? `Cherry-pick ${p?.commits.length || w.hashes.length} commit${(p?.commits.length || w.hashes.length) === 1 ? '' : 's'}` : w.kind === 'compare' ? 'Compare branches' : w.kind === 'stashes' ? 'Stashes' : 'Saved changes';
   let body = w.loading ? `<div class="workflow-empty" role="status">${icon('loading', 'codicon-modifier-spin')} Loading…</div>` : w.error ? `<div class="detail-error" role="alert"><span>${escapeHtml(w.error)}</span><button data-action="retry-workflow">Retry</button></div>` : '';
   let footer = '';
+  if (p && !w.loading && !w.error && w.kind === 'cherryPick') {
+    const stale = s.branch !== p.branch || (s.headOid && s.headOid !== p.head);
+    body = `<div class="cherry-pick-target"><small>Apply to current checkout</small><strong>${icon('git-branch')} ${escapeHtml(p.branch)}</strong><code>HEAD ${escapeHtml(p.head.slice(0, 7))}</code></div><p>Only these selected commits will be applied, in the order below. Each creates a local commit on this branch.</p><ol class="cherry-pick-commits">${p.commits.map(commit => `<li><code title="${escapeHtml(commit.hash)}">${escapeHtml(commit.hash.slice(0, 7))}</code><span title="${escapeHtml(commit.subject)}">${escapeHtml(commit.subject)}</span></li>`).join('')}</ol>${stale ? '<p class="detail-error" role="alert">The current branch changed. Close this preview and review again.</p>' : '<p class="workflow-hint">If a conflict occurs, resolve it in the Merge Editor, then continue. Abort returns to the start of this batch.</p>'}`;
+    footer = `<button class="push-review-cancel" data-action="close-workflow">Cancel</button><button class="primary-button" data-action="confirm-cherry-pick" ${ui.busy || s.operation || stale ? 'disabled' : ''}>Cherry-pick ${p.commits.length} commit${p.commits.length === 1 ? '' : 's'}</button>`;
+  }
   if (p && !w.loading && !w.error && w.kind === 'compare') {
     const tabs = [['files', `${p.files.length} file${p.files.length === 1 ? '' : 's'}`], ['current', `${p.current.count} only in current`], ['target', `${p.target.count} only in target`]];
     body = `<div class="workflow-route"><strong title="${escapeHtml(p.currentName)}">${escapeHtml(p.currentName)}</strong>${icon('arrow-right')}<strong title="${escapeHtml(p.targetName)}">${escapeHtml(p.targetName)}</strong></div><p>Files compare the two branch tips. Each commit list shows commits absent from the other branch.</p><div class="workflow-tabs" role="tablist" aria-label="Branch comparison">${tabs.map(([tab, label]) => `<button role="tab" aria-selected="${w.tab === tab}" data-workflow-tab="${tab}">${escapeHtml(label)}</button>`).join('')}</div><div class="workflow-files" role="tabpanel">${w.tab === 'files' ? renderWorkflowFiles(p.files) : p[w.tab].commits.length ? p[w.tab].commits.map(commit => `<div class="workflow-commit" title="${escapeHtml(commit.hash)}"><code>${escapeHtml(commit.hash.slice(0, 7))}</code><span>${escapeHtml(commit.subject)}</span></div>`).join('') + (p[w.tab].count > p[w.tab].commits.length ? '<p>Showing the latest 80 commits.</p>' : '') : '<p class="workflow-empty">No unique commits on this side.</p>'}</div>`;
@@ -988,7 +1047,7 @@ function renderConflictState(s) {
   const operation = s.operation;
   if (!operation) return '';
   const label = ({ merge: 'Merge', rebase: 'Rebase', 'cherry-pick': 'Cherry-pick', revert: 'Revert', conflicts: 'Resolve conflicts' })[operation.kind];
-  return `<section class="conflict-state" aria-label="Git operation"><div class="conflict-state-heading">${icon('warning')}<strong>${label}${operation.kind === 'conflicts' ? '' : ' in progress'}</strong><span>${operation.files.length} unresolved</span></div>${operation.files.length ? `<div class="conflict-files">${operation.files.map(file => `<div class="conflict-file"><button data-open-conflict="${escapeHtml(file)}" title="Open Merge Editor: ${escapeHtml(file)}">${icon('git-merge')}<span>${escapeHtml(file)}</span></button><button data-resolve-conflict="${escapeHtml(file)}" title="Stage the resolved result for ${escapeHtml(file)}" ${ui.busy ? 'disabled' : ''}>Mark resolved</button></div>`).join('')}</div>` : '<p>All conflicts are staged. Review your changes, then continue.</p>'}${operation.kind === 'conflicts' ? '<p>Review each file and mark it resolved. The saved stash remains available if these came from a restore.</p>' : `<div class="conflict-actions"><button data-action="abort-operation" ${ui.busy ? 'disabled' : ''}>Abort…</button><button class="primary-button" data-action="continue-operation" ${ui.busy || operation.files.length ? 'disabled' : ''}>Continue ${label}</button></div>`}</section>`;
+  return `<section class="conflict-state" aria-label="Git operation"><div class="conflict-state-heading">${icon('warning')}<strong>${label}${operation.kind === 'conflicts' ? '' : ' in progress'}</strong><span>${operation.files.length} unresolved</span></div>${operation.files.length ? `<div class="conflict-files">${operation.files.map(file => `<div class="conflict-file"><button data-open-conflict="${escapeHtml(file)}" title="Open Merge Editor: ${escapeHtml(file)}">${icon('git-merge')}<span>${escapeHtml(file)}</span></button><button data-resolve-conflict="${escapeHtml(file)}" title="Stage the resolved result for ${escapeHtml(file)}" ${ui.busy ? 'disabled' : ''}>Mark resolved</button></div>`).join('')}</div>` : operation.canSkip ? '<p>This commit has no remaining changes. Skip it to continue the batch.</p>' : '<p>All conflicts are staged. Review your changes, then continue.</p>'}${operation.kind === 'conflicts' ? '<p>Review each file and mark it resolved. The saved stash remains available if these came from a restore.</p>' : `<div class="conflict-actions"><button data-action="abort-operation" ${ui.busy ? 'disabled' : ''}>Abort…</button>${operation.canSkip ? `<button class="primary-button" data-action="skip-operation" ${ui.busy ? 'disabled' : ''}>Skip empty commit</button>` : ''}<button class="primary-button" data-action="continue-operation" ${ui.busy || operation.files.length || operation.canSkip ? 'disabled' : ''}>Continue ${label}</button></div>`}</section>`;
 }
 
 function renderCommitRepository(s) {
@@ -1495,7 +1554,8 @@ function renderLogBranchTree(node, depth = 0, parentPath = '', forceExpanded = f
 function renderLogBranchPane(s) {
   const query = ui.logBranchQuery.trim().toLowerCase();
   const matches = (item) => !query || item.name.toLowerCase().includes(query);
-  const local = s.branches.filter((branch) => !branch.remote && matches(branch))
+  const current = s.branches.find(branch => !branch.remote && branch.current);
+  const local = s.branches.filter((branch) => !branch.remote && !branch.current && matches(branch))
     .sort((left, right) => Number(right.current) - Number(left.current) || left.name.localeCompare(right.name));
   const remote = s.branches.filter((branch) => branch.remote && matches(branch));
   const tags = (s.tags || []).filter(matches).map((tag) => ({ ...tag, path: tag.name, name: tag.name, remote: false, kind: 'tag' }));
@@ -1514,6 +1574,7 @@ function renderLogBranchPane(s) {
     </section>`;
   };
   return `<aside class="log-branch-pane" id="kivo-log-branches" aria-label="History branches">
+    <section class="log-current-branch" aria-label="Current checkout"><small>Current checkout</small>${current ? renderLogBranchRow(current, 0, renderLogBranchSync(current, s)) : `<span class="detached-checkout">${icon(s.branch === '(detached)' ? 'git-commit' : 'git-branch')} ${escapeHtml(s.branch === '(detached)' ? 'Detached HEAD' : s.branch)}</span>`}</section>
     <label class="log-branch-search">${icon('search')}<input id="log-branch-search" aria-label="Branch or tag" placeholder="Branch or tag" value="${escapeHtml(ui.logBranchQuery)}"></label>
     <div class="log-branch-tree">
       ${group('local', 'Local', local, query ? 'No matching local branches' : 'No other local branches')}
@@ -1560,12 +1621,16 @@ function renderCommitContextMenu() {
   if (!menu) return '';
   const commit = graphCommits().find((candidate) => candidate.hash === menu.hash);
   if (!commit) return '';
+  const count = selectedHistoryCommits().length;
+  const unavailable = cherryPickUnavailable();
   const width = 270;
-  const height = 244;
+  const height = count > 1 ? 150 : 282;
   const left = clamp(menu.x, 8, Math.max(8, window.innerWidth - width - 8));
   const top = clamp(menu.y, 8, Math.max(8, window.innerHeight - height - 8));
-  return `<div class="context-menu commit-context-menu" data-commit-context role="menu" aria-label="Actions for commit ${escapeHtml(commit.shortHash)}" style="left:${left}px;top:${top}px">
-    <div class="context-menu-title commit-context-title">${icon('git-commit')}<span><strong title="${escapeHtml(commit.subject)}">${escapeHtml(commit.subject)}</strong><code>${escapeHtml(commit.shortHash)}</code></span></div>
+  return `<div class="context-menu commit-context-menu" data-commit-context role="menu" aria-label="${count > 1 ? `Actions for ${count} selected commits` : `Actions for commit ${escapeHtml(commit.shortHash)}`}" style="left:${left}px;top:${top}px">
+    <div class="context-menu-title commit-context-title">${icon('git-commit')}<span><strong title="${escapeHtml(commit.subject)}">${count > 1 ? `${count} commits selected` : escapeHtml(commit.subject)}</strong><code>${count > 1 ? `Apply to ${escapeHtml(ui.snapshot.branch)}` : escapeHtml(commit.shortHash)}</code></span></div>
+    <button role="menuitem" data-commit-context-action="cherry-pick" ${unavailable ? 'disabled' : ''} title="${escapeHtml(unavailable || `Apply selected commits to ${ui.snapshot.branch}`)}">${icon('git-pull-request-go-to-changes')}<span>Cherry-pick${count > 1 ? ` ${count} Commits` : ''}…</span></button>
+    ${count > 1 ? `<button role="menuitem" data-action="close-commit">${icon('clear-all')}<span>Clear Selection</span></button>` : `
     <div class="context-menu-separator" role="separator"></div>
     <button role="menuitem" data-commit-context-action="details">${icon('preview')}<span>Show Commit Details</span></button>
     <button role="menuitem" data-commit-context-action="copy">${icon('copy')}<span>Copy Commit Hash</span></button>
@@ -1574,6 +1639,7 @@ function renderCommitContextMenu() {
     <button role="menuitem" data-commit-context-action="branch" ${ui.busy ? 'disabled' : ''}>${icon('git-branch-create')}<span>New Branch from Commit…</span></button>
     <button role="menuitem" data-commit-context-action="tag" ${ui.busy ? 'disabled' : ''}>${icon('tag')}<span>New Tag…</span></button>
     <button role="menuitem" data-commit-context-action="checkout" ${ui.busy ? 'disabled' : ''}>${icon('inspect')}<span>Checkout Revision…</span></button>
+    `}
   </div>`;
 }
 
@@ -1638,8 +1704,9 @@ function renderGraph(s) {
       <div class="log-splitter" data-log-splitter role="separator" aria-label="Resize History branch tree" aria-controls="kivo-log-branches kivo-log-history" aria-orientation="vertical" aria-valuemin="${LOG_BRANCH_MIN_WIDTH}" aria-valuemax="${LOG_BRANCH_MAX_WIDTH}" aria-valuenow="${branchWidth}" tabindex="0" title="Drag to resize the branch tree. Double-click to reset."></div>
       <section class="log-history-pane" id="kivo-log-history" aria-label="Commit history">${renderConflictState(s)}
         ${renderLogFilterBar(s, commits, filtersActive)}
+        ${ui.selectedCommitHashes.size > 1 && !ui.commitRangeDragging ? `<div class="history-selection-bar"><span role="status">${ui.selectedCommitHashes.size} commits selected</span><button class="history-selection-action" data-action="cherry-pick-selected" title="${escapeHtml(cherryPickUnavailable() || `Apply to ${s.branch}`)}" ${cherryPickUnavailable() ? 'disabled' : ''}>Cherry-pick…</button><button class="idea-toolbar-button" data-action="close-commit" aria-label="Clear selected commits">${icon('close')}</button></div>` : ''}
         <div class="log-column-header" aria-hidden="true" style="--graph-width:${graphWidth}px"><span>AUTHOR</span><span>GRAPH</span><span>COMMIT</span><span>DATE</span></div>
-        <div class="graph-list ${graph.compressed ? 'graph-compressed' : ''} ${ui.graphLoadingMore ? 'is-loading' : ''}" id="kivo-graph-list" data-graph-list role="listbox" aria-label="Commit history${graph.compressed ? `, compact ${laneCount}-lane topology` : ''}" aria-busy="${ui.graphLoadingMore || ui.historyRefLoading || ui.historySearchLoading}" aria-setsize="${commits.length}" style="--lane-count:${laneCount};--graph-width:${graphWidth}px;--graph-row-height:${GRAPH_ROW_HEIGHT}px">${ui.historyRefLoading || ui.historySearchLoading && !commits.length ? `<div class="inline-empty" role="status">${icon('loading', 'codicon-modifier-spin')} ${ui.historyRefLoading ? 'Loading branch history…' : 'Searching complete history…'}</div>` : commits.length ? `<div class="graph-rows" id="kivo-graph-rows" style="height:${windowed.totalHeight}px"><div class="graph-virtual-spacer" id="kivo-graph-top" aria-hidden="true" style="height:${windowed.topSpacer}px"></div><div class="graph-row-window" id="kivo-graph-window" data-graph-window data-window-start="${windowed.start}" data-window-end="${windowed.end}" style="height:${visibleCommits.length * GRAPH_ROW_HEIGHT}px">${visibleCommits.map((commit, index) => `<article class="graph-row ${commit.unpushedTo ? 'unpushed' : ''} ${commit.parents.length > 1 ? 'merge-row' : ''} ${ui.selectedCommitHash === commit.hash ? 'selected' : ''}" data-commit="${escapeHtml(commit.hash)}" data-hash="${escapeHtml(commit.hash)}" role="option" aria-selected="${ui.selectedCommitHash === commit.hash}" aria-posinset="${windowed.start + index + 1}" tabindex="${focusHash === commit.hash ? '0' : '-1'}">
+        <div class="graph-list ${graph.compressed ? 'graph-compressed' : ''} ${ui.graphLoadingMore ? 'is-loading' : ''}" id="kivo-graph-list" data-graph-list role="listbox" aria-multiselectable="true" aria-label="Commit history${graph.compressed ? `, compact ${laneCount}-lane topology` : ''}" aria-busy="${ui.graphLoadingMore || ui.historyRefLoading || ui.historySearchLoading}" aria-setsize="${commits.length}" style="--lane-count:${laneCount};--graph-width:${graphWidth}px;--graph-row-height:${GRAPH_ROW_HEIGHT}px">${ui.historyRefLoading || ui.historySearchLoading && !commits.length ? `<div class="inline-empty" role="status">${icon('loading', 'codicon-modifier-spin')} ${ui.historyRefLoading ? 'Loading branch history…' : 'Searching complete history…'}</div>` : commits.length ? `<div class="graph-rows" id="kivo-graph-rows" style="height:${windowed.totalHeight}px"><div class="graph-virtual-spacer" id="kivo-graph-top" aria-hidden="true" style="height:${windowed.topSpacer}px"></div><div class="graph-row-window" id="kivo-graph-window" data-graph-window data-window-start="${windowed.start}" data-window-end="${windowed.end}" style="height:${visibleCommits.length * GRAPH_ROW_HEIGHT}px">${visibleCommits.map((commit, index) => `<article class="graph-row ${commit.unpushedTo ? 'unpushed' : ''} ${commit.parents.length > 1 ? 'merge-row' : ''} ${ui.selectedCommitHashes.has(commit.hash) ? 'selected' : ''}" data-commit="${escapeHtml(commit.hash)}" data-hash="${escapeHtml(commit.hash)}" role="option" aria-selected="${ui.selectedCommitHashes.has(commit.hash)}" aria-posinset="${windowed.start + index + 1}" tabindex="${focusHash === commit.hash ? '0' : '-1'}">
           <span class="log-author" title="${escapeHtml(commit.author)}">${escapeHtml(commit.author)}</span><div class="graph-canvas">${renderGraphSvg(commit, graph)}</div><div class="graph-commit"><div class="log-subject">${renderUnpushedBadge(commit)}<strong title="${escapeHtml(commit.subject)}">${escapeHtml(commit.subject)}</strong>${renderRowRefs(commit.refs)}</div><span class="log-meta"><code>${escapeHtml(commit.shortHash)}</code>${commit.parents?.length > 1 ? '<span class="merge-note">Merge</span>' : ''}</span></div>${renderLogDate(commit.date)}
         </article>`).join('')}</div><div class="graph-virtual-spacer" id="kivo-graph-bottom" aria-hidden="true" style="height:${windowed.bottomSpacer}px"></div></div>` : `<div class="inline-empty" role="status">${ui.historySearchError ? `Search failed. <button data-action="retry-history-search">Retry</button>` : historySearchActive() ? 'No matching commits in this repository' : 'No commits yet'}</div>`}${commits.length && !ui.historyRefLoading ? `<div class="graph-load-sentinel" role="status">${ui.graphLoadingMore ? `${icon('loading', 'codicon-modifier-spin')}<span>Loading older commits…</span>` : hasMore ? 'Scroll to the bottom for older commits' : 'End of history'}</div>` : ''}</div>
       </section>
@@ -1825,6 +1892,7 @@ function openCommitContextMenu(event, targetRow = event.currentTarget) {
   event.stopPropagation();
   const hash = targetRow.dataset.commit;
   if (!hash) return;
+  selectCommit(hash, { preserveSelection: ui.selectedCommitHashes.has(hash), immediate: false });
   ui.branchContextMenu = undefined;
   ui.fileContextMenu = undefined;
   ui.listMenuId = undefined;
@@ -1842,6 +1910,60 @@ function openCommitContextMenu(event, targetRow = event.currentTarget) {
 function bindContextMenuDelegation() {
   if (document.__kivoContextMenuBound) return;
   document.__kivoContextMenuBound = true;
+  let drag;
+  let suppressUntil = 0;
+  let scrollFrame;
+  const updateDrag = (x, y) => {
+    if (!drag || drag.root !== ui.snapshot?.root) return;
+    const list = app.querySelector('[data-graph-list]');
+    if (!list) return;
+    drag.x = x; drag.y = y;
+    if (!drag.moved && Math.hypot(x - drag.startX, y - drag.startY) < 4) return;
+    drag.moved = true;
+    ui.commitRangeDragging = true;
+    const bounds = list.getBoundingClientRect();
+    const commits = graphCommits();
+    const index = clamp(Math.floor((clamp(y, bounds.top, bounds.bottom - 1) - bounds.top + list.scrollTop) / GRAPH_ROW_HEIGHT), 0, commits.length - 1);
+    const hash = commits[index]?.hash;
+    if (!hash || hash === drag.lastHash) return;
+    ui.commitSelectionAnchor = drag.anchor;
+    drag.lastHash = hash;
+    selectCommit(hash, { range: true, immediate: false });
+  };
+  const autoScroll = () => {
+    if (!drag) return;
+    const list = app.querySelector('[data-graph-list]');
+    if (drag.moved && list) {
+      const bounds = list.getBoundingClientRect();
+      const speed = drag.y < bounds.top + 24 ? -8 : drag.y > bounds.bottom - 24 ? 8 : 0;
+      if (speed) { list.scrollTop += speed; ui.graphScrollTop = list.scrollTop; updateDrag(drag.x, drag.y); }
+    }
+    scrollFrame = requestAnimationFrame(autoScroll);
+  };
+  document.addEventListener('pointerdown', event => {
+    const row = event.target instanceof Element ? event.target.closest('[data-commit]') : undefined;
+    if (event.button !== 2 || !row || !app.contains(row) || row.closest('[inert]')) return;
+    drag = { root: ui.snapshot.root, anchor: row.dataset.commit, lastHash: undefined, startX: event.clientX, startY: event.clientY, x: event.clientX, y: event.clientY, moved: false };
+    scrollFrame = requestAnimationFrame(autoScroll);
+  }, true);
+  document.addEventListener('pointermove', event => { if (drag && (event.buttons & 2)) updateDrag(event.clientX, event.clientY); }, true);
+  document.addEventListener('pointerup', event => {
+    if (event.button !== 2 || !drag) return;
+    const completed = drag;
+    drag = undefined;
+    ui.commitRangeDragging = false;
+    cancelAnimationFrame(scrollFrame);
+    suppressUntil = performance.now() + 500;
+    if (completed.root === ui.snapshot?.root) openCommitContextMenu(event, { dataset: { commit: completed.moved ? completed.lastHash || completed.anchor : completed.anchor } });
+  }, true);
+  const cancelDrag = () => {
+    const moved = drag?.moved;
+    drag = undefined; cancelAnimationFrame(scrollFrame); ui.commitRangeDragging = false;
+    if (moved && ui.snapshot) render();
+  };
+  document.addEventListener('pointercancel', cancelDrag, true);
+  window.addEventListener('blur', cancelDrag);
+  document.addEventListener('keydown', event => { if (event.key === 'Escape') cancelDrag(); }, true);
   document.addEventListener('contextmenu', (event) => {
     const target = event.target;
     const pathElement = event.composedPath?.().find((node) => node instanceof Element && (node.matches?.('[data-log-branch]') || node.matches?.('[data-checkout]') || node.matches?.('[data-file-row]') || node.matches?.('[data-commit]')));
@@ -1857,7 +1979,10 @@ function bindContextMenuDelegation() {
       return;
     }
     const commit = element?.closest('[data-commit]');
-    if (commit && app.contains(commit)) openCommitContextMenu(event, commit);
+    if (commit && app.contains(commit)) {
+      if (drag || performance.now() < suppressUntil) { event.preventDefault(); event.stopPropagation(); return; }
+      openCommitContextMenu(event, commit);
+    }
   }, true);
 }
 
@@ -1867,6 +1992,7 @@ function runCommitContextAction(event) {
   const menu = ui.commitContextMenu;
   const action = event.currentTarget.dataset.commitContextAction;
   if (!menu || !action) return;
+  if (action === 'cherry-pick' && !cherryPickUnavailable()) { requestWorkflow('cherryPick', { hashes: selectedHistoryCommits().map(commit => commit.hash) }); return; }
   ui.commitContextMenu = undefined;
   if (action === 'details') selectCommit(menu.hash, { focus: true, immediate: true });
   if (action === 'copy') post('copyCommitHash', { hash: menu.hash });
@@ -2384,7 +2510,7 @@ function bind() {
   once('[data-file-menu]', 'click', (event) => openFileContextMenu(event, event.currentTarget.closest('[data-file-row]')));
   once('[data-graph-list]', 'scroll', onGraphScroll);
   bindGraphViewport();
-  once('[data-commit]', 'click', (event) => selectCommit(event.currentTarget.dataset.commit));
+  once('[data-commit]', 'click', (event) => selectCommit(event.currentTarget.dataset.commit, { toggle: event.ctrlKey || event.metaKey, range: event.shiftKey }));
   once('[data-recent-commit]', 'click', (event) => selectRecentCommit(event.currentTarget.dataset.recentCommit));
   once('[data-recent-retry]', 'click', (event) => selectRecentCommit(event.currentTarget.dataset.recentRetry, true));
   once('[data-recent-history]', 'click', (event) => post('showRecentCommit', { hash: event.currentTarget.dataset.recentHistory }));
@@ -2411,7 +2537,7 @@ function bind() {
     }
     if (['Enter', ' '].includes(event.key)) {
       event.preventDefault();
-      event.currentTarget.click();
+      selectCommit(event.currentTarget.dataset.commit, { focus: true, toggle: event.ctrlKey || event.metaKey, range: event.shiftKey });
       return;
     }
     if (!['ArrowDown', 'ArrowUp', 'Home', 'End'].includes(event.key)) return;
@@ -2421,7 +2547,7 @@ function bind() {
     const current = commits.findIndex((commit) => commit.hash === event.currentTarget.dataset.commit);
     const next = event.key === 'Home' ? 0 : event.key === 'End' ? commits.length - 1 : current + (event.key === 'ArrowDown' ? 1 : -1);
     const target = commits[Math.max(0, Math.min(commits.length - 1, next))];
-    if (target && target.hash !== event.currentTarget.dataset.commit) selectCommit(target.hash, { focus: true, immediate: false });
+    if (target && target.hash !== event.currentTarget.dataset.commit) selectCommit(target.hash, { focus: true, immediate: false, range: event.shiftKey, toggle: event.shiftKey && (event.ctrlKey || event.metaKey) });
   });
   once('[data-commit-file]', 'click', (event) => {
     const button = event.currentTarget;
@@ -2842,10 +2968,19 @@ function bind() {
 function handleAction(action) {
   if (action === 'stashes') { requestWorkflow('stashes'); return; }
   if (action === 'close-workflow') { closeWorkflow(); return; }
-  if (action === 'retry-workflow' && ui.workflow) { const { kind, branch, remote, hash } = ui.workflow; requestWorkflow(kind, { branch, remote, hash }); return; }
+  if (action === 'retry-workflow' && ui.workflow) { const { kind, branch, remote, hash, hashes } = ui.workflow; requestWorkflow(kind, { branch, remote, hash, hashes }); return; }
+  if (action === 'cherry-pick-selected' && !cherryPickUnavailable()) { requestWorkflow('cherryPick', { hashes: selectedHistoryCommits().map(commit => commit.hash) }); return; }
+  if (action === 'confirm-cherry-pick' && !ui.busy && ui.workflow?.kind === 'cherryPick' && ui.workflow.payload && !ui.workflow.loading && !ui.workflow.error) {
+    const { root, requestId } = ui.workflow;
+    ui.workflow = undefined;
+    render();
+    post('cherryPick', { root, requestId });
+    requestAnimationFrame(() => app.querySelector('[data-commit][tabindex="0"]')?.focus({ preventScroll: true }));
+    return;
+  }
   if (action === 'save-stash' && !ui.busy) { post('stashCreate', { root: ui.snapshot.root, message: ui.stashMessage }); return; }
   if ((action === 'apply-stash' || action === 'drop-stash') && !ui.busy && ui.workflow?.payload) { post(action === 'apply-stash' ? 'stashApply' : 'stashDrop', { root: ui.workflow.root, hash: ui.workflow.payload.hash }); return; }
-  if ((action === 'continue-operation' || action === 'abort-operation') && !ui.busy && ui.snapshot.operation) { post(action === 'continue-operation' ? 'continueOperation' : 'abortOperation', { root: ui.snapshot.root, token: ui.snapshot.operation.token }); return; }
+  if (['continue-operation', 'abort-operation', 'skip-operation'].includes(action) && !ui.busy && ui.snapshot.operation) { post(({ 'continue-operation': 'continueOperation', 'abort-operation': 'abortOperation', 'skip-operation': 'skipOperation' })[action], { root: ui.snapshot.root, token: ui.snapshot.operation.token }); return; }
   if (action === 'cancel-push-review') { respondPushReview('cancel'); return; }
   if (action === 'confirm-push-review') { respondPushReview('push'); return; }
   if (action === 'fetch-push-review') { respondPushReview('fetch'); return; }
@@ -2946,6 +3081,8 @@ function handleAction(action) {
     if (hadRef) {
       ui.historyRefLoading = true;
       ui.selectedCommitHash = undefined;
+      ui.selectedCommitHashes.clear();
+      ui.commitSelectionAnchor = undefined;
       ui.commitDetails = undefined;
       post('setHistoryRef', { branch: '' });
     } else reconcileHistorySelection();
@@ -2989,8 +3126,11 @@ function handleAction(action) {
   if (action === 'commit') commit();
   if (action === 'commit-and-push') commit(true);
   if (action === 'close-commit') {
+    ui.commitContextMenu = undefined;
     clearTimeout(commitDetailTimer);
     ui.selectedCommitHash = undefined;
+    ui.selectedCommitHashes.clear();
+    ui.commitSelectionAnchor = undefined;
     ui.focusedCommitHash = undefined;
     ui.commitDetails = undefined;
     ui.commitDetailsError = undefined;
@@ -3194,6 +3334,8 @@ window.addEventListener('message', (event) => {
     ui.graphScrollTop = 0;
     ui.historyRefLoading = true;
     ui.selectedCommitHash = undefined;
+    ui.selectedCommitHashes.clear();
+    ui.commitSelectionAnchor = undefined;
     ui.commitDetails = undefined;
     persist();
     render();
@@ -3210,6 +3352,8 @@ window.addEventListener('message', (event) => {
     ui.graphScrollTop = 0;
     ui.historyRefLoading = true;
     ui.selectedCommitHash = undefined;
+    ui.selectedCommitHashes.clear();
+    ui.commitSelectionAnchor = undefined;
     ui.commitDetails = undefined;
     persist();
     render();
@@ -3282,6 +3426,8 @@ window.addEventListener('message', (event) => {
         !ui.historySearch?.commits.some((commit) => commit.hash === ui.selectedCommitHash)) {
       clearTimeout(commitDetailTimer);
       ui.selectedCommitHash = undefined;
+      ui.selectedCommitHashes.clear();
+      ui.commitSelectionAnchor = undefined;
       ui.focusedCommitHash = undefined;
       ui.commitDetails = undefined;
       ui.commitDetailsError = undefined;
@@ -3421,7 +3567,7 @@ document.addEventListener('keydown', (event) => {
     const hash = ui.commitContextMenu.hash;
     ui.commitContextMenu = undefined;
     render();
-    requestAnimationFrame(() => [...app.querySelectorAll('[data-commit]')].find((row) => row.dataset.commit === hash)?.focus());
+    [...app.querySelectorAll('[data-commit]')].find((row) => row.dataset.commit === hash)?.focus({ preventScroll: true });
     return;
   }
   if (ui.fileContextMenu) {
@@ -3466,6 +3612,8 @@ document.addEventListener('keydown', (event) => {
     event.preventDefault();
     clearTimeout(commitDetailTimer);
     ui.selectedCommitHash = undefined;
+    ui.selectedCommitHashes.clear();
+    ui.commitSelectionAnchor = undefined;
     ui.focusedCommitHash = undefined;
     ui.commitDetails = undefined;
     ui.commitDetailsError = undefined;

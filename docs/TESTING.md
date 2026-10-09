@@ -12,6 +12,10 @@ Push review checks cover destination and commit summaries, cancel/confirm/fetch 
 
 First-publication tests additionally cover local branches without upstreams, zero new commits, Commit and Push to an empty remote, publication without checkout, explicit remote selection, distinct fetch/push URLs, existing server branches without fetched objects, and deleted upstreams after Fetch. Real Git rejects changed publication destinations and a same-name branch created immediately before send. Browser checks cover Publish entries, connecting to an existing branch, cancellation, destination-loading replies and visible confirmation at 240px × 420px.
 
+`scripts/history-selection-regressions.mjs` checks the pinned checkout during branch search and history navigation; Ctrl/Cmd-click, Shift ranges, keyboard selection across 220 virtual rows and right-button dragging; context-menu selection retention; exact preview membership/order, cancellation focus and one-use confirmation messages; stale checkout/repository replies; filter resets; and empty-commit Skip controls. These assertions run with or without screenshot capture.
+
+`test/cherryPick.integration.test.ts` executes real Git in disposable repositories. It checks selected-only application across gaps, ancestry order, dirty and detached checkouts, invalid/overlarge/already-applied selections, changed reviewed heads, merge prevalidation, continuing after a conflict, aborting every commit in a batch and skipping an empty commit without dropping staged edits.
+
 ```sh
 npm ci
 npm install --no-save --package-lock=false playwright@1.62.1
