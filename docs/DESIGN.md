@@ -52,3 +52,7 @@ The extension never stores credentials or tokens. Fetch, pull, and push are dele
 2. **Daily workflow:** graph history, branch operations, partial-hunk assignment, stash and shelf.
 3. **Conflict workflow:** merge editor integration, rebase status, abort/continue actions.
 4. **Polish:** multi-root repositories, performance work, keyboard map, accessibility audit, marketplace release.
+
+## Shared component policy
+
+See [frontend component review](FRONTEND_COMPONENTS.md) for the cross-project library choices and Kivo’s host-native boundary.
