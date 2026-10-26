@@ -17,6 +17,8 @@ Kivo Git keeps a familiar two-surface workflow in VS Code: **Commit** stays in t
 
 ## Features
 
+0.5.8 adds short interaction transitions and delayed checkout feedback. [See the animated preview and motion rules](docs/interaction-motion.md).
+
 Checkout failures now retain their reason, Git details and recovery actions. Branches occupied by another worktree can open that directory directly; known blockers are checked before saving a stash. See [checkout and worktree recovery](docs/checkout-reliability.md).
 
 ### Commit workspace

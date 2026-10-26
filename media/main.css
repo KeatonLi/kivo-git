@@ -2,8 +2,8 @@
   --ease: cubic-bezier(.2,.8,.2,1);
   --motion-fast: 80ms;
   --motion-control: 140ms;
-  --motion-layout: 220ms;
-  --motion-result: 260ms;
+  --motion-layout: 180ms;
+  --motion-result: 180ms;
   --radius-sm: 3px;
   --radius-md: 4px;
   --radius-lg: 6px;
@@ -65,7 +65,7 @@ button:disabled { cursor: default !important; }
 .sync-chip:focus-visible { outline: 1px solid var(--accent); outline-offset: 1px; }
 .sync-chip:disabled { opacity: .48; }
 .sync-chevron { margin-left: -2px; font-size: 10px; opacity: .62; }
-.sync-menu { position: absolute; z-index: 7; top: 29px; right: 0; width: 206px; padding: 5px; border: 1px solid var(--vscode-widget-border, var(--border-subtle)); border-radius: var(--radius-md); background: var(--vscode-editorWidget-background); box-shadow: var(--shadow-popover); opacity: 0; transform: translateY(-4px) scale(.98); transform-origin: top right; pointer-events: none; transition: opacity 130ms ease, transform 160ms var(--ease); }
+.sync-menu { position: absolute; z-index: 7; top: 29px; right: 0; width: 206px; padding: 5px; border: 1px solid var(--vscode-widget-border, var(--border-subtle)); border-radius: var(--radius-md); background: var(--vscode-editorWidget-background, var(--surface-base)); box-shadow: var(--shadow-popover); opacity: 0; transform: translateY(-4px) scale(.98); transform-origin: top right; pointer-events: none; transition: opacity 130ms ease, transform 160ms var(--ease); }
 .sync-menu.open { opacity: 1; transform: translateY(0) scale(1); pointer-events: auto; }
 .sync-menu-title { padding: 4px 7px 5px; color: var(--muted); font-size: 9px; font-weight: 700; letter-spacing: .5px; text-transform: uppercase; }
 .sync-menu button { width: 100%; display: flex; flex-direction: column; gap: 1px; padding: 6px 7px; border-radius: var(--radius-sm); background: transparent; text-align: left; cursor: pointer; }
@@ -100,7 +100,7 @@ button:disabled { cursor: default !important; }
 .list-name { flex: 1; overflow: hidden; text-overflow: ellipsis; font-weight: 600; white-space: nowrap; }
 .active-label { padding: 1px 5px; border-radius: 8px; background: color-mix(in srgb, var(--accent) 14%, transparent); color: var(--accent); font-size: 8px; font-weight: 650; letter-spacing: .2px; }
 .count { min-width: 19px; padding: 1px 5px; border-radius: 9px; background: var(--vscode-badge-background); color: var(--vscode-badge-foreground); text-align: center; font-size: 9px; transition: transform 160ms var(--ease); }
-.list-menu { position: absolute; z-index: 5; top: 29px; right: 4px; min-width: 132px; padding: 4px; border: 1px solid var(--vscode-widget-border, var(--border-subtle)); border-radius: var(--radius-md); background: var(--vscode-editorWidget-background); box-shadow: var(--shadow-popover); opacity: 0; transform: translateY(-3px) scale(.98); transform-origin: top right; pointer-events: none; transition: opacity 120ms ease, transform 150ms var(--ease); }
+.list-menu { position: absolute; z-index: 5; top: 29px; right: 4px; min-width: 132px; padding: 4px; border: 1px solid var(--vscode-widget-border, var(--border-subtle)); border-radius: var(--radius-md); background: var(--vscode-editorWidget-background, var(--surface-base)); box-shadow: var(--shadow-popover); opacity: 0; transform: translateY(-3px) scale(.98); transform-origin: top right; pointer-events: none; transition: opacity 120ms ease, transform 150ms var(--ease); }
 .list-menu.open { opacity: 1; transform: translateY(0) scale(1); pointer-events: auto; }
 .list-menu button { width: 100%; padding: 6px 8px; border-radius: var(--radius-sm); background: transparent; text-align: left; cursor: pointer; }
 .list-menu button:hover, .list-menu button:focus-visible { background: var(--vscode-list-hoverBackground); outline: none; }
@@ -144,7 +144,7 @@ button:disabled { cursor: default !important; }
 .file-more { width: 22px; height: 22px; flex: 0 0 22px; display: grid; place-items: center; margin-left: -3px; border-radius: 3px; background: transparent; color: var(--vscode-icon-foreground, var(--muted)); cursor: pointer; opacity: 0; }
 .file-row:hover .file-more, .file-row:focus-within .file-more, .file-more[aria-expanded="true"] { opacity: 1; }
 .file-more:hover, .file-more:focus-visible { outline: none; background: var(--vscode-toolbar-hoverBackground); color: var(--vscode-foreground); }
-.drag-avatar { position: fixed; z-index: 100; top: -100px; left: -100px; max-width: 220px; padding: 6px 10px; border: 1px solid color-mix(in srgb, var(--accent) 70%, var(--vscode-widget-border)); border-radius: var(--radius-md); background: var(--vscode-editorWidget-background); box-shadow: var(--shadow-popover); color: var(--vscode-foreground); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.drag-avatar { position: fixed; z-index: 100; top: -100px; left: -100px; max-width: 220px; padding: 6px 10px; border: 1px solid color-mix(in srgb, var(--accent) 70%, var(--vscode-widget-border)); border-radius: var(--radius-md); background: var(--vscode-editorWidget-background, var(--surface-base)); box-shadow: var(--shadow-popover); color: var(--vscode-foreground); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 
 .commit-panel { flex: 0 0 auto; min-height: 0; display: flex; flex-direction: column; padding: 9px 10px 11px; background: color-mix(in srgb, var(--surface-base) 96%, var(--accent) 4%); }
 .commit-panel textarea { width: 100%; resize: vertical; min-height: 58px; max-height: 130px; padding: 8px 9px; border: 1px solid var(--vscode-input-border, var(--border-subtle)); border-radius: var(--radius-md); outline: 0; background: var(--vscode-input-background); color: var(--vscode-input-foreground); transition: border-color var(--motion-control), box-shadow var(--motion-control); }
@@ -345,7 +345,7 @@ body.commit-panel-resizing .commit-panel-splitter::after { top: 1px; height: 3px
 .commit-detail-empty > span { max-width: 190px; font-size: 10px; }
 .detail-empty-mark { display: grid; width: 27px; height: 27px; place-items: center; border-radius: 7px; background: color-mix(in srgb, var(--accent) 12%, transparent); color: var(--accent); font-size: 14px; }
 
-/* Golden-master mode deliberately removes Kivo-only motion and card emphasis. */
+/* Static host parity: list refreshes stay quiet; scoped interaction motion uses WAAPI. */
 .parity-mode .changelist,
 .parity-mode .file-row,
 .parity-mode .graph-row,
@@ -390,7 +390,7 @@ body.commit-panel-resizing .commit-panel-splitter::after { top: 1px; height: 3px
 
 .branch-overlay { position: fixed; inset: 0; z-index: 10; pointer-events: none; }
 .scrim { position: absolute; inset: 0; background: rgba(0,0,0,.25); opacity: 0; transition: opacity 140ms ease; backdrop-filter: blur(1px); }
-.branch-popup { position: absolute; z-index: 1; left: 7px; right: 7px; top: 35px; max-height: min(520px, calc(100vh - 45px)); display: flex; flex-direction: column; border: 1px solid var(--vscode-widget-border, var(--border-subtle)); border-radius: var(--radius-lg); background: var(--vscode-editorWidget-background); box-shadow: var(--shadow-popover); opacity: 0; transform: translateY(-5px) scale(.985); transform-origin: top center; transition: opacity 170ms ease, transform 190ms var(--ease); overflow: hidden; }
+.branch-popup { position: absolute; z-index: 1; left: 7px; right: 7px; top: 35px; max-height: min(520px, calc(100vh - 45px)); display: flex; flex-direction: column; border: 1px solid var(--vscode-widget-border, var(--border-subtle)); border-radius: var(--radius-lg); background: var(--vscode-editorWidget-background, var(--surface-base)); box-shadow: var(--shadow-popover); opacity: 0; transform: translateY(-5px) scale(.985); transform-origin: top center; transition: opacity 170ms ease, transform 190ms var(--ease); overflow: hidden; }
 .branch-overlay.open { pointer-events: auto; }
 .branch-overlay.open .scrim { opacity: 1; }
 .branch-overlay.open .branch-popup { opacity: 1; transform: translateY(0) scale(1); }
@@ -1649,3 +1649,20 @@ body.commit-zone-resizing, body.commit-zone-resizing * { cursor: row-resize !imp
 .operation-failure summary { cursor: pointer; color: var(--muted); }
 .operation-failure pre { white-space: pre-wrap; overflow-wrap: anywhere; font-size: 11px; user-select: text; }
 .worktree-badge { flex-shrink: 0; color: var(--muted); font-size: 10px; }
+
+/* Short, state-triggered motion; geometry and pointer targets stay stable. */
+.parity-mode .context-menu, .parity-mode .push-review-dialog, .toast, .toast.leaving { animation: none; }
+.parity-mode :is(.idea-toolbar-button, .icon-button, .operation-recovery-actions button, .commit-header-branch) { transition: background-color var(--motion-control), color var(--motion-control), opacity var(--motion-fast); }
+.parity-mode :is(.idea-toolbar-button, .icon-button, .operation-recovery-actions button, .commit-header-branch):active:not(:disabled) { opacity: .72; }
+[data-checkout-pending] { position: relative; overflow: hidden; }
+.log-current-branch > small { display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+[data-checkout-pending="true"]::after { content: ''; position: absolute; left: 0; right: 0; bottom: 0; height: 2px; background: var(--vscode-focusBorder, var(--accent)); transform-origin: left; animation: checkout-waiting 1100ms ease-in-out infinite; pointer-events: none; }
+@keyframes checkout-waiting { 0% { transform: translateX(-100%) scaleX(.35); } 100% { transform: translateX(100%) scaleX(.35); } }
+body[data-motion-paused="true"] [data-checkout-pending="true"]::after { animation-play-state: paused; }
+@media (prefers-reduced-motion: reduce) {
+  .parity-mode :is(.idea-toolbar-button, .icon-button, .operation-recovery-actions button, .commit-header-branch) { transition: none; }
+  [data-checkout-pending="true"]::after { animation: none; transform: none; opacity: .45; }
+}
+
+.parity-mode .commit-toolbar-menu { transition: none; }
+body[data-motion-paused="true"] .codicon-modifier-spin { animation-play-state: paused; }

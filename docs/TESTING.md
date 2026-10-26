@@ -47,3 +47,6 @@ Webview E2E covers primary-ref summaries and title space, branch comparison tabs
 ## Checkout / worktree recovery (0.5.7)
 
 `test/checkout.integration.test.ts` runs real Git repositories for occupied branches (including remote tracking), untouched staged/unstaged/untracked files on rejection, symmetric linked-worktree snapshots, occupation races after saving, exact stash recovery, checkout/create/detached hook failures, and ordinary switches. `test/operationRecovery.test.ts` checks retained host state, panel replay, invisible-view notifications, late preflight results, repository changes and revalidated worktree opening. `scripts/checkout-recovery-regressions.mjs` checks the production Webview's persistent cards, safe details, stale replies, explicit worktree actions, keyboard/narrow layouts and exact stash-detail routing.
+
+
+`motion-regressions.mjs` verifies actual WAAPI entrances, stable no-op refreshes, interruption-safe error exits, keyboard availability, active-animation cancellation on reduced-motion changes, fast-operation suppression and actual branch updates. It runs inside the full Webview E2E suite. The preference-change scenario slows a real in-flight animation before yielding, so natural completion cannot masquerade as cancellation on a slow runner.

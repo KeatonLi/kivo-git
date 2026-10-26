@@ -2,6 +2,8 @@
 
 > Status: **active release gate**
 >
+> Current exception: the user-requested [scoped interaction motion](interaction-motion.md) is permitted within the existing layout. Decorative and background-refresh animation remain outside scope.
+
 > Until this contract passes user A/B testing, Kivo Git must not introduce a new visual language, custom motion, sync dashboard, or other differentiating UI. The only product-owned identity allowed in this phase is the Kivo Git name and mark.
 
 ## Reference lock
@@ -51,3 +53,8 @@ Kivo Git is considered in **parity mode** when the following is true:
 - A fixture repository covers linear history, a merge, a branch fork, remote refs, tags, and a detached/empty state.
 - A screenshot or screen recording for each P0 row is compared against the locked reference at the same viewport and state.
 - The user confirms the bottom-panel placement, Log density, Graph topology, selection, filters, and details feel consistent with IDEA/Rebased.
+
+
+## Interaction motion clarification
+
+The user has explicitly requested interaction animation after the 0.5.7 checkout fixes. The scoped state transitions in [interaction motion](interaction-motion.md) are now allowed within the existing composition. Static host/IDE parity, stable reading positions and the prohibition on decorative or background-refresh animation remain in force.

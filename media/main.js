@@ -101,6 +101,8 @@ const ui = {
   branchPopupRemoteExpanded: false,
   busy: false,
   operationKind: undefined,
+  operationMessage: '',
+  checkoutPending: false,
   operationId: 0,
   syncPhase: 'idle',
   lastFetchedAt: undefined,
@@ -164,11 +166,14 @@ let graphViewportFrame;
 let graphScrollFrame;
 let commitScrollTimer;
 let renderedRoot;
+let checkoutFeedbackTimer;
 let commitResizeObserver;
 let observedCommitUpper;
 const reducedMotion = window.matchMedia('(prefers-reduced-motion: reduce)');
 const runningMotion = new Set();
 const elementMotion = new WeakMap();
+let motionPreferenceFrame;
+const motionTiming = { enter: 140, exit: 100, result: 180, easing: 'cubic-bezier(.2,.8,.2,1)' };
 
 function motionEnabled() { return !reducedMotion.matches && !document.hidden; }
 
@@ -181,16 +186,80 @@ function playMotion(element, frames, options) {
   const cleanup = () => {
     runningMotion.delete(animation);
     if (elementMotion.get(element) === animation) elementMotion.delete(element);
+    if (!runningMotion.size && motionPreferenceFrame !== undefined) {
+      cancelAnimationFrame(motionPreferenceFrame);
+      motionPreferenceFrame = undefined;
+    }
   };
   animation.finished.then(cleanup, cleanup);
+  if (motionPreferenceFrame === undefined) motionPreferenceFrame = requestAnimationFrame(watchMotionPreferences);
+  return animation;
+}
+
+// Embedded browsers can deliver media-query change events after the next paint.
+// Check only while a WAAPI transition is active, then stop scheduling frames.
+function watchMotionPreferences() {
+  motionPreferenceFrame = undefined;
+  if (!motionEnabled()) { stopMotion(); return; }
+  if (runningMotion.size) motionPreferenceFrame = requestAnimationFrame(watchMotionPreferences);
 }
 
 function stopMotion() {
+  if (motionPreferenceFrame !== undefined) cancelAnimationFrame(motionPreferenceFrame);
+  motionPreferenceFrame = undefined;
   for (const animation of runningMotion) animation.cancel();
   runningMotion.clear();
 }
 reducedMotion.addEventListener('change', () => { if (reducedMotion.matches) stopMotion(); });
-document.addEventListener('visibilitychange', () => { if (document.hidden) stopMotion(); });
+document.addEventListener('visibilitychange', () => {
+  document.body.dataset.motionPaused = String(document.hidden);
+  if (document.hidden) stopMotion();
+});
+
+function transientSurfaces() {
+  return new Map(['.branch-popup', '.context-menu', '.commit-toolbar-menu.open', '.sync-menu.open', '.list-menu.open', '.workflow-dialog', '.push-review-dialog:not(.workflow-dialog)', '.operation-failure'].map(selector => {
+    const element = app.querySelector(selector);
+    return [selector, { element, identity: element?.getAttribute('data-failure-id') || element?.getAttribute('aria-label') }];
+  }));
+}
+
+function revealSurfaces(previous) {
+  if (!motionEnabled()) return;
+  for (const [selector, next] of transientSurfaces()) {
+    const before = previous.get(selector);
+    if (!next.element || before?.element === next.element && before?.identity === next.identity) continue;
+    playMotion(next.element, [{ opacity: 0, transform: 'translateY(-4px)' }, { opacity: 1, transform: 'translateY(0)' }],
+      { duration: selector === '.operation-failure' ? 160 : motionTiming.enter, easing: motionTiming.easing });
+  }
+}
+
+function closeFailureMotion() {
+  const element = app.querySelector('.operation-failure');
+  if (element) {
+    element.inert = true;
+    element.setAttribute('aria-hidden', 'true');
+  }
+  const start = element ? { opacity: getComputedStyle(element).opacity, transform: getComputedStyle(element).transform } : { opacity: 1, transform: 'none' };
+  const animation = playMotion(element, [start, { opacity: 0, transform: 'translateY(-3px)' }],
+    { duration: motionTiming.exit, easing: 'ease-in' });
+  const finish = () => { if (!ui.failure) render(); };
+  if (animation) animation.finished.then(finish, finish);
+  else finish();
+}
+
+function updateCheckoutFeedback(message) {
+  clearTimeout(checkoutFeedbackTimer);
+  ui.checkoutPending = false;
+  ui.operationMessage = message.phase === 'loading' ? message.message : '';
+  if (message.phase !== 'loading' || !['checkout', 'branch'].includes(message.kind)) return;
+  const id = ui.operationId, root = ui.snapshot?.root;
+  checkoutFeedbackTimer = setTimeout(() => {
+    if (!ui.busy || ui.operationId !== id || ui.snapshot?.root !== root) return;
+    ui.checkoutPending = true;
+    render();
+    if (!message.feedbackSurface || message.feedbackSurface === surface) toast(message.message, 'loading');
+  }, 120);
+}
 
 function changelistMovement(before, after, viewportHeight) {
   if (!before || before.listId === after.listId || !before.width || !before.height || !after.width || !after.height) return undefined;
@@ -762,6 +831,7 @@ function clearDragFeedback() {
 function keyFor(node) {
   if (node.nodeType !== Node.ELEMENT_NODE) return null;
   if (node.id) return `id:${node.id}`;
+  if (node.dataset.failureId) return `failure:${node.dataset.failureId}`;
   if (node.dataset.path) return `file:${node.dataset.path}`;
   if (node.dataset.listId && node.classList.contains('changelist')) return `list:${node.dataset.listId}`;
   if (node.dataset.checkout) return `branch:${node.dataset.checkout}`;
@@ -815,6 +885,7 @@ function patchApp(html) {
   // Patch the app root against the same element shape. Using a generic div here
   // would strip #app on the first snapshot and collapse the flex-height tool
   // window after every webview reload.
+  const previousSurfaces = transientSurfaces();
   const target = document.createElement('main');
   target.id = 'app';
   target.innerHTML = html;
@@ -825,7 +896,7 @@ function patchApp(html) {
     const list = app.querySelector(selector);
     return { list, top: list?.scrollTop || 0, anchor: captureReadingAnchor(list, '[data-path], [data-hash]') };
   }) : [];
-  const pool = new Map([...app.querySelectorAll('[id], [data-path], [data-list-id], [data-checkout], [data-hash]')].map((node) => [keyFor(node), node]));
+  const pool = new Map([...app.querySelectorAll('[id], [data-path], [data-list-id], [data-checkout], [data-hash], [data-failure-id]')].map((node) => [keyFor(node), node]));
   const before = new Map();
   if (motionEnabled()) {
     const destinations = new Map([...target.querySelectorAll('.file-row')].filter((row) => !row.closest('.collapsed')).map((row) => [row.dataset.path, row.dataset.listId]));
@@ -837,6 +908,7 @@ function patchApp(html) {
     }
   }
   patchNode(app, target, pool);
+  revealSurfaces(previousSurfaces);
   if (focusedCommit && document.activeElement === document.body) {
     const row = app.querySelector(`[data-commit="${CSS.escape(focusedCommit)}"]`);
     if (row && !row.closest('[inert]')) row.focus({ preventScroll: true });
@@ -1076,7 +1148,7 @@ function renderCommitRepository(s) {
   const label = `${icon('repo')}<span class="commit-repository-name">${escapeHtml(name)}</span>`;
   return `<div class="commit-repository-header">${s.repositoryCount > 1
     ? `<button class="commit-repository-label commit-repository-picker" data-action="choose-repository" aria-label="Choose repository, current ${escapeHtml(name)}" aria-haspopup="dialog" title="${escapeHtml(title)}\nChoose repository" ${ui.busy ? 'disabled' : ''}>${label}${icon('chevron-down')}</button>`
-    : `<div class="commit-repository-label" aria-label="Current repository ${escapeHtml(name)}" title="${escapeHtml(title)}">${label}</div>`}<button class="commit-header-branch" data-action="branches" aria-haspopup="dialog" aria-expanded="${ui.branchOpen}" title="${escapeHtml(s.branch)}" aria-label="Current branch ${escapeHtml(s.branch)}; open branches" ${ui.busy ? 'disabled' : ''}>${icon('git-branch')}<span>${escapeHtml(s.branch === '(detached)' ? 'Detached HEAD' : s.branch)}</span></button></div>`;
+    : `<div class="commit-repository-label" aria-label="Current repository ${escapeHtml(name)}" title="${escapeHtml(title)}">${label}</div>`}<button class="commit-header-branch" data-checkout-pending="${ui.checkoutPending}" data-action="branches" aria-haspopup="dialog" aria-expanded="${ui.branchOpen}" title="${escapeHtml(s.branch)}" aria-label="Current branch ${escapeHtml(s.branch)}; open branches" ${ui.busy ? 'disabled' : ''}>${icon(ui.checkoutPending ? 'loading' : 'git-branch', ui.checkoutPending ? 'codicon-modifier-spin' : '')}<span>${escapeHtml(s.branch === '(detached)' ? 'Detached HEAD' : s.branch)}</span></button></div>`;
 }
 
 function renderCommitToolbar(s) {
@@ -1538,7 +1610,7 @@ function renderCommitDetails(s) {
 function renderLogBranchRow(branch, depth = 0, sync = '') {
   const kind = branch.kind === 'tag' ? 'tag' : 'branch';
   const label = branch.leaf || branch.name;
-  const row = `<button class="log-branch-row ${branch.current ? 'current' : ''} ${ui.graphBranchFilter === branch.name ? 'selected' : ''}" style="--tree-indent:${depth * 13}px" data-log-branch="${escapeHtml(branch.name)}" data-branch-ref="${escapeHtml(branch.name)}" data-branch-remote="${branch.remote ? 'true' : 'false'}" data-branch-kind="${kind}" aria-pressed="${ui.graphBranchFilter === branch.name}" aria-haspopup="menu" title="Show ${escapeHtml(branch.name)} history · Right-click for ${kind} actions">${icon(branch.remote ? 'cloud' : kind === 'tag' ? 'tag' : 'git-branch')}<span>${escapeHtml(label)}</span>${sync}${branch.worktreePath ? `<small class="worktree-badge" title="${escapeHtml(branch.worktreePath)}">Worktree</small>` : ''}${branch.current ? '<small>HEAD</small>' : ''}</button>`;
+  const row = `<button class="log-branch-row ${branch.current ? 'current' : ''} ${ui.graphBranchFilter === branch.name ? 'selected' : ''}" style="--tree-indent:${depth * 13}px" data-log-branch="${escapeHtml(branch.name)}" data-branch-ref="${escapeHtml(branch.name)}" data-branch-remote="${branch.remote ? 'true' : 'false'}" data-branch-kind="${kind}" aria-pressed="${ui.graphBranchFilter === branch.name}" aria-haspopup="menu" title="Show ${escapeHtml(branch.name)} history · Right-click for ${kind} actions">${icon(branch.current && ui.checkoutPending ? 'loading' : branch.remote ? 'cloud' : kind === 'tag' ? 'tag' : 'git-branch', branch.current && ui.checkoutPending ? 'codicon-modifier-spin' : '')}<span>${escapeHtml(label)}</span>${sync}${branch.worktreePath ? `<small class="worktree-badge" title="${escapeHtml(branch.worktreePath)}">Worktree</small>` : ''}${branch.current ? '<small>HEAD</small>' : ''}</button>`;
   if (branch.remote || branch.current || kind === 'tag' || !branch.upstream || branch.upstreamGone) return row;
   const title = `Update ${branch.name} from ${branch.upstream} (fast-forward only)`;
   return `<div class="log-branch-entry ${ui.graphBranchFilter === branch.name ? 'selected' : ''}">${row}<button class="log-branch-update" data-update-branch="${escapeHtml(branch.name)}" aria-label="${escapeHtml(title)}" title="${escapeHtml(title)}" ${ui.busy ? 'disabled' : ''}>${icon('arrow-down')}</button></div>`;
@@ -1594,7 +1666,7 @@ function renderLogBranchPane(s) {
     </section>`;
   };
   return `<aside class="log-branch-pane" id="kivo-log-branches" aria-label="History branches">
-    <section class="log-current-branch" aria-label="Current checkout"><small>Current checkout</small>${current ? renderLogBranchRow(current, 0, renderLogBranchSync(current, s)) : `<span class="detached-checkout">${icon(s.branch === '(detached)' ? 'git-commit' : 'git-branch')} ${escapeHtml(s.branch === '(detached)' ? 'Detached HEAD' : s.branch)}</span>`}</section>
+    <section class="log-current-branch" data-checkout-pending="${ui.checkoutPending}" aria-label="Current checkout"><small role="status" title="${escapeHtml(ui.checkoutPending ? ui.operationMessage : 'Current checkout')}">${escapeHtml(ui.checkoutPending ? ui.operationMessage : 'Current checkout')}</small>${current ? renderLogBranchRow(current, 0, renderLogBranchSync(current, s)) : `<span class="detached-checkout">${icon(s.branch === '(detached)' ? 'git-commit' : 'git-branch')} ${escapeHtml(s.branch === '(detached)' ? 'Detached HEAD' : s.branch)}</span>`}</section>
     <label class="log-branch-search">${icon('search')}<input id="log-branch-search" aria-label="Branch or tag" placeholder="Branch or tag" value="${escapeHtml(ui.logBranchQuery)}"></label>
     <div class="log-branch-tree">
       ${group('local', 'Local', local, query ? 'No matching local branches' : 'No other local branches')}
@@ -3236,7 +3308,9 @@ function toast(message, phase = 'success') {
   element.setAttribute('role', phase === 'error' ? 'alert' : 'status');
   element.innerHTML = `${icon(phase === 'success' ? 'check' : phase === 'loading' ? 'loading' : 'error', phase === 'loading' ? 'codicon-modifier-spin' : '')}<p>${escapeHtml(message)}</p><button class="toast-close" aria-label="Dismiss notification" title="Dismiss">${icon('close')}</button>`;
   clearTimeout(toastRegion.firstElementChild?.dismissTimer);
+  element.returnFocus = document.activeElement;
   toastRegion.replaceChildren(element);
+  playMotion(element, [{ opacity: 0, transform: 'translateY(4px)' }, { opacity: 1, transform: 'translateY(0)' }], { duration: 120, easing: motionTiming.easing });
   const scheduleDismiss = () => {
     clearTimeout(element.dismissTimer);
     if (phase === 'success' && !element.matches(':hover, :focus-within')) element.dismissTimer = setTimeout(() => dismissToast(element), phase === 'error' ? 8000 : 2800);
@@ -3253,10 +3327,18 @@ function toast(message, phase = 'success') {
 function dismissToast(element) {
   if (!element?.isConnected || element.classList.contains('leaving')) return;
   clearTimeout(element.dismissTimer);
-  if (!motionEnabled()) { element.remove(); return; }
+  const heldFocus = element.contains(document.activeElement);
   element.classList.add('leaving');
-  element.addEventListener('animationend', () => element.remove(), { once: true });
-  setTimeout(() => element.remove(), 240);
+  element.inert = true;
+  element.setAttribute('aria-hidden', 'true');
+  if (heldFocus) {
+    const target = element.returnFocus?.isConnected && !element.returnFocus.disabled && !element.returnFocus.closest('[inert]') ? element.returnFocus : app.querySelector('[data-action="refresh"]');
+    target?.focus({ preventScroll: true });
+  }
+  const start = { opacity: getComputedStyle(element).opacity, transform: getComputedStyle(element).transform };
+  const animation = playMotion(element, [start, { opacity: 0, transform: 'translateY(3px)' }], { duration: motionTiming.exit, easing: 'ease-in' });
+  if (animation) animation.finished.then(() => element.remove(), () => element.remove());
+  else element.remove();
 }
 
 window.addEventListener('message', (event) => {
@@ -3437,7 +3519,7 @@ window.addEventListener('message', (event) => {
     ui.emptyMessage = undefined;
     ui.snapshot = message.payload;
     const version = ui.failureVersions.get(nextRoot) || 0;
-    if (previousRoot !== nextRoot) { ui.failure = undefined; ui.busy = false; ui.operationKind = undefined; }
+    if (previousRoot !== nextRoot) { clearTimeout(checkoutFeedbackTimer); ui.failure = undefined; ui.busy = false; ui.operationKind = undefined; ui.checkoutPending = false; ui.operationMessage = ''; }
     if (message.payload.failure && message.payload.failure.id >= version && message.payload.failure.id > (ui.failureVersions.get(`dismissed:${nextRoot}`) || 0)) {
       ui.failure = message.payload.failure;
       ui.failureVersions.set(nextRoot, message.payload.failure.id);
@@ -3455,7 +3537,14 @@ window.addEventListener('message', (event) => {
         toast('Branch changed. Reopen Push to review the latest commits.', 'error');
       }
     }
-    if (previousRoot === nextRoot && previousBranch !== message.payload.branch) clearRecentCommitPreview(true);
+    if (previousRoot === nextRoot && previousBranch !== message.payload.branch) {
+      clearRecentCommitPreview(true);
+      requestAnimationFrame(() => {
+        if (ui.snapshot?.root !== nextRoot || ui.snapshot?.branch !== message.payload.branch) return;
+        const title = app.querySelector(surface === 'history' ? '.log-current-branch .log-branch-row > span' : '.commit-header-branch > span');
+        playMotion(title, [{ opacity: .45, transform: 'translateY(2px)' }, { opacity: 1, transform: 'translateY(0)' }], { duration: motionTiming.result, easing: motionTiming.easing });
+      });
+    }
     else if (ui.recentSelectedHash && !recentCommits(message.payload).some((commit) => commit.hash === ui.recentSelectedHash)) clearRecentCommitPreview();
     ui.graphLoadingMore = false;
     ui.historyRefLoading = false;
@@ -3511,7 +3600,8 @@ window.addEventListener('message', (event) => {
     if (!message.failure) ui.failureVersions.set(`dismissed:${message.root}`, message.id);
     else ui.failureVersions.delete(`dismissed:${message.root}`);
     ui.failure = message.failure || undefined;
-    render();
+    if (message.failure) render();
+    else closeFailureMotion();
     if (!message.failure) requestAnimationFrame(() => app.querySelector(surface === 'history' ? '.log-branch-row.current' : '[data-action="branches"]')?.focus());
   }
   if (message.type === 'openSavedStash' && message.root === ui.snapshot?.root) requestWorkflow('stashDetails', { hash: message.hash });
@@ -3522,9 +3612,10 @@ window.addEventListener('message', (event) => {
     document.querySelectorAll('.toast.loading').forEach((item) => dismissToast(item));
     ui.busy = message.phase === 'loading';
     ui.operationKind = message.phase === 'loading' ? message.kind : undefined;
+    updateCheckoutFeedback(message);
     if (message.phase === 'loading') ui.pullMenuOpen = false;
     if (message.phase === 'success' && message.clearsCommit) { ui.commitMessage = ''; ui.selected.clear(); persist(); }
-    if (message.phase !== 'error' && (!message.feedbackSurface || message.feedbackSurface === surface)) toast(message.message, message.phase);
+    if (message.phase !== 'error' && !(message.phase === 'loading' && ['checkout', 'branch'].includes(message.kind)) && (!message.feedbackSurface || message.feedbackSurface === surface)) toast(message.message, message.phase);
     if (message.kind === 'stash' && message.phase !== 'loading' && ui.workflow && (!message.feedbackSurface || message.feedbackSurface === surface)) {
       if (message.phase === 'success') { ui.stashMessage = ''; requestWorkflow('stashes'); }
       else { ui.workflow.error = message.message; ui.workflow.loading = false; }

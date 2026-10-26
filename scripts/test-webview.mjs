@@ -7,6 +7,7 @@ import { mkdir } from 'node:fs/promises';
 import { verifyExperienceRegressions } from './webview-experience-regressions.mjs';
 import { verifyHistorySelection } from './history-selection-regressions.mjs';
 import { verifyCheckoutRecovery } from './checkout-recovery-regressions.mjs';
+import { verifyInteractionMotion } from './motion-regressions.mjs';
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const require = createRequire(import.meta.url);
@@ -77,6 +78,7 @@ try {
   await verifyExperienceRegressions(page, query => openSurface(page, query));
   await verifyHistorySelection(page, query => openSurface(page, query));
   await verifyCheckoutRecovery(page, query => openSurface(page, query));
+  await verifyInteractionMotion(page, query => openSurface(page, query));
 
   await page.goto(`${baseUrl}/test/visual-preview.html?surface=changes&state=loading`);
   await page.waitForSelector('.repository-loading');

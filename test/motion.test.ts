@@ -6,11 +6,12 @@ import { describe, expect, it, vi } from 'vitest';
 async function motion() {
   const context: Record<string, any> = {
     reducedMotion: { matches: false }, document: { hidden: false },
-    runningMotion: new Set(), elementMotion: new WeakMap(), Node: { ELEMENT_NODE: 1 }
+    runningMotion: new Set(), elementMotion: new WeakMap(), motionPreferenceFrame: undefined,
+    requestAnimationFrame: vi.fn().mockReturnValue(1), cancelAnimationFrame: vi.fn(), Node: { ELEMENT_NODE: 1 }
   };
   const source = await readFile('media/main.js', 'utf8');
   const ast = ts.createSourceFile('main.js', source, ts.ScriptTarget.Latest, true, ts.ScriptKind.JS);
-  const names = new Set(['motionEnabled', 'playMotion', 'stopMotion', 'changelistMovement', 'keyFor']);
+  const names = new Set(['motionEnabled', 'playMotion', 'stopMotion', 'watchMotionPreferences', 'changelistMovement', 'keyFor']);
   runInNewContext(ast.statements.filter((node) => ts.isFunctionDeclaration(node) && node.name && names.has(node.name.text)).map((node) => node.getText(ast)).join('\n'), context);
   return context;
 }
@@ -50,6 +51,27 @@ describe('state-only motion', () => {
     await Promise.resolve();
     expect(context.runningMotion.size).toBe(0);
     expect(context.elementMotion.has(element)).toBe(false);
+  });
+
+  it('cancels active motion on the next frame even if a media-change event is delayed', async () => {
+    const context = await motion();
+    const animation = { cancel: vi.fn(), finished: new Promise(() => {}) };
+    context.playMotion({ animate: () => animation }, [], {});
+    expect(context.requestAnimationFrame).toHaveBeenCalledOnce();
+    context.reducedMotion.matches = true;
+    context.watchMotionPreferences();
+    expect(animation.cancel).toHaveBeenCalledOnce();
+    expect(context.runningMotion.size).toBe(0);
+    expect(context.requestAnimationFrame).toHaveBeenCalledOnce();
+  });
+
+  it('stops preference monitoring as soon as the last transition finishes', async () => {
+    const context = await motion();
+    context.playMotion({ animate: () => ({ cancel: vi.fn(), finished: Promise.resolve() }) }, [], {});
+    await Promise.resolve();
+    expect(context.runningMotion.size).toBe(0);
+    expect(context.cancelAnimationFrame).toHaveBeenCalledWith(1);
+    expect(context.motionPreferenceFrame).toBeUndefined();
   });
 
   it('does not confuse a changelist container with its menu actions during DOM reuse', async () => {

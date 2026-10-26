@@ -2,6 +2,14 @@
 
 ## Unreleased
 
+## 0.5.8
+
+- Add short, state-triggered entrances for branch pickers, menus, review dialogs and operation failures, while keeping ordinary refreshes and file lists still.
+- Delay checkout waiting feedback by 120ms to avoid flashing on fast operations; keep the actual current branch until Git reports its new state.
+- Fade dismissed errors and notifications out after immediately releasing their keyboard path. Cancel overlapping animations and preserve newer errors during interrupted exits.
+- Respect reduced-motion preferences and hidden views, and give the actual branch title one restrained transition after checkout.
+- Fix menu background fallbacks for themes or previews without an editor-widget surface variable. Add real-browser motion regressions and an animated preview.
+
 ## 0.5.7 - 2026-10-26
 
 - Detect branches used by other worktrees before saving changes. Show their location and open registered worktrees in a new VS Code window.
