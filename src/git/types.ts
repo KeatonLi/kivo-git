@@ -1,3 +1,4 @@
+import type { WorktreeSummary } from './checkout';
 export type ChangeKind = 'modified' | 'added' | 'deleted' | 'renamed' | 'untracked' | 'conflict';
 
 export interface GitChange {
@@ -10,6 +11,7 @@ export interface GitChange {
 }
 
 export interface BranchSummary {
+  worktreePath?: string;
   name: string;
   oid?: string;
   current: boolean;
@@ -110,6 +112,7 @@ export interface ChangeList {
 }
 
 export interface RepositorySnapshot {
+  worktrees?: WorktreeSummary[];
   operation?: GitOperationState;
   repositoryName: string;
   /** Stable host/webview identity: exactly the selected GitClient.workspaceRoot. */

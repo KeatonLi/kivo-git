@@ -1,5 +1,8 @@
 import * as vscode from 'vscode';
 import path from 'node:path';
+import { promises as fs } from 'node:fs';
+import { operationFailure, type OperationFailure, type RecoveryAction } from './operationFeedback';
+import { sameWorktreePath } from './git/checkout';
 import { FileIconThemeResolver, type WebviewFileIcon } from './FileIconThemeResolver';
 import { GitClient } from './git/GitClient';
 import type { CherryPickPreview, CommitDetails, PullStrategy, RepositorySnapshot, WorkflowFile } from './git/types';
@@ -8,6 +11,9 @@ import { PushReviewSession } from './PushReviewSession';
 import { isMessageAllowedOnSurface, KivoViewTypes, type KivoSurface, surfaceForViewType } from './viewLayout';
 
 type WebviewMessage =
+  | { type: 'operationRecovery'; root: string; id: number; action: RecoveryAction | 'dismiss' }
+  | { type: 'openWorktree'; root: string; branch: string }
+  | { type: 'chooseWorktree'; root: string }
   | { type: 'workflowRequest'; root: string; requestId: number; kind: 'compare' | 'stashes' | 'stashDetails' | 'cherryPick'; branch?: string; remote?: boolean; hash?: string; hashes?: string[] }
   | { type: 'cherryPick'; root: string; requestId: number }
   | { type: 'closeWorkflow'; requestId: number }
@@ -46,8 +52,8 @@ type WebviewMessage =
   | { type: 'reuseCommitMessage'; draft: string }
   | { type: 'configureGitIdentity' | 'configureUpstream' }
   | { type: 'chooseRepository' }
-  | { type: 'checkout'; branch: string; remote: boolean }
-  | { type: 'createBranch'; startPoint: string }
+  | { type: 'checkout'; root: string; branch: string; remote: boolean }
+  | { type: 'createBranch'; root: string; startPoint: string }
   | { type: 'mergeBranch'; branch: string }
   | { type: 'updateBranch'; branch: string }
   | { type: 'pushBranch'; branch: string }
@@ -55,7 +61,7 @@ type WebviewMessage =
   | { type: 'deleteBranch'; branch: string; remote: boolean }
   | { type: 'copyBranchName'; branch: string }
   | { type: 'createTag'; hash: string }
-  | { type: 'checkoutRevision'; hash: string }
+  | { type: 'checkoutRevision'; root: string; hash: string }
   | { type: 'copyCommitHash'; hash: string }
   | { type: 'copyCommitSubject'; hash: string }
   | { type: 'createChangelist' }
@@ -64,7 +70,7 @@ type WebviewMessage =
   | { type: 'setActiveChangelist'; id: string }
   | { type: 'moveFiles'; paths: string[]; listId: string };
 type OperationKind = 'commit' | 'checkout' | 'branch' | 'tag' | 'changelist' | 'move' | 'track' | 'rollback' | 'fetch' | 'pull' | 'push' | 'identity' | 'stash' | 'conflict' | 'cherry-pick';
-type WebviewRepositorySnapshot = RepositorySnapshot & { fileIcons: Record<string, WebviewFileIcon>; repositoryCount: number; allRepositoryChanges: number };
+type WebviewRepositorySnapshot = RepositorySnapshot & { failure?: OperationFailure; fileIcons: Record<string, WebviewFileIcon>; repositoryCount: number; allRepositoryChanges: number };
 const HISTORY_PAGE_SIZE = 80;
 
 export class IdeaGitViewProvider implements vscode.WebviewViewProvider, vscode.TextDocumentContentProvider, vscode.Disposable {
@@ -92,6 +98,8 @@ export class IdeaGitViewProvider implements vscode.WebviewViewProvider, vscode.T
   private watcher?: vscode.FileSystemWatcher;
   private watchedRoot?: string;
   private operationId = 0;
+  private readonly operationFailures = new Map<string, OperationFailure>();
+  private operationOutput?: vscode.OutputChannel;
   private operationRunning = false;
   private readonly pushReview = new PushReviewSession();
   private readonly workflowSessions = new Map<KivoSurface, { root: string; id: number; files: WorkflowFile[]; cherryPick?: CherryPickPreview }>();
@@ -420,6 +428,7 @@ export class IdeaGitViewProvider implements vscode.WebviewViewProvider, vscode.T
     if (!view) return;
     const payload: WebviewRepositorySnapshot = {
       ...snapshot,
+      failure: this.operationFailures?.get(snapshot.root),
       repositoryCount: this.availableRepositories().length,
       allRepositoryChanges: this.badgeCount,
       fileIcons: surface === 'changes'
@@ -618,6 +627,7 @@ export class IdeaGitViewProvider implements vscode.WebviewViewProvider, vscode.T
       await vscode.commands.executeCommand('workbench.action.openSettings', '@ext:KeatonLi.kivo-git');
       return;
     }
+    let messageRoot: string | undefined;
     try {
       // Empty-state navigation must work before a Git client can be created.
       if (message.type === 'openFolder') {
@@ -636,7 +646,33 @@ export class IdeaGitViewProvider implements vscode.WebviewViewProvider, vscode.T
         return;
       }
       const client = await this.getClient();
+      messageRoot = client.workspaceRoot;
+      if (['checkout', 'createBranch', 'checkoutRevision'].includes(message.type) && (!('root' in message) || message.root !== client.workspaceRoot)) {
+        await this.postToView(surface, { type: 'notice', phase: 'error', message: 'Repository changed. Refresh and choose the branch again.' });
+        await this.refresh(true);
+        return;
+      }
       switch (message.type) {
+        case 'operationRecovery':
+          await this.recoverOperation(client, surface, message);
+          return;
+        case 'openWorktree': {
+          if (message.root !== client.workspaceRoot) return;
+          const tree = (await client.getWorktrees()).find(tree => tree.branch === message.branch);
+          if (!tree) throw new Error('This worktree is no longer registered. Refresh and try again.');
+          await this.openRegisteredWorktree(client, tree.path);
+          return;
+        }
+        case 'chooseWorktree': {
+          if (message.root !== client.workspaceRoot) return;
+          const trees = await client.getWorktrees();
+          const chosen = await vscode.window.showQuickPick(trees.filter(tree => !tree.bare).map(tree => ({
+            label: tree.branch || (tree.detached ? 'Detached HEAD' : 'Worktree'), detail: tree.path,
+            description: tree.prunable !== undefined ? 'Unavailable · check directory' : tree.locked !== undefined ? 'Locked' : undefined, tree
+          })), { title: 'Open Worktree in a New Window', placeHolder: 'Each worktree has its own files and index' });
+          if (chosen && this.selectedWorkspace()?.uri.fsPath === client.workspaceRoot) await this.openRegisteredWorktree(client, chosen.tree.path);
+          return;
+        }
         case 'searchHistory': {
           const requestId = Number(message.requestId);
           if (!Number.isSafeInteger(requestId) || requestId < 0) return;
@@ -976,12 +1012,17 @@ export class IdeaGitViewProvider implements vscode.WebviewViewProvider, vscode.T
       if (message.type === 'workflowRequest' && Number.isSafeInteger(message.requestId) && message.requestId >= 0) {
         await this.postToView(surface, { type: 'workflowResult', root: message.root, requestId: message.requestId, error: detail });
       }
+      if (['checkout', 'checkoutRevision', 'createBranch'].includes(message.type)) {
+        const root = messageRoot || this.selectedWorkspace()?.uri.fsPath;
+        if (root) { await this.recordOperationFailure(error, root, 'checkout', ++this.operationId); return; }
+      }
       await this.postToView(surface, { type: 'notice', phase: 'error', message: detail });
       void vscode.window.showErrorMessage(`${IdeaGitViewProvider.productName}: ${detail}`);
     }
   }
 
   private async checkoutWithReview(client: GitClient, surface: KivoSurface, branch: string, remote: boolean): Promise<void> {
+    await client.checkCheckout(branch, remote);
     const snapshot = await client.snapshot(5);
     if (snapshot.operation) throw new Error('Finish the current Git operation or conflicts before switching branches.');
     let stashFirst = false;
@@ -993,6 +1034,7 @@ export class IdeaGitViewProvider implements vscode.WebviewViewProvider, vscode.T
       if (!choice || this.selectedWorkspace()?.uri.fsPath !== client.workspaceRoot) return;
       stashFirst = choice.label === 'Stash and Switch';
     }
+    if (this.selectedWorkspace()?.uri.fsPath !== client.workspaceRoot) return;
     await this.operation('checkout', `Switching to ${branch}…`, () => stashFirst ? client.stashAndCheckout(branch, remote) : client.checkout(branch, remote), `Switched to ${branch}${stashFirst ? '; changes saved in Stashes' : ''}`, false, surface);
   }
 
@@ -1010,7 +1052,7 @@ export class IdeaGitViewProvider implements vscode.WebviewViewProvider, vscode.T
       ignoreFocusOut: true,
       validateInput: (value) => value.trim() ? undefined : 'Enter a branch name.'
     });
-    if (name === undefined) return;
+    if (name === undefined || this.selectedWorkspace()?.uri.fsPath !== client.workspaceRoot) return;
     const branch = name.trim();
     await this.operation('branch', `Creating ${branch} from ${startPoint}…`, () => client.createBranch(branch, startPoint), `Created and switched to ${branch}`);
   }
@@ -1034,7 +1076,7 @@ export class IdeaGitViewProvider implements vscode.WebviewViewProvider, vscode.T
       { modal: true, detail: 'You can inspect the repository at this revision. Create a branch before committing new work.' },
       'Checkout Revision'
     );
-    if (choice !== 'Checkout Revision') return;
+    if (choice !== 'Checkout Revision' || this.selectedWorkspace()?.uri.fsPath !== client.workspaceRoot) return;
     await this.operation('checkout', `Checking out ${hash.slice(0, 8)}…`, () => client.checkoutRevision(hash), `Checked out ${hash.slice(0, 8)}`);
   }
 
@@ -1353,30 +1395,80 @@ export class IdeaGitViewProvider implements vscode.WebviewViewProvider, vscode.T
     await this.operation('move', uniquePaths.length === 1 ? `Moving ${uniquePaths[0]}…` : `Moving ${uniquePaths.length} files…`, () => client.moveToChangelist(uniquePaths, target.id), `Moved to ${target.label}`);
   }
 
+  private async recordOperationFailure(error: unknown, root: string, kind: string, id: number): Promise<void> {
+    const failure = operationFailure(error, { id, root, kind });
+    // Keep only one recent failure per worktree and bound retention in long sessions.
+    this.operationFailures.delete(root);
+    this.operationFailures.set(root, failure);
+    if (this.operationFailures.size > 20) this.operationFailures.delete(this.operationFailures.keys().next().value!);
+    this.operationOutput ||= vscode.window.createOutputChannel('Kivo Git Operations');
+    this.operationOutput.appendLine(`[${new Date().toISOString()}] ${kind} · ${root}\n${failure.title}\n${failure.details}\n${failure.stashHash ? `Saved stash: ${failure.stashHash}\n` : ''}`);
+    await this.postToReadyViews({ type: 'operationFailure', root, failure, id });
+    if (![...this.views.values()].some(view => view.visible) && this.selectedWorkspace()?.uri.fsPath === root) {
+      void vscode.window.showErrorMessage(`Kivo Git: ${failure.title}`, 'Show Details', 'Open History').then(choice => {
+        if (choice === 'Show Details') this.operationOutput?.show(true);
+        if (choice === 'Open History') void this.showLog();
+      });
+    }
+  }
+
+  private async openRegisteredWorktree(client: GitClient, target: string): Promise<void> {
+    if (this.operationRunning || this.selectedWorkspace()?.uri.fsPath !== client.workspaceRoot) return;
+    const tree = (await client.getWorktrees()).find(tree => sameWorktreePath(tree.path, target));
+    if (!tree || tree.bare || tree.prunable !== undefined || !(await fs.stat(tree.path).catch(() => undefined))?.isDirectory()) {
+      throw new Error('This worktree is unavailable or no longer registered. Refresh and check its directory.');
+    }
+    if (this.selectedWorkspace()?.uri.fsPath !== client.workspaceRoot) return;
+    await vscode.commands.executeCommand('vscode.openFolder', vscode.Uri.file(tree.path), true);
+  }
+
+  private async recoverOperation(client: GitClient, surface: KivoSurface, message: Extract<WebviewMessage, { type: 'operationRecovery' }>): Promise<void> {
+    if (message.root !== client.workspaceRoot) return;
+    const failure = this.operationFailures.get(message.root);
+    if (!failure || failure.id !== message.id) return;
+    if (message.action === 'dismiss') {
+      this.operationFailures.delete(message.root);
+      await this.postToReadyViews({ type: 'operationFailure', root: message.root, id: failure.id, failure: null });
+      return;
+    }
+    if (!failure.actions.includes(message.action)) return;
+    if (message.action === 'details') this.operationOutput?.show(true);
+    if (message.action === 'copy') await vscode.env.clipboard.writeText(`${failure.title}\nWorking directory: ${failure.root}\n${failure.details}${failure.stashHash ? `\nSaved stash: ${failure.stashHash}` : ''}`);
+    if (message.action === 'refresh') await this.refresh(true);
+    if (message.action === 'changes') await this.showChanges();
+    if (message.action === 'openWorktree' && failure.worktreePath) await this.openRegisteredWorktree(client, failure.worktreePath);
+    if (message.action === 'stashes' && failure.stashHash) await this.postToView(surface, { type: 'openSavedStash', root: failure.root, hash: failure.stashHash });
+  }
+
   private async operation(kind: OperationKind, label: string, action: () => Promise<void>, success: string, clearsCommit = false, feedbackSurface?: KivoSurface): Promise<boolean> {
     if (this.operationRunning) throw new Error('Another Git operation is already running.');
     this.operationRunning = true;
+    const root = this.selectedWorkspace()?.uri.fsPath;
     const id = ++this.operationId;
     let writeStarted = false;
     try {
-      await this.postToReadyViews({ type: 'operation', id, kind, phase: 'loading', message: label, feedbackSurface });
+      await this.postToReadyViews({ type: 'operation', root, id, kind, phase: 'loading', message: label, feedbackSurface });
       if (this.autoFetchPromise) await this.autoFetchPromise;
       this.coordinator.beginWrite();
       writeStarted = true;
       await vscode.window.withProgress({ location: vscode.ProgressLocation.SourceControl, title: `${IdeaGitViewProvider.productName}: ${label}` }, action);
-      if (kind === 'commit' || kind === 'checkout' || kind === 'pull' || kind === 'branch' || kind === 'cherry-pick' || kind === 'conflict') this.repositoryEmitter.fire();
+      if (kind === 'commit' || kind === 'pull' || kind === 'cherry-pick' || kind === 'conflict') this.repositoryEmitter.fire();
       if (kind === 'fetch') await this.setSyncState('idle', Date.now());
       else if (kind === 'pull' || kind === 'push') await this.setSyncState('idle', Date.now());
-      await this.postToReadyViews({ type: 'operation', id, kind, phase: 'success', message: success, clearsCommit, feedbackSurface });
+      await this.postToReadyViews({ type: 'operation', root, id, kind, phase: 'success', message: success, clearsCommit, feedbackSurface });
       return true;
     } catch (error) {
       this.coordinator.reset();
       if (kind === 'fetch' || kind === 'pull' || kind === 'push') await this.setSyncState('error', undefined, this.errorText(error));
-      await this.postToReadyViews({ type: 'operation', id, kind, phase: 'error', message: this.errorText(error), feedbackSurface });
+      if (root) await this.recordOperationFailure(error, root, kind, id);
+      await this.postToReadyViews({ type: 'operation', root, id, kind, phase: 'error', message: this.errorText(error), feedbackSurface });
       return false;
     } finally {
       this.operationRunning = false;
-      if (writeStarted) this.coordinator.endWrite();
+      if (writeStarted) {
+        if (kind === 'checkout' || kind === 'branch') this.repositoryEmitter.fire();
+        this.coordinator.endWrite();
+      }
     }
   }
 
@@ -1586,6 +1678,7 @@ export class IdeaGitViewProvider implements vscode.WebviewViewProvider, vscode.T
     if (this.debounceTimer) clearTimeout(this.debounceTimer);
     this.refreshDueAt = undefined;
     this.watcher?.dispose();
+    this.operationOutput?.dispose();
     this.emitter.dispose();
     this.repositoryEmitter.dispose();
   }

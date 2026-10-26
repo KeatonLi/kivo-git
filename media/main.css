@@ -1634,3 +1634,18 @@ body.commit-zone-resizing, body.commit-zone-resizing * { cursor: row-resize !imp
 .parity-mode .push-review-dialog, .parity-mode .branch-popup, .parity-mode .commit-recent-preview { animation: panel-appear 140ms ease-out; }
 @keyframes panel-appear { from { opacity: 0; transform: translateY(3px); } to { opacity: 1; transform: translateY(0); } }
 @media (prefers-reduced-motion: reduce) { .parity-mode .push-review-dialog, .parity-mode .branch-popup, .parity-mode .commit-recent-preview { animation: none; } }
+
+/* Host-retained operation failures stay visible across ordinary refreshes. */
+.operation-failure { flex: 0 0 auto; max-height: 36vh; overflow: auto; padding: 10px 12px; border-bottom: 1px solid var(--warning); background: var(--vscode-inputValidation-warningBackground, var(--surface-soft)); }
+.operation-failure-heading { display: flex; align-items: flex-start; gap: 8px; }
+.operation-failure-heading strong { display: flex; align-items: flex-start; gap: 7px; flex: 1; min-width: 0; overflow-wrap: anywhere; font-weight: 600; }
+.operation-failure-heading .codicon { color: var(--warning); margin-top: 2px; }
+.operation-failure-heading .icon-button { flex-shrink: 0; width: 22px; height: 22px; }
+.operation-failure p { margin: 4px 0; color: var(--muted); overflow-wrap: anywhere; }
+.operation-recovery-actions { display: flex; flex-wrap: wrap; gap: 5px; margin-top: 7px; }
+.operation-recovery-actions button { padding: 4px 7px; background: var(--vscode-button-secondaryBackground, var(--surface-soft)); color: var(--vscode-button-secondaryForeground, var(--vscode-foreground)); border: 1px solid var(--border-subtle); border-radius: var(--radius-sm); cursor: pointer; }
+.operation-recovery-actions button:hover { background: var(--vscode-button-secondaryHoverBackground, var(--surface-accent)); }
+.operation-failure details { margin-top: 6px; }
+.operation-failure summary { cursor: pointer; color: var(--muted); }
+.operation-failure pre { white-space: pre-wrap; overflow-wrap: anywhere; font-size: 11px; user-select: text; }
+.worktree-badge { flex-shrink: 0; color: var(--muted); font-size: 10px; }

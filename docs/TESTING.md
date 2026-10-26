@@ -42,3 +42,8 @@ The VS Code Web extension host cannot run this extension as-is: Kivo Git uses No
 `test/gitWorkflows.integration.test.ts` uses disposable real repositories for branch-tip comparisons, unique commits, remote refs, renames, stash previews (including untracked files), restored index state, checkout prevalidation and failure recovery, stash identity after reflog reordering, merge continuation/abort, linked-worktree rebase, and conflicts from externally started cherry-pick/revert.
 
 Webview E2E covers primary-ref summaries and title space, branch comparison tabs and diff messages, stash save/preview/restore, stale responses, retry, repository changes, conflict controls in both surfaces, and bounded workflow dialogs with keyboard focus containment. The Extension Host suite creates a real Git conflict and verifies that the built-in Merge Editor opens.
+
+
+## Checkout / worktree recovery (0.5.7)
+
+`test/checkout.integration.test.ts` runs real Git repositories for occupied branches (including remote tracking), untouched staged/unstaged/untracked files on rejection, symmetric linked-worktree snapshots, occupation races after saving, exact stash recovery, checkout/create/detached hook failures, and ordinary switches. `test/operationRecovery.test.ts` checks retained host state, panel replay, invisible-view notifications, late preflight results, repository changes and revalidated worktree opening. `scripts/checkout-recovery-regressions.mjs` checks the production Webview's persistent cards, safe details, stale replies, explicit worktree actions, keyboard/narrow layouts and exact stash-detail routing.

@@ -19,6 +19,7 @@ export function surfaceForViewType(viewType: string): KivoSurface | undefined {
 
 const sharedMessages = new Set([
   'ready',
+  'operationRecovery', 'openWorktree', 'chooseWorktree',
   'workflowRequest', 'closeWorkflow', 'openWorkflowDiff',
   'stashCreate', 'stashApply', 'stashDrop',
   'openConflict', 'resolveConflict', 'continueOperation', 'abortOperation', 'skipOperation',

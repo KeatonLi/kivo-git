@@ -5,6 +5,7 @@ import { createHash } from 'node:crypto';
 import { ChangelistStore } from './ChangelistStore';
 import { parsePorcelainV2 } from './statusParser';
 import { GitWorkflows } from './GitWorkflows';
+import { CheckoutError, GitCommandError, parseWorktrees, sameWorktreePath, type WorktreeSummary } from './checkout';
 import type { BranchSummary, CommitDetails, CommitFile, CommitSummary, GitRef, LineBlame, PullStrategy, PushPreview, RepositorySnapshot } from './types';
 
 const execFileAsync = promisify(execFile);
@@ -46,9 +47,9 @@ export class GitClient {
       });
       return result.stdout;
     } catch (error) {
-      const detail = error as Error & { stderr?: string };
+      const detail = error as Error & { stderr?: string; stdout?: string; code?: string | number };
       if (detail.name === 'AbortError') throw detail;
-      throw new Error(detail.stderr?.trim() || detail.message);
+      throw new GitCommandError(args, this.workspaceRoot, detail.code, detail.stdout || '', detail.stderr || '', detail.message);
     }
   }
 
@@ -66,15 +67,20 @@ export class GitClient {
 
   async snapshot(commitLimit = 80, historyRef?: string): Promise<RepositorySnapshot> {
     if (!this.store) await this.initialize();
-    const [statusOutput, branches, tags, topLevel, identity, operation, remotes] = await Promise.all([
+    const [statusOutput, branches, tags, topLevel, identity, operation, remotes, worktrees] = await Promise.all([
       this.run(['status', '--porcelain=v2', '--branch', '-z', '--untracked-files=all']),
       this.getBranches(),
       this.getTags(),
       this.run(['rev-parse', '--show-toplevel']),
       this.getCommitIdentity(),
       this.workflows.operationState(),
-      this.getRemotes()
+      this.getRemotes(),
+      this.getWorktrees()
     ]);
+    for (const branch of branches) {
+      const occupied = !branch.remote && worktrees.find(tree => tree.branch === branch.name && !sameWorktreePath(tree.path, topLevel.replace(/\r?\n$/, '')));
+      if (occupied) branch.worktreePath = occupied.path;
+    }
     const parsed = parsePorcelainV2(statusOutput);
     // Use the same opaque repository identity as every host request and response.
     // Git can rewrite Windows separators, drive casing and short-path aliases.
@@ -96,7 +102,8 @@ export class GitClient {
       this.markOutgoingCommits(recentCommits, headBranch, branches, parsed.headOid)
     ]);
     return {
-      repositoryName: path.basename(topLevel.trim()),
+      worktrees,
+      repositoryName: path.basename(topLevel.replace(/\r?\n$/, '')),
       root,
       identity,
       operation,
@@ -447,29 +454,81 @@ export class GitClient {
     await this.run(['--literal-pathspecs', 'update-index', '--force-remove', '--', ...new Set(paths)]);
   }
 
-  private async checkoutArgs(branchName: string, remote: boolean): Promise<string[]> {
+  async getWorktrees(): Promise<WorktreeSummary[]> {
+    return parseWorktrees(await this.run(['worktree', 'list', '--porcelain', '-z']));
+  }
+
+  private async checkSwitchState(): Promise<void> {
+    const operation = await this.workflows.operationState();
+    if (operation) throw new CheckoutError('operation-in-progress', `Finish the current ${operation.kind} before switching branches.`,
+      `The current ${operation.kind} is unfinished. Open Changes to resolve conflicts and continue or abort it.\n${operation.files.join('\n')}`);
+  }
+
+  private async checkoutPlan(branchName: string, remote: boolean): Promise<{ args: string[]; branch: string; oid: string }> {
+    await this.checkSwitchState();
     const branches = await this.getBranches();
-    if (!branches.some(branch => branch.name === branchName && branch.remote === remote)) throw new Error('This branch no longer exists. Refresh and try again.');
-    if (!remote) {
-      return ['switch', branchName];
-    }
-    const slash = branchName.indexOf('/');
-    const localName = slash >= 0 ? branchName.slice(slash + 1) : branchName;
+    const target = branches.find(branch => branch.name === branchName && branch.remote === remote);
+    if (!target) throw new CheckoutError('branch-missing', 'This branch no longer exists. Refresh and try again.');
+    const localName = remote ? branchName.slice(branchName.indexOf('/') + 1) : branchName;
     const local = branches.find(branch => !branch.remote && branch.name === localName);
-    if (local && local.upstream !== branchName) throw new Error(`${localName} already exists and tracks a different branch. Choose its local branch explicitly.`);
-    return local ? ['switch', localName] : ['switch', '--track', '-c', localName, branchName];
+    if (remote && local && local.upstream !== branchName) throw new CheckoutError('tracking-conflict', `${localName} already exists and tracks a different branch. Choose its local branch explicitly.`);
+    const [worktrees, currentRoot] = await Promise.all([this.getWorktrees(), this.run(['rev-parse', '--show-toplevel'])]);
+    const occupied = worktrees.find(tree => tree.branch === localName && !sameWorktreePath(tree.path, currentRoot.replace(/\r?\n$/, '')));
+    if (occupied) {
+      const error = new CheckoutError('worktree-occupied', `${localName} is already open in another worktree.`,
+        `${localName} is used by worktree at:\n${occupied.path}\nOpen that worktree to work on this branch. No changes were stashed.`);
+      error.worktreePath = occupied.path;
+      throw error;
+    }
+    return { branch: localName, oid: (local || target).oid!, args: remote && !local
+      ? ['switch', '--track', '-c', localName, branchName] : ['switch', localName] };
+  }
+
+  async checkCheckout(branchName: string, remote: boolean): Promise<void> {
+    await this.checkoutPlan(branchName, remote);
+  }
+
+  private async switchAndVerify(args: string[], expectedBranch: string | undefined, expectedOid: string, stashHash?: string): Promise<void> {
+    let commandError: unknown;
+    try { await this.run(args); } catch (error) { commandError = error; }
+    const [branch, oid] = await Promise.all([
+      this.run(['symbolic-ref', '--short', '-q', 'HEAD']).then(value => value.trim()).catch(() => ''),
+      this.run(['rev-parse', '--verify', 'HEAD']).then(value => value.trim()).catch(() => '')
+    ]);
+    const reachedTarget = branch === (expectedBranch || '') && oid === expectedOid;
+    if (!commandError && reachedTarget) return;
+    let error: CheckoutError;
+    const detail = commandError instanceof GitCommandError
+      ? `git ${commandError.args.join(' ')}\nExit: ${commandError.exitCode ?? 'unknown'}\n${commandError.stderr}\n${commandError.stdout}`
+      : commandError instanceof Error ? commandError.message : String(commandError || 'The checkout changed while it was running.');
+    if (reachedTarget) {
+      error = new CheckoutError('checkout-completed-with-error', `Now on ${expectedBranch || expectedOid.slice(0, 8)}, but Git reported a checkout error.`,
+        `The target was reached. A post-checkout hook or another checkout step reported an error. Review the details before retrying.\n${detail}`);
+    } else {
+      const [operation, worktrees, currentRoot] = await Promise.all([this.workflows.operationState().catch(() => undefined), this.getWorktrees().catch(() => []), this.run(['rev-parse', '--show-toplevel']).catch(() => this.workspaceRoot)]);
+      const occupied = expectedBranch && worktrees.find(tree => tree.branch === expectedBranch && !sameWorktreePath(tree.path, currentRoot.replace(/\r?\n$/, '')));
+      const changesBlocked = commandError instanceof GitCommandError && /would be overwritten|local changes|untracked working tree files/i.test(commandError.stderr);
+      error = new CheckoutError(occupied ? 'worktree-occupied' : operation ? 'operation-in-progress' : changesBlocked ? 'changes-blocked' : commandError ? 'git-error' : 'checkout-incomplete',
+        occupied ? `${expectedBranch} is already open in another worktree.` : operation ? `Finish the current ${operation.kind} before switching branches.` : changesBlocked ? 'Local files prevent switching branches. Review or save your changes.' : `Could not switch to ${expectedBranch || expectedOid.slice(0, 8)}.`, detail);
+      if (occupied) error.worktreePath = occupied.path;
+    }
+    error.actualBranch = branch || (oid ? 'Detached HEAD' : 'Unknown (unable to read HEAD)');
+    if (stashHash) {
+      error.stashHash = stashHash;
+      error.message += ` Your changes remain saved in stash ${stashHash.slice(0, 8)}.`;
+    }
+    throw error;
   }
 
   async checkout(branchName: string, remote: boolean): Promise<void> {
-    if (await this.workflows.operationState()) throw new Error('Finish the current Git operation or conflicts before switching branches.');
-    await this.run(await this.checkoutArgs(branchName, remote));
+    const plan = await this.checkoutPlan(branchName, remote);
+    await this.switchAndVerify(plan.args, plan.branch, plan.oid);
   }
 
   async stashAndCheckout(branchName: string, remote: boolean): Promise<void> {
-    const args = await this.checkoutArgs(branchName, remote);
+    const plan = await this.checkoutPlan(branchName, remote);
     const saved = await this.workflows.saveStash(`Kivo Git: before switching to ${branchName}`);
-    try { await this.run(args); }
-    catch (error) { throw new Error(`${error instanceof Error ? error.message : String(error)}\nYour changes remain saved in stash ${saved.slice(0, 8)}. Open Stashes to restore them.`); }
+    await this.switchAndVerify(plan.args, plan.branch, plan.oid, saved);
   }
 
   /**
@@ -483,8 +542,10 @@ export class GitClient {
     if (!name) throw new Error('Enter a branch name.');
     if (!startPoint) throw new Error('Choose a branch or tag to start from.');
     await this.run(['check-ref-format', '--branch', name]);
-    await this.run(['rev-parse', '--verify', '--quiet', `${startPoint}^{commit}`]);
-    await this.run(['switch', '-c', name, startPoint]);
+    if ((await this.getBranches()).some(branch => !branch.remote && branch.name === name)) throw new CheckoutError('tracking-conflict', `${name} already exists. Choose another branch name.`);
+    await this.checkSwitchState();
+    const oid = (await this.run(['rev-parse', '--verify', `${startPoint}^{commit}`])).trim();
+    await this.switchAndVerify(['switch', '-c', name, startPoint], name, oid);
   }
 
   async createTag(tagName: string, revision: string): Promise<void> {
@@ -499,7 +560,9 @@ export class GitClient {
   async checkoutRevision(revision: string): Promise<void> {
     if (!/^[0-9a-f]{7,40}$/i.test(revision)) throw new Error('Invalid commit hash.');
     await this.run(['rev-parse', '--verify', '--quiet', `${revision}^{commit}`]);
-    await this.run(['switch', '--detach', revision]);
+    await this.checkSwitchState();
+    const oid = (await this.run(['rev-parse', '--verify', `${revision}^{commit}`])).trim();
+    await this.switchAndVerify(['switch', '--detach', revision], undefined, oid);
   }
 
   async mergeBranch(branchName: string): Promise<void> {

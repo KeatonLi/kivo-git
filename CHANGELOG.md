@@ -2,6 +2,14 @@
 
 ## Unreleased
 
+## 0.5.7 - 2026-10-26
+
+- Detect branches used by other worktrees before saving changes. Show their location and open registered worktrees in a new VS Code window.
+- Keep operation failures visible across panel refresh/recreation, with Git details, an Output log, copy and relevant recovery actions. Notify when no Kivo panel is visible.
+- Verify the actual branch and HEAD after checkout, branch creation and detached checkout, including post-checkout hook failures and exact saved-stash recovery.
+- Keep late failures and operation feedback associated with their originating repository; revalidate selection before switching after an asynchronous review.
+- Add isolated real-Git, host-routing and browser regressions for occupied worktrees, external races, partial success, narrow panels and stale replies.
+
 ## 0.5.6 - 2026-10-09
 
 - Pin the actual checked-out branch above History's branch search, with HEAD and sync status. Searching or viewing another branch keeps the checkout visible without duplicating it in Local.

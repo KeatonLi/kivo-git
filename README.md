@@ -17,6 +17,8 @@ Kivo Git keeps a familiar two-surface workflow in VS Code: **Commit** stays in t
 
 ## Features
 
+Checkout failures now retain their reason, Git details and recovery actions. Branches occupied by another worktree can open that directory directly; known blockers are checked before saving a stash. See [checkout and worktree recovery](docs/checkout-reliability.md).
+
 ### Commit workspace
 
 - Real repository status powered by the native Git CLI

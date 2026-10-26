@@ -43,6 +43,8 @@ const hasCustomCommitSplit = (state) => state.commitPanelLayoutVersion === 2 && 
     && Number(state.commitZonePercent) !== COMMIT_ZONE_DEFAULT_PERCENT));
 
 const ui = {
+  failure: undefined,
+  failureVersions: new Map(),
   workflow: undefined,
   workflowRequestId: 0,
   stashMessage: '',
@@ -235,7 +237,10 @@ const updatedLabel = (date) => {
   return relative === 'now' ? 'Updated just now' : `Updated ${relative} ago`;
 };
 
-function post(type, payload = {}) { vscode.postMessage({ type, ...payload }); }
+function post(type, payload = {}) {
+  const origin = ['checkout', 'createBranch', 'checkoutRevision'].includes(type) ? { root: ui.snapshot?.root } : {};
+  vscode.postMessage({ type, ...payload, ...origin });
+}
 function serializeRepositoryState() {
   return {
     selected: [...ui.selected],
@@ -902,6 +907,20 @@ function renderRepositoryEmpty() {
   return `<section class="empty-state" role="${hasError ? 'alert' : 'status'}"><div class="empty-mark">${icon(hasError ? 'error' : 'repo')}</div><h2>${title}</h2><p>${escapeHtml(description)}</p><div class="empty-state-actions">${actions}</div>${ui.emptyMessage ? `<details class="empty-state-details"><summary>Details</summary><pre>${escapeHtml(ui.emptyMessage)}</pre></details>` : ''}</section>`;
 }
 
+function renderOperationFailure() {
+  const failure = ui.failure;
+  if (!failure || failure.root !== ui.snapshot?.root) return '';
+  const labels = { openWorktree: 'Open worktree', stashes: 'View saved changes', changes: 'Open Changes', details: 'View log', copy: 'Copy details', refresh: 'Refresh' };
+  return `<section class="operation-failure" role="region" aria-live="polite" aria-label="Last Git operation issue" data-failure-id="${failure.id}">
+    <div class="operation-failure-heading"><strong>${icon('warning')}${escapeHtml(failure.title)}</strong><button class="icon-button" data-operation-recovery="dismiss" aria-label="Dismiss operation issue" title="Dismiss">${icon('close')}</button></div>
+    ${failure.worktreePath ? `<p class="operation-failure-path">${escapeHtml(failure.worktreePath)}</p>` : ''}
+    ${failure.actualBranch ? `<p>Current checkout: ${escapeHtml(failure.actualBranch)}</p>` : ''}
+    ${failure.stashHash ? `<p>Saved changes: <code>${escapeHtml(failure.stashHash.slice(0, 8))}</code> · The saved copy is kept.</p>` : ''}
+    <div class="operation-recovery-actions">${failure.actions.filter(action => labels[action]).map(action => `<button data-operation-recovery="${action}" ${ui.busy ? 'disabled' : ''}>${labels[action]}</button>`).join('')}</div>
+    <details><summary>Git details</summary><pre>${escapeHtml(failure.details)}</pre></details>
+  </section>`;
+}
+
 function render() {
   const s = ui.snapshot;
   if (!s) {
@@ -911,6 +930,7 @@ function render() {
   }
   patchApp(`
     <section class="content ${surface}-content ${surface === 'changes' && ui.commitZoneResized && !ui.recentCommitsCollapsed ? 'recent-resized' : ''} ${surface === 'changes' && ui.recentCommitsCollapsed ? 'recent-collapsed' : ''}" data-root="${escapeHtml(s.root)}" aria-busy="${ui.busy}" ${ui.commitReviewOpen || ui.pushReview || ui.workflow ? 'inert' : ''}>
+      ${renderOperationFailure()}
       ${surface === 'changes' ? renderChanges(s) : renderGraph(s)}
     </section>
     ${surface === 'changes' && ui.branchOpen ? renderBranchPopup(s) : ''}
@@ -1518,7 +1538,7 @@ function renderCommitDetails(s) {
 function renderLogBranchRow(branch, depth = 0, sync = '') {
   const kind = branch.kind === 'tag' ? 'tag' : 'branch';
   const label = branch.leaf || branch.name;
-  const row = `<button class="log-branch-row ${branch.current ? 'current' : ''} ${ui.graphBranchFilter === branch.name ? 'selected' : ''}" style="--tree-indent:${depth * 13}px" data-log-branch="${escapeHtml(branch.name)}" data-branch-ref="${escapeHtml(branch.name)}" data-branch-remote="${branch.remote ? 'true' : 'false'}" data-branch-kind="${kind}" aria-pressed="${ui.graphBranchFilter === branch.name}" aria-haspopup="menu" title="Show ${escapeHtml(branch.name)} history · Right-click for ${kind} actions">${icon(branch.remote ? 'cloud' : kind === 'tag' ? 'tag' : 'git-branch')}<span>${escapeHtml(label)}</span>${sync}${branch.current ? '<small>HEAD</small>' : ''}</button>`;
+  const row = `<button class="log-branch-row ${branch.current ? 'current' : ''} ${ui.graphBranchFilter === branch.name ? 'selected' : ''}" style="--tree-indent:${depth * 13}px" data-log-branch="${escapeHtml(branch.name)}" data-branch-ref="${escapeHtml(branch.name)}" data-branch-remote="${branch.remote ? 'true' : 'false'}" data-branch-kind="${kind}" aria-pressed="${ui.graphBranchFilter === branch.name}" aria-haspopup="menu" title="Show ${escapeHtml(branch.name)} history · Right-click for ${kind} actions">${icon(branch.remote ? 'cloud' : kind === 'tag' ? 'tag' : 'git-branch')}<span>${escapeHtml(label)}</span>${sync}${branch.worktreePath ? `<small class="worktree-badge" title="${escapeHtml(branch.worktreePath)}">Worktree</small>` : ''}${branch.current ? '<small>HEAD</small>' : ''}</button>`;
   if (branch.remote || branch.current || kind === 'tag' || !branch.upstream || branch.upstreamGone) return row;
   const title = `Update ${branch.name} from ${branch.upstream} (fast-forward only)`;
   return `<div class="log-branch-entry ${ui.graphBranchFilter === branch.name ? 'selected' : ''}">${row}<button class="log-branch-update" data-update-branch="${escapeHtml(branch.name)}" aria-label="${escapeHtml(title)}" title="${escapeHtml(title)}" ${ui.busy ? 'disabled' : ''}>${icon('arrow-down')}</button></div>`;
@@ -1601,7 +1621,7 @@ function renderBranchContextMenu() {
   const refLabel = menu.kind === 'tag' ? 'tag' : 'branch';
   return `<div class="context-menu branch-context-menu" data-branch-context role="menu" aria-label="Actions for ${escapeHtml(menu.ref)}" style="left:${left}px;top:${top}px">
     <div class="context-menu-title branch-context-title"><span>${icon(menu.remote ? 'cloud' : menu.kind === 'tag' ? 'tag' : 'git-branch')}</span><strong title="${escapeHtml(menu.ref)}">${escapeHtml(menu.ref)}</strong></div>
-    ${menu.kind === 'branch' && !menu.current ? `<button role="menuitem" data-branch-context-action="checkout" ${ui.busy ? 'disabled' : ''}>${icon('check')}<span>Checkout</span></button>` : ''}
+    ${menu.kind === 'branch' && !menu.current ? `<button role="menuitem" data-branch-context-action="checkout" ${ui.busy ? 'disabled' : ''}>${icon('check')}<span>${selected?.worktreePath ? 'Open Worktree…' : 'Checkout'}</span></button>` : ''}
     ${trackedLocal ? `<button role="menuitem" data-branch-context-action="update" ${ui.busy ? 'disabled' : ''}>${icon('arrow-down')}<span>Update from Remote</span></button>` : ''}
     ${local ? `<button role="menuitem" data-branch-context-action="push" ${ui.busy || ui.pushPreparing?.active ? 'disabled' : ''}>${icon(trackedLocal ? 'arrow-up' : 'cloud-upload')}<span>${trackedLocal ? 'Push…' : 'Publish Branch…'}</span></button>` : ''}
     ${menu.kind === 'branch' && !menu.current ? `<button role="menuitem" data-branch-context-action="compare" ${ui.busy ? 'disabled' : ''}>${icon('compare-changes')}<span>Compare with Current</span></button>` : ''}
@@ -1645,6 +1665,7 @@ function renderCommitContextMenu() {
 
 function renderLogActionRail(s) {
   return `<aside class="log-action-rail" aria-label="History actions">
+    ${(s.worktrees?.length || 0) > 1 ? `<button class="idea-toolbar-button" data-action="choose-worktree" aria-label="Open worktree in a new window" title="Worktrees" ${ui.busy ? 'disabled' : ''}>${icon('folder-opened')}<span class="rail-text">Worktrees</span></button>` : ''}
     <button class="idea-toolbar-button" data-action="stashes" aria-label="Open saved Stashes" title="Stashes" ${ui.busy ? 'disabled' : ''}>${icon('archive')}<span class="rail-text">Stashes</span></button>
     <button class="idea-toolbar-button" data-action="show-changes" aria-label="Open Commit tool window" title="Open Commit tool window">${kivoIcon('changes', 'kivo-toolbar-mark')}<span class="rail-text">Commit</span></button>
     ${s.repositoryCount > 1 ? `<button class="idea-toolbar-button" data-action="choose-repository" aria-label="Choose repository, current ${escapeHtml(s.repositoryName)}" title="Repository: ${escapeHtml(s.repositoryName)}" ${ui.busy ? 'disabled' : ''}>${icon('repo')}<span class="rail-text">Repos</span></button>` : ''}
@@ -2016,7 +2037,11 @@ function runBranchContextAction(event) {
     ui.branchQuery = '';
   }
   if (action === 'new' && !ui.busy) post('createBranch', { startPoint: menu.ref });
-  if (action === 'checkout' && !ui.busy) post('checkout', { branch: menu.ref, remote: menu.remote });
+  if (action === 'checkout' && !ui.busy) {
+    const branch = ui.snapshot?.branches.find(branch => branch.name === menu.ref && branch.remote === menu.remote);
+    if (branch?.worktreePath) post('openWorktree', { root: ui.snapshot.root, branch: menu.ref });
+    else post('checkout', { branch: menu.ref, remote: menu.remote });
+  }
   if (action === 'merge' && !ui.busy) post('mergeBranch', { branch: menu.ref });
   if (action === 'update' && !ui.busy && !menu.remote) {
     if (menu.current) post('pull', { strategy: 'ff-only' });
@@ -2439,8 +2464,8 @@ function renderBranchPopup(s) {
   const filtered = s.branches.filter((branch) => branch.name.toLowerCase().includes(query));
   const local = filtered.filter((branch) => !branch.remote).sort((a, b) => Number(b.current) - Number(a.current));
   const remote = filtered.filter((branch) => branch.remote);
-  const rows = (items) => items.map((branch) => `<button class="branch-row ${branch.current ? 'current' : ''}" data-checkout="${escapeHtml(branch.name)}" data-remote="${branch.remote}" ${ui.busy ? 'disabled' : ''}>
-      ${icon(branch.current ? 'check' : branch.remote ? 'cloud' : 'git-branch')}<span class="branch-row-name">${escapeHtml(branch.name)}</span>${branch.tracking ? `<small>${escapeHtml(branch.tracking)}</small>` : ''}
+  const rows = (items) => items.map((branch) => `<button class="branch-row ${branch.current ? 'current' : ''}" data-checkout="${escapeHtml(branch.name)}" data-remote="${branch.remote}" title="${branch.worktreePath ? `Open worktree: ${escapeHtml(branch.worktreePath)}` : escapeHtml(branch.name)}" ${ui.busy ? 'disabled' : ''}>
+      ${icon(branch.current ? 'check' : branch.remote ? 'cloud' : 'git-branch')}<span class="branch-row-name">${escapeHtml(branch.name)}</span>${branch.worktreePath ? '<small class="worktree-badge">Worktree ↗</small>' : ''}${branch.tracking ? `<small>${escapeHtml(branch.tracking)}</small>` : ''}
     </button>`).join('');
   const popupGroup = (key, label, items) => {
     const count = ui.branchPopupVisibleCounts[key];
@@ -2465,6 +2490,10 @@ function bind() {
     node.addEventListener(event, handler);
   });
   once('[data-workflow-file]', 'click', event => { const w = ui.workflow; if (w) post('openWorkflowDiff', { root: w.root, requestId: w.requestId, path: event.currentTarget.dataset.workflowFile }); });
+  once('[data-operation-recovery]', 'click', event => {
+    if (!ui.failure || ui.busy) return;
+    post('operationRecovery', { root: ui.failure.root, id: ui.failure.id, action: event.currentTarget.dataset.operationRecovery });
+  });
   once('[data-stash-details]', 'click', event => requestWorkflow('stashDetails', { hash: event.currentTarget.dataset.stashDetails }));
   once('[data-workflow-tab]', 'click', event => { ui.workflow.tab = event.currentTarget.dataset.workflowTab; render(); });
   once('#stash-message', 'input', event => { ui.stashMessage = event.currentTarget.value; });
@@ -2868,7 +2897,9 @@ function bind() {
     if (button.classList.contains('current') || ui.busy) return;
     ui.branchOpen = false;
     ui.branchQuery = '';
-    post('checkout', { branch: button.dataset.checkout, remote: button.dataset.remote === 'true' });
+    const branch = ui.snapshot.branches.find(branch => branch.name === button.dataset.checkout && branch.remote === (button.dataset.remote === 'true'));
+    if (branch?.worktreePath) post('openWorktree', { root: ui.snapshot.root, branch: branch.name });
+    else post('checkout', { branch: button.dataset.checkout, remote: button.dataset.remote === 'true' });
     render();
   });
   once('[draggable="true"]', 'dragstart', (event) => {
@@ -3028,6 +3059,7 @@ function handleAction(action) {
     requestAnimationFrame(() => app.querySelector('[data-action="toggle-history-focus"]')?.focus());
     return;
   }
+  if (action === 'choose-worktree' && !ui.busy) post('chooseWorktree', { root: ui.snapshot.root });
   if (action === 'choose-repository' && !ui.busy) post('chooseRepository');
   if (action === 'clear-selection' && !ui.busy) {
     ui.selected.clear();
@@ -3404,6 +3436,12 @@ window.addEventListener('message', (event) => {
     lastSnapshot = fingerprint;
     ui.emptyMessage = undefined;
     ui.snapshot = message.payload;
+    const version = ui.failureVersions.get(nextRoot) || 0;
+    if (previousRoot !== nextRoot) { ui.failure = undefined; ui.busy = false; ui.operationKind = undefined; }
+    if (message.payload.failure && message.payload.failure.id >= version && message.payload.failure.id > (ui.failureVersions.get(`dismissed:${nextRoot}`) || 0)) {
+      ui.failure = message.payload.failure;
+      ui.failureVersions.set(nextRoot, message.payload.failure.id);
+    }
     if (historyAnchor && previousRoot === nextRoot && previousBranch === message.payload.branch) {
       const index = graphCommits().findIndex(commit => commit.hash === historyAnchor.key);
       if (index >= 0) ui.graphScrollTop = Math.max(0, index * GRAPH_ROW_HEIGHT - historyAnchor.offset);
@@ -3466,7 +3504,19 @@ window.addEventListener('message', (event) => {
     lastSnapshot = '';
     render();
   }
+  if (message.type === 'operationFailure') {
+    if (message.root !== ui.snapshot?.root || message.id < (ui.failureVersions.get(message.root) || 0)) return;
+    if (message.failure && message.id <= (ui.failureVersions.get(`dismissed:${message.root}`) || 0)) return;
+    ui.failureVersions.set(message.root, message.id);
+    if (!message.failure) ui.failureVersions.set(`dismissed:${message.root}`, message.id);
+    else ui.failureVersions.delete(`dismissed:${message.root}`);
+    ui.failure = message.failure || undefined;
+    render();
+    if (!message.failure) requestAnimationFrame(() => app.querySelector(surface === 'history' ? '.log-branch-row.current' : '[data-action="branches"]')?.focus());
+  }
+  if (message.type === 'openSavedStash' && message.root === ui.snapshot?.root) requestWorkflow('stashDetails', { hash: message.hash });
   if (message.type === 'operation') {
+    if (message.root && message.root !== ui.snapshot?.root) return;
     if (message.id && message.id < ui.operationId) return;
     if (message.id) ui.operationId = message.id;
     document.querySelectorAll('.toast.loading').forEach((item) => dismissToast(item));
@@ -3474,7 +3524,7 @@ window.addEventListener('message', (event) => {
     ui.operationKind = message.phase === 'loading' ? message.kind : undefined;
     if (message.phase === 'loading') ui.pullMenuOpen = false;
     if (message.phase === 'success' && message.clearsCommit) { ui.commitMessage = ''; ui.selected.clear(); persist(); }
-    if (!message.feedbackSurface || message.feedbackSurface === surface) toast(message.message, message.phase);
+    if (message.phase !== 'error' && (!message.feedbackSurface || message.feedbackSurface === surface)) toast(message.message, message.phase);
     if (message.kind === 'stash' && message.phase !== 'loading' && ui.workflow && (!message.feedbackSurface || message.feedbackSurface === surface)) {
       if (message.phase === 'success') { ui.stashMessage = ''; requestWorkflow('stashes'); }
       else { ui.workflow.error = message.message; ui.workflow.loading = false; }
