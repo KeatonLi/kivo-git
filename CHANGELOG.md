@@ -2,6 +2,13 @@
 
 ## Unreleased
 
+## 0.5.9
+
+- Animate the visible branch name, including detached HEAD, after a real checkout state change.
+- Preserve keyboard focus when a previous error is dismissed while another control or a newer error has focus.
+- Restore focus to an available control when operation notifications finish or are replaced, after busy state is cleared.
+- Add browser regressions using independent snapshots and real message sequences for these cases.
+
 ## 0.5.8
 
 - Add short, state-triggered entrances for branch pickers, menus, review dialogs and operation failures, while keeping ordinary refreshes and file lists still.

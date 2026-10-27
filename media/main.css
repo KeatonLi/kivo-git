@@ -1666,3 +1666,6 @@ body[data-motion-paused="true"] [data-checkout-pending="true"]::after { animatio
 
 .parity-mode .commit-toolbar-menu { transition: none; }
 body[data-motion-paused="true"] .codicon-modifier-spin { animation-play-state: paused; }
+
+/* Keep the surrounding workspace DOM stable as recovery cards enter or leave. */
+#kivo-operation-failure-slot { flex: 0 0 auto; min-width: 0; }

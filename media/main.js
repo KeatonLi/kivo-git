@@ -1002,7 +1002,7 @@ function render() {
   }
   patchApp(`
     <section class="content ${surface}-content ${surface === 'changes' && ui.commitZoneResized && !ui.recentCommitsCollapsed ? 'recent-resized' : ''} ${surface === 'changes' && ui.recentCommitsCollapsed ? 'recent-collapsed' : ''}" data-root="${escapeHtml(s.root)}" aria-busy="${ui.busy}" ${ui.commitReviewOpen || ui.pushReview || ui.workflow ? 'inert' : ''}>
-      ${renderOperationFailure()}
+      <div id="kivo-operation-failure-slot">${renderOperationFailure()}</div>
       ${surface === 'changes' ? renderChanges(s) : renderGraph(s)}
     </section>
     ${surface === 'changes' && ui.branchOpen ? renderBranchPopup(s) : ''}
@@ -1148,7 +1148,7 @@ function renderCommitRepository(s) {
   const label = `${icon('repo')}<span class="commit-repository-name">${escapeHtml(name)}</span>`;
   return `<div class="commit-repository-header">${s.repositoryCount > 1
     ? `<button class="commit-repository-label commit-repository-picker" data-action="choose-repository" aria-label="Choose repository, current ${escapeHtml(name)}" aria-haspopup="dialog" title="${escapeHtml(title)}\nChoose repository" ${ui.busy ? 'disabled' : ''}>${label}${icon('chevron-down')}</button>`
-    : `<div class="commit-repository-label" aria-label="Current repository ${escapeHtml(name)}" title="${escapeHtml(title)}">${label}</div>`}<button class="commit-header-branch" data-checkout-pending="${ui.checkoutPending}" data-action="branches" aria-haspopup="dialog" aria-expanded="${ui.branchOpen}" title="${escapeHtml(s.branch)}" aria-label="Current branch ${escapeHtml(s.branch)}; open branches" ${ui.busy ? 'disabled' : ''}>${icon(ui.checkoutPending ? 'loading' : 'git-branch', ui.checkoutPending ? 'codicon-modifier-spin' : '')}<span>${escapeHtml(s.branch === '(detached)' ? 'Detached HEAD' : s.branch)}</span></button></div>`;
+    : `<div class="commit-repository-label" aria-label="Current repository ${escapeHtml(name)}" title="${escapeHtml(title)}">${label}</div>`}<button class="commit-header-branch" data-checkout-pending="${ui.checkoutPending}" data-action="branches" aria-haspopup="dialog" aria-expanded="${ui.branchOpen}" title="${escapeHtml(s.branch)}" aria-label="Current branch ${escapeHtml(s.branch)}; open branches" ${ui.busy ? 'disabled' : ''}>${icon(ui.checkoutPending ? 'loading' : 'git-branch', ui.checkoutPending ? 'codicon-modifier-spin' : '')}<span class="checkout-branch-label">${escapeHtml(s.branch === '(detached)' ? 'Detached HEAD' : s.branch)}</span></button></div>`;
 }
 
 function renderCommitToolbar(s) {
@@ -1610,7 +1610,7 @@ function renderCommitDetails(s) {
 function renderLogBranchRow(branch, depth = 0, sync = '') {
   const kind = branch.kind === 'tag' ? 'tag' : 'branch';
   const label = branch.leaf || branch.name;
-  const row = `<button class="log-branch-row ${branch.current ? 'current' : ''} ${ui.graphBranchFilter === branch.name ? 'selected' : ''}" style="--tree-indent:${depth * 13}px" data-log-branch="${escapeHtml(branch.name)}" data-branch-ref="${escapeHtml(branch.name)}" data-branch-remote="${branch.remote ? 'true' : 'false'}" data-branch-kind="${kind}" aria-pressed="${ui.graphBranchFilter === branch.name}" aria-haspopup="menu" title="Show ${escapeHtml(branch.name)} history · Right-click for ${kind} actions">${icon(branch.current && ui.checkoutPending ? 'loading' : branch.remote ? 'cloud' : kind === 'tag' ? 'tag' : 'git-branch', branch.current && ui.checkoutPending ? 'codicon-modifier-spin' : '')}<span>${escapeHtml(label)}</span>${sync}${branch.worktreePath ? `<small class="worktree-badge" title="${escapeHtml(branch.worktreePath)}">Worktree</small>` : ''}${branch.current ? '<small>HEAD</small>' : ''}</button>`;
+  const row = `<button class="log-branch-row ${branch.current ? 'current' : ''} ${ui.graphBranchFilter === branch.name ? 'selected' : ''}" style="--tree-indent:${depth * 13}px" data-log-branch="${escapeHtml(branch.name)}" data-branch-ref="${escapeHtml(branch.name)}" data-branch-remote="${branch.remote ? 'true' : 'false'}" data-branch-kind="${kind}" aria-pressed="${ui.graphBranchFilter === branch.name}" aria-haspopup="menu" title="Show ${escapeHtml(branch.name)} history · Right-click for ${kind} actions">${icon(branch.current && ui.checkoutPending ? 'loading' : branch.remote ? 'cloud' : kind === 'tag' ? 'tag' : 'git-branch', branch.current && ui.checkoutPending ? 'codicon-modifier-spin' : '')}<span class="checkout-branch-label">${escapeHtml(label)}</span>${sync}${branch.worktreePath ? `<small class="worktree-badge" title="${escapeHtml(branch.worktreePath)}">Worktree</small>` : ''}${branch.current ? '<small>HEAD</small>' : ''}</button>`;
   if (branch.remote || branch.current || kind === 'tag' || !branch.upstream || branch.upstreamGone) return row;
   const title = `Update ${branch.name} from ${branch.upstream} (fast-forward only)`;
   return `<div class="log-branch-entry ${ui.graphBranchFilter === branch.name ? 'selected' : ''}">${row}<button class="log-branch-update" data-update-branch="${escapeHtml(branch.name)}" aria-label="${escapeHtml(title)}" title="${escapeHtml(title)}" ${ui.busy ? 'disabled' : ''}>${icon('arrow-down')}</button></div>`;
@@ -1666,7 +1666,7 @@ function renderLogBranchPane(s) {
     </section>`;
   };
   return `<aside class="log-branch-pane" id="kivo-log-branches" aria-label="History branches">
-    <section class="log-current-branch" data-checkout-pending="${ui.checkoutPending}" aria-label="Current checkout"><small role="status" title="${escapeHtml(ui.checkoutPending ? ui.operationMessage : 'Current checkout')}">${escapeHtml(ui.checkoutPending ? ui.operationMessage : 'Current checkout')}</small>${current ? renderLogBranchRow(current, 0, renderLogBranchSync(current, s)) : `<span class="detached-checkout">${icon(s.branch === '(detached)' ? 'git-commit' : 'git-branch')} ${escapeHtml(s.branch === '(detached)' ? 'Detached HEAD' : s.branch)}</span>`}</section>
+    <section class="log-current-branch" data-checkout-pending="${ui.checkoutPending}" aria-label="Current checkout"><small role="status" title="${escapeHtml(ui.checkoutPending ? ui.operationMessage : 'Current checkout')}">${escapeHtml(ui.checkoutPending ? ui.operationMessage : 'Current checkout')}</small>${current ? renderLogBranchRow(current, 0, renderLogBranchSync(current, s)) : `<span class="detached-checkout">${icon(s.branch === '(detached)' ? 'git-commit' : 'git-branch')} <span class="checkout-branch-label">${escapeHtml(s.branch === '(detached)' ? 'Detached HEAD' : s.branch)}</span></span>`}</section>
     <label class="log-branch-search">${icon('search')}<input id="log-branch-search" aria-label="Branch or tag" placeholder="Branch or tag" value="${escapeHtml(ui.logBranchQuery)}"></label>
     <div class="log-branch-tree">
       ${group('local', 'Local', local, query ? 'No matching local branches' : 'No other local branches')}
@@ -3307,9 +3307,12 @@ function toast(message, phase = 'success') {
   element.className = `toast ${phase}`;
   element.setAttribute('role', phase === 'error' ? 'alert' : 'status');
   element.innerHTML = `${icon(phase === 'success' ? 'check' : phase === 'loading' ? 'loading' : 'error', phase === 'loading' ? 'codicon-modifier-spin' : '')}<p>${escapeHtml(message)}</p><button class="toast-close" aria-label="Dismiss notification" title="Dismiss">${icon('close')}</button>`;
-  clearTimeout(toastRegion.firstElementChild?.dismissTimer);
-  element.returnFocus = document.activeElement;
+  const previous = toastRegion.firstElementChild;
+  const heldFocus = previous?.contains(document.activeElement);
+  clearTimeout(previous?.dismissTimer);
+  element.returnFocus = heldFocus ? previous.returnFocus : document.activeElement;
   toastRegion.replaceChildren(element);
+  if (heldFocus && document.hasFocus()) restoreToastFocus(element, element.querySelector('.toast-close'));
   playMotion(element, [{ opacity: 0, transform: 'translateY(4px)' }, { opacity: 1, transform: 'translateY(0)' }], { duration: 120, easing: motionTiming.easing });
   const scheduleDismiss = () => {
     clearTimeout(element.dismissTimer);
@@ -3324,6 +3327,16 @@ function toast(message, phase = 'success') {
   return element;
 }
 
+function restoreToastFocus(element, replacement) {
+  const original = element.returnFocus;
+  const usable = (target) => target && target !== document.body && target !== document.documentElement && target.isConnected && !target.disabled &&
+    !target.closest('[inert]') && target.getClientRects().length > 0;
+  let target = usable(original) ? original : usable(replacement) ? replacement :
+    [...app.querySelectorAll('button:not(:disabled), input:not(:disabled), textarea:not(:disabled), [tabindex="0"]')].find(usable);
+  if (!target) { app.tabIndex = -1; target = app; }
+  target.focus({ preventScroll: true });
+}
+
 function dismissToast(element) {
   if (!element?.isConnected || element.classList.contains('leaving')) return;
   clearTimeout(element.dismissTimer);
@@ -3331,10 +3344,7 @@ function dismissToast(element) {
   element.classList.add('leaving');
   element.inert = true;
   element.setAttribute('aria-hidden', 'true');
-  if (heldFocus) {
-    const target = element.returnFocus?.isConnected && !element.returnFocus.disabled && !element.returnFocus.closest('[inert]') ? element.returnFocus : app.querySelector('[data-action="refresh"]');
-    target?.focus({ preventScroll: true });
-  }
+  if (heldFocus && document.hasFocus()) restoreToastFocus(element);
   const start = { opacity: getComputedStyle(element).opacity, transform: getComputedStyle(element).transform };
   const animation = playMotion(element, [start, { opacity: 0, transform: 'translateY(3px)' }], { duration: motionTiming.exit, easing: 'ease-in' });
   if (animation) animation.finished.then(() => element.remove(), () => element.remove());
@@ -3541,7 +3551,7 @@ window.addEventListener('message', (event) => {
       clearRecentCommitPreview(true);
       requestAnimationFrame(() => {
         if (ui.snapshot?.root !== nextRoot || ui.snapshot?.branch !== message.payload.branch) return;
-        const title = app.querySelector(surface === 'history' ? '.log-current-branch .log-branch-row > span' : '.commit-header-branch > span');
+        const title = app.querySelector(surface === 'history' ? '.log-current-branch .checkout-branch-label' : '.commit-header-branch .checkout-branch-label');
         playMotion(title, [{ opacity: .45, transform: 'translateY(2px)' }, { opacity: 1, transform: 'translateY(0)' }], { duration: motionTiming.result, easing: motionTiming.easing });
       });
     }
@@ -3599,28 +3609,37 @@ window.addEventListener('message', (event) => {
     ui.failureVersions.set(message.root, message.id);
     if (!message.failure) ui.failureVersions.set(`dismissed:${message.root}`, message.id);
     else ui.failureVersions.delete(`dismissed:${message.root}`);
+    const oldCard = app.querySelector('.operation-failure');
+    const previousFocus = document.activeElement;
+    const restoreFocus = !message.failure && document.hasFocus() && oldCard?.contains(previousFocus);
     ui.failure = message.failure || undefined;
     if (message.failure) render();
     else closeFailureMotion();
-    if (!message.failure) requestAnimationFrame(() => app.querySelector(surface === 'history' ? '.log-branch-row.current' : '[data-action="branches"]')?.focus());
+    if (restoreFocus) requestAnimationFrame(() => {
+      if (!document.hasFocus() || ui.snapshot?.root !== message.root || ui.failure ||
+          ui.failureVersions.get(message.root) !== message.id) return;
+      if (document.activeElement !== document.body && document.activeElement !== previousFocus && !oldCard.contains(document.activeElement)) return;
+      app.querySelector(surface === 'history' ? '.log-branch-row.current' : '[data-action="branches"]')?.focus({ preventScroll: true });
+    });
   }
   if (message.type === 'openSavedStash' && message.root === ui.snapshot?.root) requestWorkflow('stashDetails', { hash: message.hash });
   if (message.type === 'operation') {
     if (message.root && message.root !== ui.snapshot?.root) return;
     if (message.id && message.id < ui.operationId) return;
     if (message.id) ui.operationId = message.id;
-    document.querySelectorAll('.toast.loading').forEach((item) => dismissToast(item));
+    const loadingToasts = [...document.querySelectorAll('.toast.loading')];
     ui.busy = message.phase === 'loading';
     ui.operationKind = message.phase === 'loading' ? message.kind : undefined;
     updateCheckoutFeedback(message);
     if (message.phase === 'loading') ui.pullMenuOpen = false;
     if (message.phase === 'success' && message.clearsCommit) { ui.commitMessage = ''; ui.selected.clear(); persist(); }
-    if (message.phase !== 'error' && !(message.phase === 'loading' && ['checkout', 'branch'].includes(message.kind)) && (!message.feedbackSurface || message.feedbackSurface === surface)) toast(message.message, message.phase);
     if (message.kind === 'stash' && message.phase !== 'loading' && ui.workflow && (!message.feedbackSurface || message.feedbackSurface === surface)) {
       if (message.phase === 'success') { ui.stashMessage = ''; requestWorkflow('stashes'); }
       else { ui.workflow.error = message.message; ui.workflow.loading = false; }
     }
     render();
+    loadingToasts.forEach((item) => dismissToast(item));
+    if (message.phase !== 'error' && !(message.phase === 'loading' && ['checkout', 'branch'].includes(message.kind)) && (!message.feedbackSurface || message.feedbackSurface === surface)) toast(message.message, message.phase);
     if (message.phase === 'success' && message.clearsCommit) {
       const textarea = app.querySelector('#commit-message');
       if (textarea) textarea.value = '';

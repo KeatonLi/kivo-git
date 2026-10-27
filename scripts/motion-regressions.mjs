@@ -6,7 +6,7 @@ async function observeMotion(page) {
     window.__motionCancellations = 0;
     const original = Element.prototype.animate;
     Element.prototype.animate = function(frames, options) {
-      window.__motionCalls.push({ classes: String(this.className), branch: Boolean(this.closest('.log-current-branch')), duration: options.duration });
+      window.__motionCalls.push({ classes: String(this.className), text: this.textContent, hidden: this.getAttribute('aria-hidden'), branch: Boolean(this.closest('.log-current-branch')), duration: options.duration });
       const animation = original.call(this, frames, options);
       const cancel = animation.cancel.bind(animation);
       animation.cancel = () => { window.__motionCancellations += 1; cancel(); };
@@ -37,11 +37,24 @@ export async function verifyInteractionMotion(page, openSurface) {
   await page.evaluate(() => emit({ type: 'snapshot', payload: { ...fixture, commitsHasMore: !fixture.commitsHasMore } }));
   assert.equal(await page.evaluate(() => window.__motionCalls.filter(call => call.classes.includes('operation-failure')).length), 1, 'A background refresh must not replay the same error entrance.');
   await region.getByRole('button', { name: 'Dismiss operation issue' }).focus();
-  await page.evaluate(() => emit({ type: 'operationFailure', root: fixture.root, id: 60, failure: null }));
-  assert.equal(await region.count(), 0, 'A closing card must immediately leave the accessibility and keyboard path.');
-  await page.evaluate(failure => emit({ type: 'operationFailure', root: failure.root, id: failure.id, failure }), issue(root, 61));
+  const newFailureFocus = await page.evaluate(async failure => {
+    emit({ type: 'operationFailure', root: fixture.root, id: 60, failure: null });
+    emit({ type: 'operationFailure', root: failure.root, id: failure.id, failure });
+    const target = document.querySelector('[data-operation-recovery="copy"]');
+    target.focus();
+    await new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve)));
+    return document.activeElement === target;
+  }, issue(root, 61));
+  assert.equal(newFailureFocus, true, 'Closing an old error must not steal focus from a newer error.');
   await page.waitForTimeout(200);
   assert.equal(await region.getAttribute('data-failure-id'), '61', 'Completing an older exit must not remove a newer error.');
+  const editorKeepsFocus = await page.evaluate(async () => {
+    const target = document.querySelector('#commit-message'); target.focus();
+    emit({ type: 'operationFailure', root: fixture.root, id: 61, failure: null });
+    await new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve)));
+    return document.activeElement === target;
+  });
+  assert.equal(editorKeepsFocus, true, 'A dismissal broadcast must not interrupt a user typing elsewhere.');
 
   assert.ok(await page.evaluate(failure => {
     emit({ type: 'operationFailure', root: failure.root, id: failure.id, failure });
@@ -63,6 +76,28 @@ export async function verifyInteractionMotion(page, openSurface) {
   await page.emulateMedia({ reducedMotion: 'no-preference' });
   await page.setViewportSize({ width: 1280, height: 650 });
   await openSurface('surface=history');
+  // A host dismissal is broadcast to every ready surface. A user already typing
+  // in History must keep both focus and their next keystroke.
+  await page.evaluate(() => emit({ type: 'operationFailure', root: fixture.root, id: 70, failure: {
+    root: fixture.root, id: 70, kind: 'checkout', title: 'A checkout issue', details: 'Example', actions: ['copy']
+  } }));
+  const search = page.locator('#graph-search');
+  await search.fill('my search');
+  await search.focus();
+  const historyKeepsFocus = await page.evaluate(async () => {
+    const target = document.querySelector('#graph-search');
+    emit({ type: 'operationFailure', root: fixture.root, id: 70, failure: null });
+    await new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve)));
+    return document.activeElement === target;
+  });
+  assert.equal(historyKeepsFocus, true, 'A dismissal broadcast must not steal focus from History search.');
+  await page.waitForTimeout(180);
+  assert.equal(await search.evaluate(element => document.activeElement === element), true, 'Removing the card after its exit must preserve the same focused search input.');
+  await page.keyboard.press('End');
+  await page.keyboard.type('!');
+  assert.equal(await search.inputValue(), 'my search!', 'The next keystroke must still enter the History search.');
+
+  await openSurface('surface=history');
   await observeMotion(page);
   await page.evaluate(() => {
     emit({ type: 'operation', root: fixture.root, id: 80, kind: 'checkout', phase: 'loading', message: 'Switching to feature/login…' });
@@ -76,18 +111,59 @@ export async function verifyInteractionMotion(page, openSurface) {
   await page.locator('[data-checkout-pending="true"]').waitFor();
   assert.match(await page.locator('.log-current-branch > small').textContent(), /Switching to feature\/login/);
   await page.evaluate(() => {
-    fixture.branches.forEach(branch => { branch.current = false; });
-    fixture.branches.push({ name: 'feature/login', current: true, remote: false });
-    fixture.branch = 'feature/login';
-    emit({ type: 'snapshot', payload: fixture });
+    const next = structuredClone(fixture);
+    next.branches.forEach(branch => { branch.current = false; });
+    next.branches.push({ name: 'feature/login', current: true, remote: false });
+    next.branch = 'feature/login';
+    emit({ type: 'snapshot', payload: next });
     emit({ type: 'operation', root: fixture.root, id: 81, kind: 'checkout', phase: 'success', message: 'Switched to feature/login' });
   });
   await page.waitForTimeout(220);
   assert.match(await page.locator('.log-current-branch').textContent(), /feature\/login/);
   assert.equal(await page.locator('.content').getAttribute('aria-busy'), 'false', 'Motion must not delay releasing completed controls.');
+  const resultAnimations = await page.evaluate(() => window.__motionCalls.filter(call => call.duration === 180 && call.branch));
+  assert.ok(resultAnimations.some(call => call.text.includes('feature/login') && call.hidden !== 'true'), 'Branch-result motion must animate the visible branch title, not its decorative icon.');
   const branchCalls = await page.evaluate(() => window.__motionCalls.filter(call => call.branch).length);
-  await page.evaluate(() => emit({ type: 'snapshot', payload: { ...fixture, commitsHasMore: !fixture.commitsHasMore } }));
+  await page.evaluate(() => emit({ type: 'snapshot', payload: { ...ui.snapshot, commitsHasMore: !ui.snapshot.commitsHasMore } }));
   assert.equal(await page.evaluate(() => window.__motionCalls.filter(call => call.branch).length), branchCalls, 'A no-op snapshot must not animate the current branch again.');
+  await page.evaluate(() => {
+    const next = structuredClone(ui.snapshot);
+    next.branches.forEach(branch => { branch.current = false; });
+    next.branch = '(detached)';
+    emit({ type: 'snapshot', payload: next });
+  });
+  await page.waitForTimeout(220);
+  assert.ok(await page.evaluate(() => window.__motionCalls.some(call => call.duration === 180 && call.branch && call.text.includes('Detached HEAD') && call.hidden !== 'true')), 'Detached HEAD needs visible result motion too.');
+
+  await page.setViewportSize({ width: 360, height: 820 });
+  await openSurface('surface=changes');
+  await observeMotion(page);
+  await page.evaluate(() => {
+    const next = structuredClone(fixture);
+    next.branches.forEach(branch => { branch.current = false; });
+    next.branches.push({ name: 'feature/visible', current: true, remote: false });
+    next.branch = 'feature/visible';
+    emit({ type: 'snapshot', payload: next });
+  });
+  await page.waitForTimeout(220);
+  assert.ok(await page.evaluate(() => window.__motionCalls.some(call => call.duration === 180 && call.text.includes('feature/visible') && call.hidden !== 'true')), 'Commit surface must animate the visible branch name.');
+
+  for (const ending of ['success', 'notice']) {
+    await openSurface('surface=changes');
+    await page.locator('[data-action="branches"]').focus();
+    await page.evaluate(() => emit({ type: 'operation', root: fixture.root, id: 701, kind: 'checkout', phase: 'loading', message: 'Switching…' }));
+    await page.locator('.toast.loading .toast-close').focus();
+    await page.evaluate(ending => ending === 'success'
+      ? emit({ type: 'operation', root: fixture.root, id: 701, kind: 'checkout', phase: 'success', message: 'Switched' })
+      : emit({ type: 'notice', phase: 'error', message: 'Another issue' }), ending);
+    await page.waitForTimeout(120);
+    const focus = await page.evaluate(() => {
+      const element = document.activeElement;
+      return { tag: element.tagName, disabled: element.disabled === true, inert: Boolean(element.closest('[inert]')), connected: element.isConnected };
+    });
+    assert.notEqual(focus.tag, 'BODY', `${ending}: focus must not fall to the page root when an operation toast is replaced.`);
+    assert.equal(focus.disabled || focus.inert || !focus.connected, false, `${ending}: focus must remain on an available control.`);
+  }
   await page.emulateMedia({ reducedMotion: null });
   await page.setViewportSize(viewport);
   console.log('Interaction motion passed: picker entry/opacity/focus, stable error refresh, interruption-safe exit, reduced motion, fast/slow checkout and stable branch updates.');

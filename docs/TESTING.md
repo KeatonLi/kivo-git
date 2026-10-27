@@ -50,3 +50,6 @@ Webview E2E covers primary-ref summaries and title space, branch comparison tabs
 
 
 `motion-regressions.mjs` verifies actual WAAPI entrances, stable no-op refreshes, interruption-safe error exits, keyboard availability, active-animation cancellation on reduced-motion changes, fast-operation suppression and actual branch updates. It runs inside the full Webview E2E suite. The preference-change scenario slows a real in-flight animation before yielding, so natural completion cannot masquerade as cancellation on a slow runner.
+
+
+For 0.5.9, the motion browser regressions send independent snapshots and assert the actual visible text animation target for Changes, History and detached HEAD. They also exercise failure-dismissal broadcasts while users are typing, a newer error taking focus, and checkout loading notifications replaced by success or notice.
