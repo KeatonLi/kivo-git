@@ -12,7 +12,7 @@ await mkdir(workspace, { recursive: true });
 await runTests({
   ...(process.env.KIVO_VSCODE_EXECUTABLE_PATH
     ? { vscodeExecutablePath: process.env.KIVO_VSCODE_EXECUTABLE_PATH }
-    : { version: '1.95.0' }),
+    : { version: process.env.KIVO_VSCODE_VERSION || '1.95.0' }),
   extensionDevelopmentPath: root,
   extensionTestsPath: path.join(root, 'test', 'extension', 'index.js'),
   launchArgs: [

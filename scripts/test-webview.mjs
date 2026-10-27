@@ -666,6 +666,8 @@ try {
 
   const firstFile = page.locator('[data-select]').first();
   await firstFile.check({ force: true });
+  assert.match(await page.locator('.commit-selection-scope').textContent(), /Whole-file commit:.*even unstaged edits/,
+    'The commit scope must be visible even when the selected file currently has no unstaged edits.');
   await page.locator('#commit-message').fill('test: verify browser commit flow');
   const commitButton = page.locator('[data-action="commit"]');
   assert.equal(await commitButton.isEnabled(), true, 'Selecting a file and entering a message should enable Commit.');
@@ -689,6 +691,9 @@ try {
   await page.locator('[data-action="search-changes"]').click();
   await page.locator('#change-filter').selectOption('staged');
   assert.match(await page.locator('.commit-selection-status').textContent(), /1 hidden/);
+  assert.match(await page.locator('.commit-selection-scope').textContent(), /Staged filters the list only.*all working-tree changes/,
+    'The staged filter explanation must remain visible alongside the hidden-selection warning.');
+  assert.match(await page.locator('.commit-selection-note.warning').textContent(), /Hidden selections/);
   assert.equal(await page.locator('[data-action="commit"]').isEnabled(), false);
   await page.setViewportSize({ width: 240, height: 420 });
   assert.equal(await page.locator('.commit-selection-total').textContent(), '1 file selected');
@@ -705,9 +710,11 @@ try {
   await page.locator('[data-action="clear-hidden-selection"]').click();
   await page.locator('[data-select-list]').check({ force: true });
   assert.equal(await page.locator('[data-select]:checked').count(), 2);
-  assert.match(await page.locator('.commit-selection-note').textContent(), /all working-tree changes/);
+  assert.match(await page.locator('.commit-selection-scope').textContent(), /Staged filters the list only.*all working-tree changes/);
   await page.locator('[data-action="commit"]').click();
   assert.equal(await page.locator('.commit-review-file').count(), 2, 'Review should show the post-filter selection.');
+  assert.match(await page.locator('.commit-review-warning').textContent(), /1 file has both staged and working-tree edits. Both will be included/,
+    'The final review must call out partially staged files before committing.');
   await page.locator('[data-action="confirm-commit-review"]').click();
   const filteredCommit = await page.evaluate(() => window.__vscodeMessages.find((message) => message.type === 'commit'));
   assert.equal(filteredCommit.paths.length, 2);

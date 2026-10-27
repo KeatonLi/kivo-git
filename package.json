@@ -2,7 +2,7 @@
   "name": "kivo-git",
   "displayName": "Kivo Git",
   "description": "An IDEA-style Git workflow for VS Code: commit changes on the left, inspect history in the bottom Panel.",
-  "version": "0.5.9",
+  "version": "0.5.10",
   "publisher": "KeatonLi",
   "license": "MIT",
   "repository": {
@@ -29,6 +29,7 @@
     "onStartupFinished",
     "onView:ideaGit.changes",
     "onView:ideaGit.history",
+    "onCommand:ideaGit.showSupportDiagnostics",
     "onCommand:ideaGit.showLineBlame",
     "onCommand:ideaGit.toggleInlineBlame"
   ],
@@ -88,6 +89,10 @@
       ]
     },
     "commands": [
+      {
+        "command": "ideaGit.showSupportDiagnostics",
+        "title": "Kivo Git: Review Diagnostic Summary"
+      },
       {
         "command": "ideaGit.refresh",
         "title": "Kivo Git: Refresh"

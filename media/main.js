@@ -600,7 +600,7 @@ function requestMoreHistory(scrollTop) {
 function requestOlderHistoryForHash() {
   if (historySearchActive()) { requestHistorySearch(true, 0); return true; }
   const hashPrefix = ui.graphQuery.trim().toLowerCase();
-  if (surface !== 'history' || !/^[0-9a-f]{7,40}$/.test(hashPrefix)) return false;
+  if (surface !== 'history' || !/^[0-9a-f]{4,64}$/.test(hashPrefix)) return false;
   const snapshot = ui.snapshot;
   if (!snapshot?.commitsHasMore || snapshot.commits.some((commit) => commit.hash.toLowerCase().startsWith(hashPrefix))) return false;
   return requestMoreHistory(ui.graphScrollTop);
@@ -1782,7 +1782,7 @@ function renderGraph(s) {
     ? ui.focusedCommitHash
     : commits[0]?.hash;
   const filtersActive = Boolean(ui.graphBranchFilter || ui.graphAuthorFilter || ui.graphAgeFilter !== 'all' || ui.graphQuery.trim() || ui.graphPathFilter.trim());
-  const searchingHash = /^[0-9a-f]{7,40}$/i.test(ui.graphQuery.trim());
+  const searchingHash = /^[0-9a-f]{4,64}$/i.test(ui.graphQuery.trim());
   const branchWidth = Math.round(clamp(ui.logBranchWidth, LOG_BRANCH_MIN_WIDTH, LOG_BRANCH_MAX_WIDTH));
   const detailWidth = Math.round(clamp(ui.logDetailWidth, LOG_DETAIL_MIN_WIDTH, LOG_DETAIL_MAX_WIDTH));
   const detailHeight = Math.round(Math.max(LOG_DETAIL_MIN_HEIGHT, ui.logDetailHeight));
@@ -3260,8 +3260,10 @@ function commitBlocker() {
 
 function renderSelectionStatus() {
   const { selectedChanges, hiddenCount } = changeSelection();
-  const wholeFiles = ui.changeFilter === 'staged' || selectedChanges.some((change) => change.staged && change.workingTreeStatus !== '.');
-  return `<div class="commit-selection-status" role="status"><div class="commit-selection-counts" title="${wholeFiles ? 'Commits include all working-tree changes in selected files.' : 'Select files to commit'}"><span class="commit-selection-total">${selectedChanges.length} ${selectedChanges.length === 1 ? 'file' : 'files'} selected</span>${hiddenCount ? `<span class="commit-selection-hidden">${hiddenCount} hidden by filters</span>` : ''}</div>${selectedChanges.length ? `<div class="commit-selection-actions"><button class="text-button rollback-selection" data-action="rollback-selected" title="Restore tracked changes to HEAD; move new files to Trash" ${ui.busy || hiddenCount ? 'disabled' : ''}>Rollback…</button>${hiddenCount ? '<button class="text-button" data-action="clear-change-filters">Clear filters</button>' : ''}<button class="text-button" data-action="${hiddenCount ? 'clear-hidden-selection' : 'clear-selection'}" ${ui.busy ? 'disabled' : ''}>${hiddenCount ? 'Remove hidden' : 'Clear'}</button></div>` : ''}</div>${hiddenCount ? '<div class="commit-selection-note warning">Hidden selections must be reviewed or removed.</div>' : wholeFiles ? '<div class="commit-selection-note">Commits include all working-tree changes in selected files.</div>' : ''}`;
+  const scope = ui.changeFilter === 'staged'
+    ? 'Staged filters the list only. Commit includes all working-tree changes in selected files.'
+    : 'Whole-file commit: includes all working-tree changes in selected files, even unstaged edits.';
+  return `<div class="commit-selection-status" role="status"><div class="commit-selection-counts" title="${selectedChanges.length ? scope : 'Select files to commit'}"><span class="commit-selection-total">${selectedChanges.length} ${selectedChanges.length === 1 ? 'file' : 'files'} selected</span>${hiddenCount ? `<span class="commit-selection-hidden">${hiddenCount} hidden by filters</span>` : ''}</div>${selectedChanges.length ? `<div class="commit-selection-actions"><button class="text-button rollback-selection" data-action="rollback-selected" title="Restore tracked changes to HEAD; move new files to Trash" ${ui.busy || hiddenCount ? 'disabled' : ''}>Rollback…</button>${hiddenCount ? '<button class="text-button" data-action="clear-change-filters">Clear filters</button>' : ''}<button class="text-button" data-action="${hiddenCount ? 'clear-hidden-selection' : 'clear-selection'}" ${ui.busy ? 'disabled' : ''}>${hiddenCount ? 'Remove hidden' : 'Clear'}</button></div>` : ''}</div>${hiddenCount ? '<div class="commit-selection-note warning">Hidden selections must be reviewed or removed.</div>' : ''}${selectedChanges.length ? `<div class="commit-selection-note commit-selection-scope">${scope}</div>` : ''}`;
 }
 
 function syncCommitActionState() {

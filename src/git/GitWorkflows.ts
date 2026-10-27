@@ -98,7 +98,7 @@ export class GitWorkflows {
   }
 
   private async requireStash(hash: string): Promise<StashEntry> {
-    if (!/^[0-9a-f]{40}$/.test(hash)) throw new Error('Choose a valid saved stash.');
+    if (!/^(?:[0-9a-f]{40}|[0-9a-f]{64})$/.test(hash)) throw new Error('Choose a valid saved stash.');
     const stash = (await this.stashes()).find(entry => entry.hash === hash);
     if (!stash) throw new Error('This stash no longer exists. Refresh and try again.');
     return stash;

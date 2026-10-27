@@ -1,19 +1,30 @@
 name: Release VSIX
 
 on:
-  push:
-    branches:
-      - main
-  workflow_dispatch:
+  workflow_run:
+    workflows: [CI]
+    types: [completed]
+    branches: [main]
 
 permissions:
   contents: write
 
+concurrency:
+  group: kivo-git-release
+  cancel-in-progress: false
+
 jobs:
   release:
+    if: >-
+      github.event.workflow_run.conclusion == 'success' &&
+      github.event.workflow_run.event == 'push' &&
+      github.event.workflow_run.head_branch == 'main' &&
+      github.event.workflow_run.head_repository.full_name == github.repository
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.workflow_run.head_sha }}
       - uses: actions/setup-node@v4
         with:
           node-version: 22
@@ -21,25 +32,50 @@ jobs:
       - name: Resolve version
         id: version
         run: node -e "console.log('tag=v'+require('./package.json').version)" >> "$GITHUB_OUTPUT"
+      - name: Verify release integrity checks
+        run: node --test scripts/release-integrity.test.mjs scripts/release-gate.test.mjs
+      - name: Verify CI commit is still current
+        id: freshness
+        run: |
+          set -euo pipefail
+          main_head=$(git ls-remote origin refs/heads/main | cut -f1)
+          node scripts/check-release-gate.mjs "$GITHUB_EVENT_PATH" "$GITHUB_REPOSITORY" "$(git rev-parse HEAD)" "$main_head" | tee -a "$GITHUB_OUTPUT"
       - name: Check existing release
         id: existing
+        if: steps.freshness.outputs.current == 'true'
         env:
           GH_TOKEN: ${{ github.token }}
           TAG: ${{ steps.version.outputs.tag }}
         run: |
-          if gh release view "$TAG" >/dev/null 2>&1; then
-            echo "found=true" >> "$GITHUB_OUTPUT"
-            mkdir -p existing-release
-            gh release download "$TAG" --pattern 'kivo-git-*.vsix' --dir existing-release || true
-            existing_manifest=$(unzip -p existing-release/kivo-git-*.vsix extension/package.json 2>/dev/null | node -e "let s=''; process.stdin.on('data', c => s += c).on('end', () => { try { const p = JSON.parse(s); console.log(JSON.stringify({ id: p.publisher + '.' + p.name, version: p.version, categories: p.categories })); } catch { console.log('missing'); } })")
-            current_manifest=$(node -e "const p = require('./package.json'); console.log(JSON.stringify({ id: p.publisher + '.' + p.name, version: p.version, categories: p.categories }))")
-            if [[ "$existing_manifest" == "$current_manifest" ]]; then
-              echo "publish=false" >> "$GITHUB_OUTPUT"
-            else
-              echo "publish=true" >> "$GITHUB_OUTPUT"
+          set -euo pipefail
+          if gh api "repos/{owner}/{repo}/releases/tags/$TAG" > release.json 2> release-error.txt; then
+            if ! git ls-remote --exit-code --tags origin "refs/tags/$TAG" > /dev/null; then
+              echo "Release tag is missing or could not be checked. Investigate and use a new version; existing releases are immutable." >&2
+              exit 1
             fi
+            mkdir -p existing-release
+            version="${TAG#v}"
+            vsix="kivo-git-$version.vsix"
+            checksum="kivo-git-$TAG.vsix.sha256"
+            gh release download "$TAG" --pattern "$vsix" --pattern "$checksum" --dir existing-release
+            unzip -p "existing-release/$vsix" extension/package.json > existing-release/manifest.json
+            node scripts/check-existing-release.mjs release.json package.json existing-release
+            echo "publish=false" >> "$GITHUB_OUTPUT"
+            echo "Existing release is complete and consistent; leaving it unchanged."
           else
-            echo "found=false" >> "$GITHUB_OUTPUT"
+            if ! grep -Fq '(HTTP 404)' release-error.txt; then
+              cat release-error.txt >&2
+              exit 1
+            fi
+            # A tag without a complete release is not safe to reuse: the build
+            # may have failed after publishing the tag, or the tag may point to
+            # a different commit. Use a new version and investigate manually.
+            status=0
+            git ls-remote --exit-code --tags origin "refs/tags/$TAG" > /dev/null || status=$?
+            if [[ "$status" != 2 ]]; then
+              echo "Release tag already exists or could not be checked. Investigate and use a new version; existing releases are immutable." >&2
+              exit 1
+            fi
             echo "publish=true" >> "$GITHUB_OUTPUT"
           fi
       - if: steps.existing.outputs.publish == 'true'
@@ -79,17 +115,17 @@ jobs:
           GH_TOKEN: ${{ github.token }}
           TAG: ${{ steps.version.outputs.tag }}
         run: |
+          set -euo pipefail
+          main_head=$(git ls-remote origin refs/heads/main | cut -f1)
+          if ! node scripts/check-release-gate.mjs "$GITHUB_EVENT_PATH" "$GITHUB_REPOSITORY" "$(git rev-parse HEAD)" "$main_head" | grep -Fxq 'current=true'; then
+            echo "main advanced after CI; refusing to publish this stale commit." >&2
+            exit 1
+          fi
           prerelease=""
           if [[ "$TAG" == *-* ]]; then prerelease="--prerelease"; fi
           git config user.name github-actions[bot]
           git config user.email 41898282+github-actions[bot]@users.noreply.github.com
-          if ! git ls-remote --exit-code --tags origin "refs/tags/$TAG" >/dev/null 2>&1; then
-            git tag -a "$TAG" -m "Kivo Git $TAG"
-            git push origin "$TAG"
-          fi
-          if [[ "${{ steps.existing.outputs.found }}" == "true" ]]; then
-            gh release upload "$TAG" kivo-git-*.vsix kivo-git-*.vsix.sha256 --clobber
-          else
-            gh release create "$TAG" kivo-git-*.vsix kivo-git-*.vsix.sha256 \
-              --title "Kivo Git $TAG" --generate-notes $prerelease
-          fi
+          git tag -a "$TAG" -m "Kivo Git $TAG"
+          git push origin "$TAG"
+          gh release create "$TAG" kivo-git-*.vsix kivo-git-*.vsix.sha256 \
+            --verify-tag --title "Kivo Git $TAG" --generate-notes $prerelease

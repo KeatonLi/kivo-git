@@ -33,7 +33,7 @@ export function parsePorcelainV2(output: string): ParsedStatus {
     if (!record) continue;
     if (record.startsWith('# branch.oid ')) {
       const oid = record.slice(13).trim();
-      if (/^[0-9a-f]{40,64}$/i.test(oid)) headOid = oid;
+      if (/^(?:[0-9a-f]{40}|[0-9a-f]{64})$/i.test(oid)) headOid = oid;
       continue;
     }
     if (record.startsWith('# branch.head ')) {

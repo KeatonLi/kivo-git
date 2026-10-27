@@ -29,14 +29,17 @@ describe('checkout and linked worktree recovery', { timeout: 15000 }, () => {
     await fs.appendFile(path.join(root, 'file.txt'), 'unstaged\n'); await fs.writeFile(path.join(root, 'new.txt'), 'untracked');
     const index = await git(root, 'show', ':file.txt');
     const error = await client.stashAndCheckout('feature', false).catch(error => error);
-    expect(error).toBeInstanceOf(CheckoutError); expect(error.code).toBe('worktree-occupied'); expect(error.worktreePath).toBe(linked);
+    expect(error).toBeInstanceOf(CheckoutError); expect(error.code).toBe('worktree-occupied');
+    expect(await fs.realpath(error.worktreePath)).toBe(await fs.realpath(linked));
     expect(await git(root, 'branch', '--show-current')).toBe('main'); expect(await client.workflows.stashes()).toEqual([]);
     expect(await git(root, 'show', ':file.txt')).toBe(index); expect(await fs.readFile(path.join(root, 'file.txt'), 'utf8')).toBe('staged\nunstaged\n');
     expect(await fs.readFile(path.join(root, 'new.txt'), 'utf8')).toBe('untracked');
-    expect((await client.snapshot(5)).branches.find(branch => branch.name === 'feature')?.worktreePath).toBe(linked);
+    expect(await fs.realpath((await client.snapshot(5)).branches.find(branch => branch.name === 'feature')!.worktreePath!)).toBe(await fs.realpath(linked));
     const other = new GitClient(linked);
-    expect((await other.snapshot(5)).branches.find(branch => branch.name === 'main')?.worktreePath).toBe(root);
-    await expect(other.checkout('main', false)).rejects.toMatchObject({ code: 'worktree-occupied', worktreePath: root });
+    expect(await fs.realpath((await other.snapshot(5)).branches.find(branch => branch.name === 'main')!.worktreePath!)).toBe(await fs.realpath(root));
+    const reverseError = await other.checkout('main', false).catch(error => error);
+    expect(reverseError).toMatchObject({ code: 'worktree-occupied' });
+    expect(await fs.realpath(reverseError.worktreePath)).toBe(await fs.realpath(root));
   });
 
   it('checks the local branch backing a remote checkout before touching changes', async () => {

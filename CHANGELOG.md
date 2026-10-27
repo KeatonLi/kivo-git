@@ -2,6 +2,14 @@
 
 ## Unreleased
 
+## 0.5.10
+
+- Support SHA-256 Git repositories and short object IDs in History, blame, checkout and stash recovery.
+- Report Git diff read errors and the 8 MiB limit instead of showing failed reads as empty files; preserve empty comparisons for new files.
+- Keep whole-file commit scope visible, including when the Staged filter is active.
+- Add a previewable, locally generated diagnostic summary containing only version and host-platform information.
+- Verify real Git and VS Code extension entry points across Linux, macOS and Windows in CI; publish only the current commit after CI succeeds, with immutable release assets.
+
 ## 0.5.9
 
 - Animate the visible branch name, including detached HEAD, after a real checkout state change.

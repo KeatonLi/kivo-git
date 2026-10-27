@@ -33,6 +33,7 @@ describe('extension contribution model', () => {
     expect(manifest.contributes.commands).toEqual(expect.arrayContaining([
       expect.objectContaining({ command: 'ideaGit.showChanges', title: 'Kivo Git: Show Changes' }),
       expect.objectContaining({ command: 'ideaGit.showLog', title: 'Kivo Git: Show History', icon: '$(history)' }),
+      expect.objectContaining({ command: 'ideaGit.showSupportDiagnostics', title: 'Kivo Git: Review Diagnostic Summary' }),
       expect.objectContaining({ command: 'ideaGit.showLineBlame', title: 'Kivo Git: Show Line Blame', icon: '$(git-commit)' }),
       expect.objectContaining({ command: 'ideaGit.toggleInlineBlame', title: 'Kivo Git: Toggle Inline Blame' })
     ]));
@@ -44,6 +45,7 @@ describe('extension contribution model', () => {
   it('enables current-line blame by default and lets users disable it in settings', async () => {
     const manifest = JSON.parse(await readFile(path.join(root, 'package.json'), 'utf8'));
     expect(manifest.activationEvents).toContain('onCommand:ideaGit.toggleInlineBlame');
+    expect(manifest.activationEvents).toContain('onCommand:ideaGit.showSupportDiagnostics');
     expect(manifest.contributes.configuration.properties['ideaGit.inlineBlame.enabled']).toMatchObject({ type: 'boolean', default: true });
   });
 

@@ -17,6 +17,7 @@ exports.run = async function run() {
     'ideaGit.showLog',
     'ideaGit.openResourceDiff',
     'ideaGit.showFileHistory',
+    'ideaGit.showSupportDiagnostics',
     'ideaGit.showLineBlame',
     'ideaGit.revealBlameCommit',
     'ideaGit.toggleInlineBlame',

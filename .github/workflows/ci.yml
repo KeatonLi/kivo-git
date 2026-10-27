@@ -20,6 +20,7 @@ jobs:
       - run: npm ci
       - run: npm run check
       - run: npm test
+      - run: node --test scripts/release-gate.test.mjs scripts/release-integrity.test.mjs
       - name: Install browser-test runtime
         run: npm install --no-save --package-lock=false playwright@1.62.1
       - name: Install Chromium for Webview E2E
@@ -32,5 +33,46 @@ jobs:
         with:
           name: kivo-webview-screenshots
           path: visual-audit/*.png
-      - run: npm run compile
-      - run: xvfb-run -a npm run test:extension
+
+  real-git:
+    name: Real Git (${{ matrix.os }})
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest, macos-latest]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: git --version
+      - run: npm ci
+      - name: Verify real Git operations and recovery
+        run: npx vitest run test/gitClient.integration.test.ts test/gitWorkflows.integration.test.ts test/checkout.integration.test.ts test/cherryPick.integration.test.ts test/gitSha256.integration.test.ts test/gitDiff.integration.test.ts --maxWorkers=2
+
+  extension-host:
+    name: VS Code ${{ matrix.vscode }} (${{ matrix.os }})
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest, macos-latest]
+        vscode: ['1.95.0', stable]
+    runs-on: ${{ matrix.os }}
+    env:
+      KIVO_VSCODE_VERSION: ${{ matrix.vscode }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: git --version
+      - run: npm ci
+      - name: Verify extension host (Linux)
+        if: runner.os == 'Linux'
+        run: xvfb-run -a npm run test:extension
+      - name: Verify extension host (Windows and macOS)
+        if: runner.os != 'Linux'
+        run: npm run test:extension

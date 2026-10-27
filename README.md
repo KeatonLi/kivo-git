@@ -17,7 +17,7 @@ Kivo Git keeps a familiar two-surface workflow in VS Code: **Commit** stays in t
 
 ## Features
 
-0.5.9 refines interaction transitions and preserves keyboard focus during checkout feedback. [See the animated preview and motion rules](docs/interaction-motion.md).
+0.5.10 supports SHA-256 Git repositories, clarifies whole-file commit scope, and reports diff read failures. [See the animated preview and motion rules](docs/interaction-motion.md).
 
 Checkout failures now retain their reason, Git details and recovery actions. Branches occupied by another worktree can open that directory directly; known blockers are checked before saving a stash. See [checkout and worktree recovery](docs/checkout-reliability.md).
 
@@ -97,6 +97,8 @@ code --install-extension kivo-git-<version>.vsix
 
 Kivo Git is an early release. Report problems through [GitHub Issues](https://github.com/KeatonLi/kivo-git/issues).
 
+For support, run **Kivo Git: Review Diagnostic Summary** from the Command Palette. You can preview and copy the extension, VS Code and Git versions and extension-host platform and architecture. The summary excludes repository contents, paths, remotes and logs, and is never uploaded by Kivo Git.
+
 ## Run locally
 
 ```bash
@@ -130,7 +132,11 @@ From a clean `main` branch, run:
 npm run release -- <version>
 ```
 
-The release tool verifies the repository and version, promotes the Unreleased changelog, runs all checks and tests, packages the VSIX, and pushes a version commit. GitHub Actions then creates the matching tag and publishes the VSIX plus SHA-256 checksum to GitHub Releases. Pre-release semantic versions are published as GitHub pre-releases.
+The release tool verifies the repository and version, promotes the Unreleased changelog, runs all checks and tests, packages the VSIX, and pushes a version commit. After CI succeeds for that exact main-branch commit, GitHub Actions creates the matching tag and publishes the VSIX plus SHA-256 checksum to GitHub Releases. Pre-release semantic versions are published as GitHub pre-releases.
+
+Release versions are immutable: a complete existing release is checked and left unchanged. If its tag or assets are incomplete or inconsistent, investigate the failure and publish a new version rather than replacing a published package.
+
+The release workflow checks that the tested commit is still the tip of `main` before building and again before creating its tag. If `main` advances, the older run does not publish; wait for CI on the newer commit. These checks are not an atomic branch lock, so maintainers should avoid pushing during a release and use protected branch rules for coordinated releases.
 
 ## Design principles
 

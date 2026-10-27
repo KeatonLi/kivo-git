@@ -219,7 +219,7 @@ export class GitClient {
     if (author) args.push(`--author=${author}`);
     if (ageDays) args.push(`--since=${new Date(Date.now() - ageDays * 86400000).toISOString()}`);
     let hashSearch = false;
-    if (/^[0-9a-f]{7,40}$/i.test(query)) {
+    if (/^[0-9a-f]{4,64}$/i.test(query)) {
       const resolved = (await this.run(['rev-parse', '--verify', '--quiet', `${query}^{commit}`]).catch(() => '')).trim();
       if (resolved) {
         if (exactRef && !(await this.run(['merge-base', '--is-ancestor', resolved, exactRef]).then(() => true).catch(() => false))) {
@@ -244,7 +244,7 @@ export class GitClient {
   }
 
   private parseCommitLog(output: string, refs: Map<string, GitRef[]>): CommitSummary[] {
-    const recordPattern = /([0-9a-f]{40})\x1f([0-9a-f]{7,40})\x1f([^\x1f]*)\x1f([^\x1f]*)\x1f([^\x1f]*)\x1f([^\x1e]*)\x1e/g;
+    const recordPattern = /(?<![0-9a-f])([0-9a-f]{64}|[0-9a-f]{40})\x1f([0-9a-f]{4,64})\x1f([^\x1f]*)\x1f([^\x1f]*)\x1f([^\x1f]*)\x1f([^\x1e]*)\x1e/g;
     const matches = [...output.matchAll(recordPattern)];
     return matches.map((match, index) => {
       const hash = match[1] ?? '';
@@ -342,7 +342,7 @@ export class GitClient {
   }
 
   async commitDetails(hash: string): Promise<CommitDetails> {
-    if (!/^[0-9a-f]{7,40}$/i.test(hash)) throw new Error('Invalid commit hash.');
+    if (!/^[0-9a-f]{4,64}$/i.test(hash)) throw new Error('Invalid commit hash.');
     if (!this.store) await this.initialize();
     const [metadata, body, parents, branches] = await Promise.all([
       this.run(['show', '-s', '--format=%H%x1f%an%x1f%aI%x1f%s', hash]),
@@ -551,14 +551,14 @@ export class GitClient {
   async createTag(tagName: string, revision: string): Promise<void> {
     const name = tagName.trim();
     if (!name) throw new Error('Enter a tag name.');
-    if (!/^[0-9a-f]{7,40}$/i.test(revision)) throw new Error('Invalid commit hash.');
+    if (!/^[0-9a-f]{4,64}$/i.test(revision)) throw new Error('Invalid commit hash.');
     await this.run(['check-ref-format', `refs/tags/${name}`]);
     await this.run(['rev-parse', '--verify', '--quiet', `${revision}^{commit}`]);
     await this.run(['tag', name, revision]);
   }
 
   async checkoutRevision(revision: string): Promise<void> {
-    if (!/^[0-9a-f]{7,40}$/i.test(revision)) throw new Error('Invalid commit hash.');
+    if (!/^[0-9a-f]{4,64}$/i.test(revision)) throw new Error('Invalid commit hash.');
     await this.run(['rev-parse', '--verify', '--quiet', `${revision}^{commit}`]);
     await this.checkSwitchState();
     const oid = (await this.run(['rev-parse', '--verify', `${revision}^{commit}`])).trim();
@@ -755,10 +755,19 @@ export class GitClient {
   }
 
   async showHeadFile(filePath: string): Promise<string> {
+    return this.readDiffFile(`HEAD:${filePath}`, filePath);
+  }
+
+  private async readDiffFile(object: string, filePath: string): Promise<string> {
     try {
-      return await this.run(['show', `HEAD:${filePath}`]);
-    } catch {
-      return '';
+      return await this.run(['show', object]);
+    } catch (error) {
+      if (error instanceof GitCommandError && error.exitCode === 'ERR_CHILD_PROCESS_STDIO_MAXBUFFER') {
+        throw new Error(`Cannot open the Git version of ${filePath}: it exceeds Kivo Git's 8 MiB diff limit. Use Git or another diff tool to review this file.`);
+      }
+      // stdout can contain a partial file on failure. Never use it as the error
+      // message or an empty diff: it may contain private source code.
+      throw new Error(`Cannot read the Git version of ${filePath}. The file or repository may have changed; refresh and try again.`);
     }
   }
 
@@ -791,7 +800,7 @@ export class GitClient {
     return output.split('\0').filter(Boolean).map((entry) => {
       const [hash = '', subject = ''] = entry.trim().split('\x1f');
       return { hash, subject };
-    }).filter((entry) => /^[0-9a-f]{40}$/.test(entry.hash));
+    }).filter((entry) => /^(?:[0-9a-f]{40}|[0-9a-f]{64})$/.test(entry.hash));
   }
 
   async blameLine(filePath: string, line: number, options: { timeout?: number; signal?: AbortSignal } = {}): Promise<LineBlame> {
@@ -818,19 +827,11 @@ export class GitClient {
   }
 
   async showIndexFile(filePath: string): Promise<string> {
-    try {
-      return await this.run(['show', `:${filePath}`]);
-    } catch {
-      return '';
-    }
+    return this.readDiffFile(`:${filePath}`, filePath);
   }
 
   async showFileAtRevision(revision: string, filePath: string): Promise<string> {
-    if (!/^[0-9a-f]{7,40}$/i.test(revision)) return '';
-    try {
-      return await this.run(['show', `${revision}:${filePath}`]);
-    } catch {
-      return '';
-    }
+    if (!/^[0-9a-f]{4,64}$/i.test(revision)) throw new Error('Invalid commit hash. Refresh and try again.');
+    return this.readDiffFile(`${revision}:${filePath}`, filePath);
   }
 }

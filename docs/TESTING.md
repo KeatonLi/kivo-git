@@ -25,11 +25,15 @@ npm run test:webview
 
 ## Extension Host tests
 
-`npm run test:extension` launches VS Code 1.95.0 and checks extension activation, registered commands, and the Commit/History entry points. CI runs this under Xvfb. Git command behavior is exercised separately in disposable repositories by `test/gitClient.integration.test.ts`.
+`npm run test:extension` launches VS Code 1.95.0 by default and checks extension activation, registered commands, the Commit/History entry points, and a real conflict opened in the native Merge Editor. Set `KIVO_VSCODE_VERSION=stable` to test the current stable release, or set it to a specific VS Code version. The executable override below takes precedence over the version selector.
+
+CI runs the Extension Host smoke test on Linux (under Xvfb), Windows and macOS against both 1.95.0 and the current stable VS Code. A separate three-platform job runs the real-Git integration suites for status and commits, workflows, checkout/worktree recovery and cherry-pick. The complete unit and browser suites still run on Linux. Check the actual CI run before claiming support for a platform or version: configuring a matrix does not establish that it passed. These tests use disposable local repositories and do not validate hosted authentication, a system Trash implementation, Remote SSH/containers, every Git version, or all screen-reader and theme combinations.
 
 To test against an installed VS Code instead of downloading the pinned version, set `KIVO_VSCODE_EXECUTABLE_PATH` to its executable before running the command. All Extension Host tests use a temporary, isolated profile.
 
 Git fixtures disable automatic line-ending conversion locally. Filenames with brackets and spaces run on Windows too; literal asterisks and trailing spaces are tested only on POSIX, where those filenames are supported. Repository identity tests cover Windows path spelling and separate linked worktrees; message tests also verify stale responses and repository switches.
+
+The object-format suite exercises SHA-1 and SHA-256 repositories, including four-character abbreviations, stash recovery and worktree races; SHA-256 cases are skipped only when the installed Git explicitly does not support that format. Diff tests distinguish new files from read failures, including blobs above the 8 MiB limit. Release gate and artifact integrity logic can be tested with `node --test scripts/release-gate.test.mjs scripts/release-integrity.test.mjs`.
 
 `npm run package` produces `kivo-git-<version>.vsix` and verifies its runtime assets and manifest directly as a ZIP file. No external unzip command is needed. `npm run test:vsix -- <path>` can verify a specific package.
 

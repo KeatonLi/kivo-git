@@ -1,6 +1,7 @@
 import { describe, expect, it, vi } from 'vitest';
 
-vi.mock('vscode', () => ({ window: { showErrorMessage: vi.fn() } }));
+const clipboard = vi.hoisted(() => vi.fn().mockResolvedValue(undefined));
+vi.mock('vscode', () => ({ window: { showErrorMessage: vi.fn() }, env: { clipboard: { writeText: clipboard } } }));
 
 import { IdeaGitViewProvider } from '../src/IdeaGitViewProvider';
 
@@ -21,6 +22,24 @@ function harness() {
 }
 
 describe('repository workflow message routing', () => {
+  it.each([4, 40, 64])('copies a valid %i-character commit ID from the History view', async (length) => {
+    const { provider, post } = harness();
+    const hash = 'a'.repeat(length);
+    await provider.handle('history', { type: 'copyCommitHash', hash });
+    expect(clipboard).toHaveBeenCalledWith(hash);
+    expect(post).toHaveBeenCalledWith('history', expect.objectContaining({ type: 'notice', phase: 'success' }));
+  });
+
+  it.each([40, 64])('navigates from a %i-character blame commit to History', async (length) => {
+    const provider = Object.assign(Object.create(IdeaGitViewProvider.prototype), {
+      coordinator: { reset: vi.fn() }, showLog: vi.fn(), refresh: vi.fn()
+    });
+    const hash = 'a'.repeat(length);
+    await provider.showCommitInHistory(hash);
+    expect(provider.pendingHistoryCommitHash).toBe(hash);
+    expect(provider.showLog).toHaveBeenCalledOnce();
+    expect(provider.refresh).toHaveBeenCalledWith(true);
+  });
   it('returns workflow results with the exact host repository identity', async () => {
     const { provider, root, post, stashes } = harness();
     await provider.handle('changes', { type: 'workflowRequest', kind: 'stashes', root, requestId: 1 });

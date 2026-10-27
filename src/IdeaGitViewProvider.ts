@@ -191,7 +191,7 @@ export class IdeaGitViewProvider implements vscode.WebviewViewProvider, vscode.T
     const workspace = root
       ? this.availableRepositories().find((folder) => folder.uri.fsPath === root)
       : this.selectedWorkspace();
-    if (!workspace) return '';
+    if (!workspace) throw new Error('The repository for this diff is no longer available. Reopen it and try again.');
     const client = workspace.uri.fsPath === this.selectedWorkspace()?.uri.fsPath
       ? await this.getClient()
       : new GitClient(workspace.uri.fsPath);
@@ -231,7 +231,7 @@ export class IdeaGitViewProvider implements vscode.WebviewViewProvider, vscode.T
         void vscode.window.showInformationMessage(`${IdeaGitViewProvider.productName}: ${filePath} has no working tree changes.`);
         return;
       }
-      await this.openDiff(change.path, change.originalPath, change.kind, false);
+      await this.openDiff(change.path, change.originalPath, change.kind, false, change.indexStatus);
     } catch (error) {
       void vscode.window.showErrorMessage(`${IdeaGitViewProvider.productName}: ${this.errorText(error)}`);
     }
@@ -252,7 +252,7 @@ export class IdeaGitViewProvider implements vscode.WebviewViewProvider, vscode.T
 
   async showCommitInHistory(hash: string, uri?: vscode.Uri): Promise<void> {
     try {
-      if (!/^[0-9a-f]{40}$/i.test(hash)) throw new Error('The Blame commit hash is invalid.');
+      if (!/^(?:[0-9a-f]{40}|[0-9a-f]{64})$/i.test(hash)) throw new Error('The Blame commit hash is invalid.');
       if (uri) await this.workspaceRelativePath(uri);
       this.historyRef = undefined;
       this.commitLimit = HISTORY_PAGE_SIZE;
@@ -969,7 +969,7 @@ export class IdeaGitViewProvider implements vscode.WebviewViewProvider, vscode.T
           await this.checkoutRevision(client, message.hash);
           return;
         case 'copyCommitHash':
-          if (!/^[0-9a-f]{7,40}$/i.test(message.hash)) throw new Error('Invalid commit hash.');
+          if (!/^[0-9a-f]{4,64}$/i.test(message.hash)) throw new Error('Invalid commit hash.');
           await vscode.env.clipboard.writeText(message.hash);
           await this.postToView(surface, { type: 'notice', phase: 'success', message: 'Commit hash copied' });
           return;
@@ -1472,10 +1472,17 @@ export class IdeaGitViewProvider implements vscode.WebviewViewProvider, vscode.T
     }
   }
 
-  private async openDiff(filePath: string, originalPath?: string, kind?: string, preview = false): Promise<void> {
+  private async openDiff(filePath: string, originalPath?: string, kind?: string, preview = false, indexStatus?: string): Promise<void> {
     const workspace = this.selectedWorkspace();
     if (!workspace) return;
-    const oldUri = this.revisionUri(originalPath ?? filePath);
+    const change = this.lastSnapshot?.root === workspace.uri.fsPath
+      ? this.lastSnapshot.changes.find((candidate) => candidate.path === filePath)
+      : undefined;
+    // Newly added files have no HEAD blob; use an explicitly empty side rather
+    // than treating a Git read failure as an empty file. A staged new file can
+    // also have unstaged edits, in which case its kind is "modified".
+    const headIsEmpty = !originalPath && (kind === 'untracked' || kind === 'added' || (indexStatus ?? change?.indexStatus) === 'A');
+    const oldUri = this.revisionUri(originalPath ?? filePath, headIsEmpty ? 'empty=1' : '');
     const currentUri = kind === 'deleted'
       ? this.revisionUri(filePath, 'empty=1')
       : vscode.Uri.file(path.join(workspace.uri.fsPath, filePath));

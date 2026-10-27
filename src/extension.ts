@@ -1,6 +1,7 @@
 import * as vscode from 'vscode';
 import { IdeaGitViewProvider } from './IdeaGitViewProvider';
 import { InlineBlameController } from './InlineBlameController';
+import { showSupportDiagnostics } from './supportDiagnostics';
 
 export function activate(context: vscode.ExtensionContext): void {
   const provider = new IdeaGitViewProvider(context);
@@ -17,6 +18,7 @@ export function activate(context: vscode.ExtensionContext): void {
     }),
     vscode.workspace.registerTextDocumentContentProvider(IdeaGitViewProvider.revisionScheme, provider),
     vscode.commands.registerCommand('ideaGit.refresh', () => provider.refresh()),
+    vscode.commands.registerCommand('ideaGit.showSupportDiagnostics', () => showSupportDiagnostics(context)),
     vscode.commands.registerCommand('ideaGit.focus', () => provider.showChanges()),
     vscode.commands.registerCommand('ideaGit.showChanges', () => provider.showChanges()),
     vscode.commands.registerCommand('ideaGit.showLog', () => provider.showLog()),
