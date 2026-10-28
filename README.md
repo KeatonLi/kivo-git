@@ -17,9 +17,11 @@ Kivo Git keeps a familiar two-surface workflow in VS Code: **Commit** stays in t
 
 ## Features
 
-0.5.10 supports SHA-256 Git repositories, clarifies whole-file commit scope, and reports diff read failures. [See the animated preview and motion rules](docs/interaction-motion.md).
+0.6.0 adds a Worktrees overview and reviewed creation from an available local branch. [See the animated preview and motion rules](docs/interaction-motion.md).
 
 Checkout failures now retain their reason, Git details and recovery actions. Branches occupied by another worktree can open that directory directly; known blockers are checked before saving a stash. See [checkout and worktree recovery](docs/checkout-reliability.md).
+
+Open **Worktrees** in History to inspect registered directories or create one. Creation requires a new directory and an unused local branch; review the exact branch, commit and path before confirming. If a Git hook reports an error after registration, Kivo shows the actual worktree and an action to inspect it. Creating new branches or removing worktrees from this view is not yet supported.
 
 ### Commit workspace
 

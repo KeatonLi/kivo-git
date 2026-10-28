@@ -1,11 +1,12 @@
 import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
 import path from 'node:path';
+import { promises as fs } from 'node:fs';
 import { createHash } from 'node:crypto';
 import { ChangelistStore } from './ChangelistStore';
 import { parsePorcelainV2 } from './statusParser';
 import { GitWorkflows } from './GitWorkflows';
-import { CheckoutError, GitCommandError, parseWorktrees, sameWorktreePath, type WorktreeSummary } from './checkout';
+import { CheckoutError, GitCommandError, WorktreeCreationError, parseWorktrees, sameWorktreePath, type WorktreeSummary, type WorktreeCreationPlan } from './checkout';
 import type { BranchSummary, CommitDetails, CommitFile, CommitSummary, GitRef, LineBlame, PullStrategy, PushPreview, RepositorySnapshot } from './types';
 
 const execFileAsync = promisify(execFile);
@@ -456,6 +457,100 @@ export class GitClient {
 
   async getWorktrees(): Promise<WorktreeSummary[]> {
     return parseWorktrees(await this.run(['worktree', 'list', '--porcelain', '-z']));
+  }
+
+  private async localWorktreeBranches(): Promise<Array<{ name: string; oid: string }>> {
+    const output = await this.run(['for-each-ref', '--format=%(refname)%09%(objectname)', 'refs/heads']);
+    return output.split('\n').filter(Boolean).map(line => {
+      const [ref = '', oid = ''] = line.split('\t');
+      return { name: ref.slice('refs/heads/'.length), oid };
+    });
+  }
+
+  /** Offer canonical local names; porcelain branch names are also canonical. */
+  async listAvailableWorktreeBranches(): Promise<Array<{ name: string; oid: string }>> {
+    const [branches, trees] = await Promise.all([this.localWorktreeBranches(), this.getWorktrees()]);
+    return branches.filter(branch => branch.oid && !trees.some(tree => tree.branch === branch.name))
+      .map(({ name, oid }) => ({ name, oid }));
+  }
+
+  /** Resolve a target through an existing parent; never reuse an existing path. */
+  private async newWorktreePath(target: string): Promise<string> {
+    if (typeof target !== 'string' || !target || target.includes('\0') || !path.isAbsolute(target)) {
+      throw new WorktreeCreationError('Choose an absolute path for the new worktree.');
+    }
+    const resolved = path.resolve(target);
+    if (resolved === path.parse(resolved).root) throw new WorktreeCreationError('Choose a new directory for the worktree.');
+    let parent: string;
+    try {
+      parent = await fs.realpath(path.dirname(resolved));
+      if (!(await fs.stat(parent)).isDirectory()) throw new Error('not a directory');
+    } catch {
+      throw new WorktreeCreationError('The parent directory is unavailable. Choose an existing directory.');
+    }
+    const actual = path.join(parent, path.basename(resolved));
+    try {
+      await fs.lstat(actual);
+      throw new WorktreeCreationError('The worktree destination already exists. Choose a new directory.');
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error;
+    }
+    return actual;
+  }
+
+  /** Prepare a reviewable plan without creating files or changing Git state. */
+  async prepareWorktree(branchName: string, targetPath: string): Promise<WorktreeCreationPlan> {
+    if (typeof branchName !== 'string' || !branchName || branchName.includes('\0')) throw new WorktreeCreationError('Choose an existing local branch.');
+    const destination = await this.newWorktreePath(targetPath);
+    const [branches, trees, commonDir, topLevel] = await Promise.all([
+      this.localWorktreeBranches(),
+      this.getWorktrees(), this.run(['rev-parse', '--git-common-dir']), this.run(['rev-parse', '--show-toplevel'])
+    ]);
+    const branch = branches.find(item => item.name === branchName);
+    if (!branch?.oid) throw new WorktreeCreationError('The selected local branch no longer exists. Refresh and try again.');
+    const occupied = trees.find(tree => tree.branch === branch.name);
+    if (occupied) throw new WorktreeCreationError(`${branch.name} is already used by a worktree at ${occupied.path}.`);
+    const actualCommonDir = await fs.realpath(path.resolve(this.workspaceRoot, commonDir.replace(/\r?\n$/, '')));
+    const relativeToGit = path.relative(actualCommonDir, destination);
+    if (!relativeToGit || (!relativeToGit.startsWith(`..${path.sep}`) && relativeToGit !== '..' && !path.isAbsolute(relativeToGit))) {
+      throw new WorktreeCreationError('Choose a destination outside Git’s internal directory.');
+    }
+    const parent = await fs.stat(path.dirname(destination));
+    const sourceRoot = await fs.realpath(topLevel.replace(/\r?\n$/, ''));
+    const source = await fs.stat(sourceRoot);
+    return { root: this.workspaceRoot, sourceRoot, sourceDevice: source.dev, sourceInode: source.ino,
+      commonDir: actualCommonDir, branch: branch.name, path: destination, head: branch.oid, parentDevice: parent.dev, parentInode: parent.ino };
+  }
+
+  /** Revalidate the reviewed plan, then check Git's actual state even on failure. */
+  async createWorktree(plan: WorktreeCreationPlan): Promise<WorktreeSummary> {
+    if (!plan || plan.root !== this.workspaceRoot || typeof plan.commonDir !== 'string' || typeof plan.sourceRoot !== 'string' || typeof plan.head !== 'string') {
+      throw new WorktreeCreationError('The repository changed. Review the worktree again.');
+    }
+    const current = await this.prepareWorktree(plan.branch, plan.path);
+    if (!sameWorktreePath(current.commonDir, plan.commonDir) || !sameWorktreePath(current.sourceRoot, plan.sourceRoot) ||
+        current.sourceDevice !== plan.sourceDevice || current.sourceInode !== plan.sourceInode || !sameWorktreePath(current.path, plan.path) || current.head !== plan.head ||
+        current.parentDevice !== plan.parentDevice || current.parentInode !== plan.parentInode) {
+      throw new WorktreeCreationError('The repository, branch or destination changed. Review the worktree again.');
+    }
+    let failure: unknown;
+    try {
+      // A short validated local branch name checks it out; refs/heads/... can
+      // make Git create a detached worktree. No --force or automatic cleanup.
+      await this.run(['worktree', 'add', '--', current.path, current.branch]);
+    } catch (error) { failure = error; }
+    let trees: WorktreeSummary[];
+    try { trees = await this.getWorktrees(); }
+    catch {
+      throw new WorktreeCreationError('Could not verify the worktree after Git ran. Check Git worktree list and the destination before retrying.');
+    }
+    const created = trees.find(tree => sameWorktreePath(tree.path, current.path));
+    if (!failure && created?.branch === current.branch && created.head === current.head && !created.detached) return created;
+    const detail = failure instanceof Error ? failure.message : 'Git finished but the registered worktree did not match the reviewed branch and commit.';
+    if (created) {
+      throw new WorktreeCreationError('A worktree is registered at the selected path, but creation did not complete as reviewed. Inspect it before retrying.', created, detail);
+    }
+    throw new WorktreeCreationError('Could not create the worktree. Check the destination and Git worktree list before retrying.', undefined, detail);
   }
 
   private async checkSwitchState(): Promise<void> {

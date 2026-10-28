@@ -35,6 +35,8 @@ Git fixtures disable automatic line-ending conversion locally. Filenames with br
 
 The object-format suite exercises SHA-1 and SHA-256 repositories, including four-character abbreviations, stash recovery and worktree races; SHA-256 cases are skipped only when the installed Git explicitly does not support that format. Diff tests distinguish new files from read failures, including blobs above the 8 MiB limit. Release gate and artifact integrity logic can be tested with `node --test scripts/release-gate.test.mjs scripts/release-integrity.test.mjs`.
 
+`test/worktreeCreation.integration.test.ts` verifies creation with real Git, untouched source files and index, branch and path races, same-name tags, and partial success from a failed checkout hook. Host tests cover the review, cancellation, repository changes and open action; the browser suite checks the entry and short History panels. The hook and symlink cases are skipped on Windows where POSIX shell and symlink privileges are not guaranteed.
+
 `npm run package` produces `kivo-git-<version>.vsix` and verifies its runtime assets and manifest directly as a ZIP file. No external unzip command is needed. `npm run test:vsix -- <path>` can verify a specific package.
 
 Inline blame additionally has focused controller and cache tests for cursor debounce, cancellation, stale results, unsaved edits, non-repository workspaces, and the settings toggle. The Extension Host test verifies the toggle command against VS Code's real configuration API.

@@ -1737,7 +1737,7 @@ function renderCommitContextMenu() {
 
 function renderLogActionRail(s) {
   return `<aside class="log-action-rail" aria-label="History actions">
-    ${(s.worktrees?.length || 0) > 1 ? `<button class="idea-toolbar-button" data-action="choose-worktree" aria-label="Open worktree in a new window" title="Worktrees" ${ui.busy ? 'disabled' : ''}>${icon('folder-opened')}<span class="rail-text">Worktrees</span></button>` : ''}
+    <button class="idea-toolbar-button" data-action="choose-worktree" aria-label="Manage Worktrees" title="Worktrees" ${ui.busy ? 'disabled' : ''}>${icon('folder-opened')}<span class="rail-text">Worktrees</span></button>
     <button class="idea-toolbar-button" data-action="stashes" aria-label="Open saved Stashes" title="Stashes" ${ui.busy ? 'disabled' : ''}>${icon('archive')}<span class="rail-text">Stashes</span></button>
     <button class="idea-toolbar-button" data-action="show-changes" aria-label="Open Commit tool window" title="Open Commit tool window">${kivoIcon('changes', 'kivo-toolbar-mark')}<span class="rail-text">Commit</span></button>
     ${s.repositoryCount > 1 ? `<button class="idea-toolbar-button" data-action="choose-repository" aria-label="Choose repository, current ${escapeHtml(s.repositoryName)}" title="Repository: ${escapeHtml(s.repositoryName)}" ${ui.busy ? 'disabled' : ''}>${icon('repo')}<span class="rail-text">Repos</span></button>` : ''}

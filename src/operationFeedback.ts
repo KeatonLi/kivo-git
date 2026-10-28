@@ -1,4 +1,4 @@
-import { CheckoutError, GitCommandError } from './git/checkout';
+import { CheckoutError, GitCommandError, WorktreeCreationError } from './git/checkout';
 
 export type RecoveryAction = 'openWorktree' | 'stashes' | 'changes' | 'details' | 'copy' | 'refresh';
 export interface OperationFailure {
@@ -20,17 +20,18 @@ export function redactGitDetail(text: string): string {
 
 export function operationFailure(error: unknown, context: { id: number; root: string; kind: string }): OperationFailure {
   const issue = error instanceof CheckoutError ? error : undefined;
+  const creation = error instanceof WorktreeCreationError ? error : undefined;
   const command = error instanceof GitCommandError ? error : undefined;
   const message = error instanceof Error ? error.message : String(error);
-  const details = issue?.details || (command
+  const details = issue?.details || (creation ? `${creation.message}${creation.created ? `\nRegistered path: ${creation.created.path}\nActual branch: ${creation.created.branch || 'detached or unavailable'}` : ''}\n${creation.details}` : undefined) || (command
     ? `git ${command.args.join(' ')}\nExit: ${command.exitCode ?? 'unknown'}\n${command.stderr}\n${command.stdout}` : message);
   const actions: RecoveryAction[] = [];
-  if (issue?.worktreePath) actions.push('openWorktree');
+  if (issue?.worktreePath || creation?.created?.path) actions.push('openWorktree');
   if (issue?.stashHash) actions.push('stashes');
   if (issue?.code === 'changes-blocked' || issue?.code === 'operation-in-progress') actions.push('changes');
   actions.push('details', 'copy', 'refresh');
   return { ...context, title: redactGitDetail(issue ? message : (message.split('\n')[0] || '')).slice(0, 320), details: redactGitDetail(details), actions,
-    ...(issue?.worktreePath ? { worktreePath: issue.worktreePath } : {}),
+    ...(issue?.worktreePath || creation?.created?.path ? { worktreePath: issue?.worktreePath || creation!.created!.path } : {}),
     ...(issue?.stashHash ? { stashHash: issue.stashHash } : {}),
     ...(issue?.actualBranch ? { actualBranch: issue.actualBranch } : {}) };
 }

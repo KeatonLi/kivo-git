@@ -50,7 +50,7 @@ jobs:
       - run: git --version
       - run: npm ci
       - name: Verify real Git operations and recovery
-        run: npx vitest run test/gitClient.integration.test.ts test/gitWorkflows.integration.test.ts test/checkout.integration.test.ts test/cherryPick.integration.test.ts test/gitSha256.integration.test.ts test/gitDiff.integration.test.ts --maxWorkers=2
+        run: npx vitest run test/gitClient.integration.test.ts test/gitWorkflows.integration.test.ts test/checkout.integration.test.ts test/cherryPick.integration.test.ts test/gitSha256.integration.test.ts test/gitDiff.integration.test.ts test/worktreeCreation.integration.test.ts --maxWorkers=2
 
   extension-host:
     name: VS Code ${{ matrix.vscode }} (${{ matrix.os }})

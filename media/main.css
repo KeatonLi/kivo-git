@@ -770,11 +770,14 @@ body[data-surface="history"] .content { min-width: 0; background: var(--vscode-p
 }
 .parity-mode .log-action-rail {
   min-width: 0;
+  min-height: 0;
   display: flex;
   flex-direction: column;
   align-items: center;
   gap: 4px;
   padding: 6px 2px;
+  overflow-y: auto;
+  overflow-x: hidden;
   border-right: 1px solid var(--vscode-panel-border, var(--border-subtle));
   background: var(--vscode-sideBar-background, var(--surface-base));
 }

@@ -2,6 +2,14 @@
 
 ## Unreleased
 
+## 0.6.0
+
+- Show a Worktrees entry in History even when only one worktree exists, with current, detached, locked and unavailable states.
+- Create a worktree from an available local branch after reviewing its commit and destination. Revalidate the repository, branch and directory before Git runs.
+- Check the actual registered worktree after Git errors; expose its path and an open action when creation partially succeeds. Never automatically delete the destination.
+- Add real-Git race and recovery tests, host review tests and narrow History interaction coverage across the supported platform matrix.
+- Use the official npm registry for the locked `yauzl` package so clean installs do not depend on a separate mirror.
+
 ## 0.5.10
 
 - Support SHA-256 Git repositories and short object IDs in History, blame, checkout and stash recovery.

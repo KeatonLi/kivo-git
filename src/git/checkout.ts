@@ -10,6 +10,27 @@ export interface WorktreeSummary {
   prunable?: string;
 }
 
+export interface WorktreeCreationPlan {
+  root: string;
+  sourceRoot: string;
+  sourceDevice: number;
+  sourceInode: number;
+  commonDir: string;
+  branch: string;
+  path: string;
+  head: string;
+  parentDevice: number;
+  parentInode: number;
+}
+
+/** An attempted creation may have registered a worktree even when Git fails. */
+export class WorktreeCreationError extends Error {
+  constructor(message: string, readonly created?: WorktreeSummary, readonly details = message) {
+    super(message);
+    this.name = 'WorktreeCreationError';
+  }
+}
+
 /** Porcelain -z leaves paths and lock reasons unquoted, including newlines. */
 export function parseWorktrees(output: string): WorktreeSummary[] {
   const result: WorktreeSummary[] = [];

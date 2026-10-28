@@ -11,6 +11,21 @@ export async function verifyCheckoutRecovery(page, openSurface) {
   };
   await page.setViewportSize({ width: 1440, height: 600 });
   await openSurface('surface=history');
+  await page.evaluate(() => { fixture.worktrees = [{ path: fixture.root, branch: fixture.branch }]; emit({ type: 'snapshot', payload: structuredClone(fixture) }); });
+  const worktrees = page.getByRole('button', { name: 'Manage Worktrees' });
+  await worktrees.focus();
+  await page.keyboard.press('Enter');
+  assert.ok(await page.evaluate(() => window.__vscodeMessages.some(message => message.type === 'chooseWorktree' && message.root === fixture.root)),
+    'Worktrees must remain discoverable and keyboard accessible with a single registered worktree.');
+  await page.setViewportSize({ width: 1440, height: 260 });
+  const lastRailAction = page.locator('.log-action-rail [data-action="toggle-history-focus"]');
+  await lastRailAction.focus();
+  assert.equal(await lastRailAction.evaluate(element => {
+    const container = element.closest('.log-action-rail');
+    const button = element.getBoundingClientRect(), bounds = container.getBoundingClientRect();
+    return button.top >= bounds.top && button.bottom <= bounds.bottom;
+  }), true, 'Keyboard focus must reveal the last History action in a short panel.');
+  await page.setViewportSize({ width: 1440, height: 600 });
   await page.evaluate(() => {
     window.__checkoutFailure = { id: 40, root: fixture.root, kind: 'checkout', title: 'feature/login is already open in another worktree.',
       worktreePath: '/projects/登录 worktree', details: 'Open the registered worktree.\n<img src=x onerror="window.__unsafe=true">', actions: ['openWorktree', 'details', 'copy', 'refresh'] };
