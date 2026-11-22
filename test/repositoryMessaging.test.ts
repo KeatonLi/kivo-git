@@ -22,6 +22,19 @@ function harness() {
 }
 
 describe('repository workflow message routing', () => {
+  it.each(['commit', 'commitAndPush'])('rejects %s confirmations from a different repository', async (type) => {
+    const { provider, root, post, select } = harness();
+    provider.operation = vi.fn();
+    provider.commitAndPush = vi.fn();
+    provider.refresh = vi.fn();
+    await provider.handle('changes', { type, root: `${root}-old`, message: 'Reviewed elsewhere', paths: ['file.txt'] });
+    select(`${root}-other`);
+    await provider.handle('changes', { type, root, message: 'Reviewed earlier', paths: ['file.txt'] });
+    expect(provider.operation).not.toHaveBeenCalled();
+    expect(provider.commitAndPush).not.toHaveBeenCalled();
+    expect(post).toHaveBeenCalledTimes(2);
+    expect(post).toHaveBeenCalledWith('changes', expect.objectContaining({ type: 'notice', phase: 'error' }));
+  });
   it.each([4, 40, 64])('copies a valid %i-character commit ID from the History view', async (length) => {
     const { provider, post } = harness();
     const hash = 'a'.repeat(length);

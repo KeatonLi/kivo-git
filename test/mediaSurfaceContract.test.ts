@@ -19,7 +19,9 @@ describe('webview surface composition', () => {
     const css = await readFile(path.join(root, 'media', 'main.css'), 'utf8');
     expect(main).toContain('function renderCommitToolbar(s)');
     expect(main).toContain('class="commit-changes-heading"');
-    expect(main).toContain('Commit and Push…');
+    expect(main).toContain('Review Commit…');
+    expect(main).toContain('data-action="confirm-commit-and-review-push"');
+    expect(main).not.toContain('data-action="commit-and-push"');
     expect(main).toContain('function renderLogActionRail(s)');
     expect(main).toContain('class="log-branch-pane"');
     expect(main).toContain('class="branch-sync-indicator');
@@ -166,7 +168,9 @@ describe('webview surface composition', () => {
 
   it('keeps commit readiness and menu focus predictable', async () => {
     const main = await readFile(path.join(root, 'media', 'main.js'), 'utf8');
-    expect(main).toContain('const canCommit = !commitBlocker();');
+    expect(main).toContain('const blocker = commitBlocker();');
+    expect(main).toContain('const canCommit = !blocker;');
+    expect(main).toContain('button.disabled = !enabled;');
     expect(main).toContain('function syncCommitActionState()');
     expect(main).toContain('syncCommitActionState();');
     expect(main).toContain("returnFocus: anchor ? 'menu' : 'file'");

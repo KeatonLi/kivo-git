@@ -21,7 +21,9 @@ Kivo Git keeps a familiar two-surface workflow in VS Code: **Commit** stays in t
 
 Checkout failures now retain their reason, Git details and recovery actions. Branches occupied by another worktree can open that directory directly; known blockers are checked before saving a stash. See [checkout and worktree recovery](docs/checkout-reliability.md).
 
-Open **Worktrees** in History to inspect registered directories or create one. Creation requires a new directory and an unused local branch; review the exact branch, commit and path before confirming. If a Git hook reports an error after registration, Kivo shows the actual worktree and an action to inspect it. Creating new branches or removing worktrees from this view is not yet supported.
+Open **Worktrees** in History to inspect and open registered directories, create one from an unused local branch, or choose **New Branch Worktree from Current…**. To start elsewhere, right-click a single commit in History and choose **New Branch in Worktree…**. Review the exact branch, commit and new directory before confirming. New-branch creation opens the new worktree in a separate VS Code window without switching the current checkout. If Git reports an error after registration, Kivo shows the actual state instead of trying to roll back automatically.
+
+**Remove Worktree…** checks that the selected linked worktree is clean, including untracked and ignored files, before showing the directory, checkout and commit for review. Removal deletes the working directory, not its branch. Kivo does not offer forced removal; close any other window using that directory and save all edits first.
 
 ### Commit workspace
 
@@ -37,7 +39,7 @@ Open **Worktrees** in History to inspect registered directories or create one. C
 - Arrow-key file navigation, Space toggle, and Shift range selection
 - Changed-file icons resolved from the active VS Code file icon theme, including compound extensions
 - Tracking and staging details on hover, with less-used toolbar actions in a named menu
-- A commit review step that lists the selected files and offers a diff shortcut for each before confirmation
+- One **Review Commit…** action showing the repository, branch, selected files, and a diff shortcut for each. Choose **Commit Locally** or **Commit & Review Push…**; the second choice saves the commit locally first and sends nothing until the separate push review is confirmed.
 
 Commit operates on whole selected files, including their working-tree edits; the Staged filter does not turn it into an index-only commit. Unrelated staged files are preserved. Selection counts appear beside the commit form. Filtering never silently drops an existing selection: hidden selections must be reviewed by clearing the filter, or removed with **Remove hidden**, before committing. List checkboxes select matching files, while keyboard select-all and range selection use the expanded, visible rows.
 

@@ -123,7 +123,6 @@ const ui = {
   pushDetailsError: undefined,
   pushDetailsRequestId: 0,
   pushDetailsCache: new Map(),
-  commitReviewAndPush: false,
   graphQuery: initialRepositoryState.graphQuery || '',
   pendingRevealHash: undefined,
   graphPathFilter: initialRepositoryState.graphPathFilter || '',
@@ -380,7 +379,6 @@ function restoreRepositoryState(root, state = {}) {
   ui.pushReview = undefined;
   ui.pushPreparing = undefined;
   clearPushCommitPreview(true);
-  ui.commitReviewAndPush = false;
   ui.graphQuery = state.graphQuery || '';
   ui.graphPathFilter = state.graphPathFilter || '';
   ui.graphBranchFilter = state.graphBranchFilter || '';
@@ -1222,8 +1220,9 @@ function renderChanges(s) {
       </div>
     </section>`;
   }).join('');
-  const commitHint = commitBlocker() || 'Commit selected files';
-  const canCommit = !commitBlocker();
+  const blocker = commitBlocker();
+  const commitHint = blocker || 'Review the selected files before committing';
+  const canCommit = !blocker;
   return `
     <div class="commit-upper" id="kivo-commit-upper" ${ui.commitZoneResized && !ui.recentCommitsCollapsed ? `style="flex-basis:${ui.commitZonePercent}%"` : ''}>
       ${renderCommitRepository(s)}
@@ -1239,8 +1238,7 @@ function renderChanges(s) {
       ${selection.selectedChanges.length ? renderSelectionStatus() : ''}
       <textarea id="commit-message" rows="3" placeholder="Commit Message" aria-label="Commit Message" style="height:var(--commit-message-height)" spellcheck="true" ${ui.operationKind === 'commit' ? 'disabled' : ''}>${escapeHtml(ui.commitMessage)}</textarea>
       <div class="commit-actions">
-        <button class="primary-button ${ui.operationKind === 'commit' ? 'working' : ''}" data-action="commit" title="${escapeHtml(commitHint)} (${commandKey}+Enter)" ${!canCommit ? 'disabled' : ''}>${ui.operationKind === 'commit' ? `${icon('loading', 'codicon-modifier-spin button-spinner')}<span>Committing…</span>` : '<span>Commit</span>'}</button>
-        <button class="commit-push-button ${ui.operationKind === 'push' ? 'working' : ''}" data-action="commit-and-push" title="${escapeHtml(canCommit ? 'Commit selected files and push' : commitHint)}" ${!canCommit ? 'disabled' : ''}>${ui.operationKind === 'push' ? `${icon('loading', 'codicon-modifier-spin button-spinner')}<span>Pushing…</span>` : '<span>Commit and Push…</span>'}</button>
+        <button class="primary-button ${ui.operationKind === 'commit' ? 'working' : ''}" data-action="commit" aria-haspopup="dialog" title="${escapeHtml(commitHint)} (${commandKey}+Enter)" ${!canCommit ? 'disabled' : ''}>${ui.operationKind === 'commit' ? `${icon('loading', 'codicon-modifier-spin button-spinner')}<span>Committing…</span>` : '<span>Review Commit…</span>'}</button>
       </div>
       </footer>
     </div>
@@ -1254,16 +1252,34 @@ function renderChanges(s) {
 function renderCommitReview(s) {
   const { selectedChanges } = changeSelection();
   const partial = selectedChanges.filter((change) => change.indexStatus !== '.' && change.workingTreeStatus !== '.').length;
-  const destination = ui.commitReviewAndPush ? `<p class="commit-review-push">${!s.upstream || s.upstreamGone ? 'Commit locally, then review where to publish this branch and set its upstream.' : `After committing, you will review the push to <strong>${escapeHtml(s.upstream)}</strong>.`}</p>` : '';
+  const detached = s.branch === '(detached)';
+  const canReviewPush = canReviewCommitPush(s);
+  const hasUpstream = Boolean(s.upstream && !s.upstreamGone);
+  const destination = canReviewPush
+    ? hasUpstream ? `Push review opens separately for <strong>${escapeHtml(s.upstream)}</strong>. Nothing is sent until you confirm it.` : 'Push review lets you choose where to publish this branch. Nothing is sent until you confirm it.'
+    : detached ? 'Push review is unavailable on a detached HEAD. Create a branch to push this work later.' : 'No remote is configured. You can commit locally and add a remote later.';
+  const blocker = commitBlocker();
   return `<div class="commit-review-overlay"><div class="commit-review-scrim" data-action="close-commit-review"></div>
     <section class="commit-review-dialog" role="dialog" aria-modal="true" aria-labelledby="commit-review-title" aria-describedby="commit-review-description">
-      <header><div><small>BEFORE COMMIT</small><h2 id="commit-review-title">Review ${selectedChanges.length} selected ${selectedChanges.length === 1 ? 'file' : 'files'}</h2></div><button class="idea-toolbar-button" data-action="close-commit-review" aria-label="Close commit review" title="Close review">${icon('close')}</button></header>
-      <p id="commit-review-description">Kivo Git commits the current working-tree contents of these files, including both staged and unstaged edits. Other staged files stay untouched.</p>
-      ${partial ? `<p class="commit-review-warning" role="note">${icon('warning')} ${partial} ${partial === 1 ? 'file has' : 'files have'} both staged and working-tree edits. Both will be included.</p>` : ''}
-      <div class="commit-review-files" aria-label="Files in this commit">${selectedChanges.map((change) => `<div class="commit-review-file"><span class="commit-review-path" title="${escapeHtml(change.path)}">${escapeHtml(change.path)}</span><span class="commit-review-state">${escapeHtml(fileStateSummary(change))}</span><button data-review-diff="${escapeHtml(change.path)}" data-original-path="${escapeHtml(change.originalPath || '')}" data-kind="${escapeHtml(change.kind)}" aria-label="Review diff for ${escapeHtml(change.path)}">Review diff</button></div>`).join('')}</div>
-      <div class="commit-review-message"><span>Message</span><strong>${escapeHtml(ui.commitMessage.trim())}</strong></div>
-      ${destination}
-      <footer><button class="commit-review-cancel" data-action="close-commit-review">Back</button><button class="primary-button" data-action="confirm-commit-review">${ui.commitReviewAndPush ? 'Commit, then review push' : 'Commit these files'}</button></footer>
+      <header class="commit-review-header"><span class="commit-review-mark" aria-hidden="true">${icon('git-commit')}</span><div><small>Local commit</small><h2 id="commit-review-title">Review ${selectedChanges.length} selected ${selectedChanges.length === 1 ? 'file' : 'files'}</h2></div><button class="idea-toolbar-button" data-action="close-commit-review" aria-label="Close commit review" title="Close review">${icon('close')}</button></header>
+      <div class="commit-review-body">
+        <div class="commit-review-target"><span>${icon('repo')}<strong>${escapeHtml(s.repositoryName)}</strong></span><span>${icon('git-branch')}<strong>${escapeHtml(detached ? 'Detached HEAD' : s.branch)}</strong></span></div>
+        <section class="commit-review-changes" aria-labelledby="commit-review-files-label">
+          <h3 id="commit-review-files-label" class="commit-review-label">Included files</h3>
+          <p id="commit-review-description">Includes staged and unstaged edits in the selected files. Other staged files stay untouched.</p>
+          ${partial ? `<p class="commit-review-warning" role="note">${icon('warning')}<span>${partial} ${partial === 1 ? 'file has' : 'files have'} both staged and working-tree edits. Both will be included.</span></p>` : ''}
+          <ul class="commit-review-files">${selectedChanges.map((change) => {
+            const split = change.path.lastIndexOf('/');
+            const leaf = change.path.slice(split + 1);
+            const directory = split < 0 ? '' : change.path.slice(0, split);
+            return `<li class="commit-review-file">${renderFileTypeIcon(change)}<div class="commit-review-path" title="${escapeHtml(change.path)}"><strong>${escapeHtml(leaf)}</strong>${directory ? `<small>${escapeHtml(directory)}</small>` : ''}</div><span class="commit-review-state">${escapeHtml(fileStateSummary(change))}</span><button data-review-diff="${escapeHtml(change.path)}" data-original-path="${escapeHtml(change.originalPath || '')}" data-kind="${escapeHtml(change.kind)}" aria-label="Review diff for ${escapeHtml(change.path)}">${icon('diff')}<span>Diff</span></button></li>`;
+          }).join('')}</ul>
+        </section>
+        <div class="commit-review-message"><span class="commit-review-label">Commit message</span><strong>${escapeHtml(ui.commitMessage.trim())}</strong></div>
+        <p class="commit-review-push">${icon('cloud')}<span>${destination}</span></p>
+        ${blocker ? `<p class="commit-review-warning" role="status">${escapeHtml(blocker)}.</p>` : ''}
+      </div>
+      <footer><button class="commit-review-cancel" data-action="close-commit-review">Back</button><button class="primary-button" data-action="confirm-commit-review" ${blocker ? 'disabled' : ''}>Commit Locally</button>${canReviewPush ? `<button class="commit-review-secondary" data-action="confirm-commit-and-review-push" ${blocker ? 'disabled' : ''}>Commit &amp; Review Push…</button>` : ''}</footer>
     </section>
   </div>`;
 }
@@ -1716,7 +1732,7 @@ function renderCommitContextMenu() {
   const count = selectedHistoryCommits().length;
   const unavailable = cherryPickUnavailable();
   const width = 270;
-  const height = count > 1 ? 150 : 282;
+  const height = count > 1 ? 150 : 308;
   const left = clamp(menu.x, 8, Math.max(8, window.innerWidth - width - 8));
   const top = clamp(menu.y, 8, Math.max(8, window.innerHeight - height - 8));
   return `<div class="context-menu commit-context-menu" data-commit-context role="menu" aria-label="${count > 1 ? `Actions for ${count} selected commits` : `Actions for commit ${escapeHtml(commit.shortHash)}`}" style="left:${left}px;top:${top}px">
@@ -1729,6 +1745,7 @@ function renderCommitContextMenu() {
     <button role="menuitem" data-commit-context-action="copy-subject">${icon('symbol-string')}<span>Copy Commit Subject</span></button>
     <div class="context-menu-separator" role="separator"></div>
     <button role="menuitem" data-commit-context-action="branch" ${ui.busy ? 'disabled' : ''}>${icon('git-branch-create')}<span>New Branch from Commit…</span></button>
+    <button role="menuitem" data-commit-context-action="worktree" ${ui.busy ? 'disabled' : ''}>${icon('folder-opened')}<span>New Branch in Worktree…</span></button>
     <button role="menuitem" data-commit-context-action="tag" ${ui.busy ? 'disabled' : ''}>${icon('tag')}<span>New Tag…</span></button>
     <button role="menuitem" data-commit-context-action="checkout" ${ui.busy ? 'disabled' : ''}>${icon('inspect')}<span>Checkout Revision…</span></button>
     `}
@@ -2091,6 +2108,12 @@ function runCommitContextAction(event) {
   if (action === 'copy') post('copyCommitHash', { hash: menu.hash });
   if (action === 'copy-subject') post('copyCommitSubject', { hash: menu.hash });
   if (action === 'branch' && !ui.busy) post('createBranch', { startPoint: menu.hash });
+  if (action === 'worktree' && !ui.busy) {
+    const selected = selectedHistoryCommits();
+    if (selected.length === 1 && selected[0].hash === menu.hash) {
+      post('createWorktree', { root: ui.snapshot.root, startPoint: menu.hash });
+    }
+  }
   if (action === 'tag' && !ui.busy) post('createTag', { hash: menu.hash });
   if (action === 'checkout' && !ui.busy) post('checkoutRevision', { hash: menu.hash });
   render();
@@ -3107,14 +3130,15 @@ function handleAction(action) {
     return;
   }
   if (action === 'close-commit-review') {
-    const andPush = ui.commitReviewAndPush;
     ui.commitReviewOpen = false;
     render();
-    requestAnimationFrame(() => app.querySelector(`[data-action="${andPush ? 'commit-and-push' : 'commit'}"]`)?.focus());
+    requestAnimationFrame(() => {
+      if (!ui.commitReviewOpen) (app.querySelector('[data-action="commit"]:not(:disabled)') || app.querySelector('[data-action="edit-commit-message"]'))?.focus();
+    });
     return;
   }
-  if (action === 'confirm-commit-review') {
-    submitReviewedCommit();
+  if (action === 'confirm-commit-review' || action === 'confirm-commit-and-review-push') {
+    submitReviewedCommit(action === 'confirm-commit-and-review-push');
     return;
   }
   if (action === 'toolbar-more') {
@@ -3228,7 +3252,6 @@ function handleAction(action) {
     render();
   }
   if (action === 'commit') commit();
-  if (action === 'commit-and-push') commit(true);
   if (action === 'close-commit') {
     ui.commitContextMenu = undefined;
     clearTimeout(commitDetailTimer);
@@ -3275,33 +3298,38 @@ function syncCommitActionState() {
     messageCheck.classList.toggle('pending', !ready);
     messageCheck.innerHTML = `${icon(ready ? 'check' : 'circle-outline')} ${ready ? 'Message ready' : 'Message needed'}`;
   }
-  for (const button of app.querySelectorAll('[data-action="commit"], [data-action="commit-and-push"]')) {
+  const button = app.querySelector('[data-action="commit"]');
+  if (button) {
     button.disabled = !enabled;
-    button.title = hint || (button.dataset.action === 'commit' ? `Commit selected files (${commandKey}+Enter)` : 'Commit selected files and push');
+    button.title = `${hint || 'Review the selected files before committing'} (${commandKey}+Enter)`;
   }
 }
 
-function commit(andPush = false) {
+function canReviewCommitPush(snapshot) {
+  return Boolean(snapshot && snapshot.branch !== '(detached)' && snapshot.remotes?.length !== 0);
+}
+
+function commit() {
   const blocker = commitBlocker();
   if (blocker) {
     toast(blocker, 'error');
     return;
   }
-  ui.commitReviewAndPush = andPush;
   ui.commitReviewOpen = true;
   render();
-  requestAnimationFrame(() => app.querySelector('[data-action="confirm-commit-review"]')?.focus());
+  requestAnimationFrame(() => app.querySelector('.commit-review-dialog header button')?.focus());
 }
 
-function submitReviewedCommit() {
+function submitReviewedCommit(andPush = false) {
   if (!ui.commitReviewOpen) return;
   const blocker = commitBlocker();
   if (blocker) { toast(blocker, 'error'); return; }
-  const andPush = ui.commitReviewAndPush;
+  if (andPush && !canReviewCommitPush(ui.snapshot)) return;
   const paths = changeSelection().selectedChanges.map((change) => change.path);
+  const root = ui.snapshot.root;
   ui.commitReviewOpen = false;
   render();
-  post(andPush ? 'commitAndPush' : 'commit', { message: ui.commitMessage, paths });
+  post(andPush ? 'commitAndPush' : 'commit', { root, message: ui.commitMessage, paths });
 }
 
 function toast(message, phase = 'success') {

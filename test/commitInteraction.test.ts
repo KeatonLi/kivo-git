@@ -11,13 +11,13 @@ async function handlers() {
     { path: 'hidden.txt', kind: 'modified', staged: false, indexStatus: '.', workingTreeStatus: 'M' }
   ];
   const context: Record<string, any> = {
-    ui: { snapshot: { changes, changelists: [{ id: 'default', changes }] }, selected: new Set(), collapsed: new Set(), changeFilter: 'staged', changeQuery: '', commitMessage: 'message', busy: false },
+    ui: { snapshot: { root: '/repo', branch: 'topic', changes, changelists: [{ id: 'default', changes }] }, selected: new Set(), collapsed: new Set(), changeFilter: 'staged', changeQuery: '', commitMessage: 'message', busy: false },
     post: vi.fn(), toast: vi.fn(), persist: vi.fn(), render: vi.fn(), requestAnimationFrame: vi.fn()
   };
   runInNewContext(await readFile('media/change-selection.js', 'utf8'), context);
   const source = await readFile('media/main.js', 'utf8');
   const ast = ts.createSourceFile('main.js', source, ts.ScriptTarget.Latest, true, ts.ScriptKind.JS);
-  const names = new Set(['changeSelection', 'orderedPaths', 'setSelection', 'commitBlocker', 'commit', 'submitReviewedCommit', 'handleAction', 'renderSelectionStatus', 'runFileContextAction', 'matchesChangeFilter']);
+  const names = new Set(['changeSelection', 'orderedPaths', 'setSelection', 'commitBlocker', 'canReviewCommitPush', 'commit', 'submitReviewedCommit', 'handleAction', 'renderSelectionStatus', 'runFileContextAction', 'matchesChangeFilter']);
   const handlers = ast.statements.filter((node) => ts.isFunctionDeclaration(node) && node.name && names.has(node.name.text));
   runInNewContext(handlers.map((node) => node.getText(ast)).join('\n'), context);
   return context;
@@ -42,21 +42,29 @@ describe('commit interaction safety', () => {
     expect(context.ui.commitReviewOpen).toBe(true);
     expect(context.post).not.toHaveBeenCalled();
     context.submitReviewedCommit();
-    expect(context.post).toHaveBeenCalledWith('commit', { message: 'message', paths: ['visible.txt'] });
+    expect(context.post).toHaveBeenCalledWith('commit', { root: '/repo', message: 'message', paths: ['visible.txt'] });
   });
 
-  it('uses the same validation for keyboard submission and commit-and-push', async () => {
+  it('only starts push review from the explicit choice after a valid local review', async () => {
     const context = await handlers();
     context.ui.selected.add('visible.txt');
     context.ui.snapshot.identity = { ready: false };
-    context.commit(true);
-    expect(context.post).not.toHaveBeenCalled();
+    context.commit();
     expect(context.commitBlocker()).toContain('identity');
+    expect(context.ui.commitReviewOpen).not.toBe(true);
     context.ui.snapshot.identity.ready = true;
+    context.commit();
     context.ui.snapshot.changes[1].kind = 'conflict';
-    context.commit(true);
+    context.submitReviewedCommit(true);
     expect(context.post).not.toHaveBeenCalled();
     expect(context.commitBlocker()).toContain('conflicts');
+    context.ui.snapshot.changes[1].kind = 'modified';
+    context.ui.snapshot.remotes = [];
+    context.submitReviewedCommit(true);
+    expect(context.post).not.toHaveBeenCalled();
+    context.ui.snapshot.remotes = ['origin'];
+    context.submitReviewedCommit(true);
+    expect(context.post).toHaveBeenCalledExactlyOnceWith('commitAndPush', { root: '/repo', message: 'message', paths: ['visible.txt'] });
   });
 
   it('preserves drafts while clearing selection and explains full-file semantics', async () => {

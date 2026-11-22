@@ -2,7 +2,7 @@
   "name": "kivo-git",
   "displayName": "Kivo Git",
   "description": "An IDEA-style Git workflow for VS Code: commit changes on the left, inspect history in the bottom Panel.",
-  "version": "0.6.0",
+  "version": "0.6.1",
   "publisher": "KeatonLi",
   "license": "MIT",
   "repository": {
@@ -37,7 +37,9 @@
   "files": [
     "dist",
     "media",
-    "docs",
+    "docs/*.md",
+    "docs/images",
+    "docs/prototypes",
     "README.md",
     "CHANGELOG.md",
     "LICENSE"

@@ -5,7 +5,7 @@ import { operationFailure, type OperationFailure, type RecoveryAction } from './
 import { sameWorktreePath } from './git/checkout';
 import { FileIconThemeResolver, type WebviewFileIcon } from './FileIconThemeResolver';
 import { GitClient } from './git/GitClient';
-import type { CherryPickPreview, CommitDetails, PullStrategy, RepositorySnapshot, WorkflowFile } from './git/types';
+import type { CherryPickPreview, CommitDetails, PullStrategy, RepositorySnapshot, WorkflowFile, WorktreeSummary } from './git/types';
 import { SnapshotCoordinator } from './SnapshotCoordinator';
 import { PushReviewSession } from './PushReviewSession';
 import { isMessageAllowedOnSurface, KivoViewTypes, type KivoSurface, surfaceForViewType } from './viewLayout';
@@ -14,6 +14,7 @@ type WebviewMessage =
   | { type: 'operationRecovery'; root: string; id: number; action: RecoveryAction | 'dismiss' }
   | { type: 'openWorktree'; root: string; branch: string }
   | { type: 'chooseWorktree'; root: string }
+  | { type: 'createWorktree'; root: string; startPoint: string }
   | { type: 'workflowRequest'; root: string; requestId: number; kind: 'compare' | 'stashes' | 'stashDetails' | 'cherryPick'; branch?: string; remote?: boolean; hash?: string; hashes?: string[] }
   | { type: 'cherryPick'; root: string; requestId: number }
   | { type: 'closeWorkflow'; requestId: number }
@@ -47,8 +48,7 @@ type WebviewMessage =
   | { type: 'showBranchHistory'; branch: string }
   | { type: 'revealInExplorer'; path: string }
   | { type: 'openCommitDiff'; hash: string; path: string; originalPath?: string; kind?: string }
-  | { type: 'commit'; message: string; paths: string[] }
-  | { type: 'commitAndPush'; message: string; paths: string[] }
+  | { type: 'commit' | 'commitAndPush'; root: string; message: string; paths: string[] }
   | { type: 'reuseCommitMessage'; draft: string }
   | { type: 'configureGitIdentity' | 'configureUpstream' }
   | { type: 'chooseRepository' }
@@ -664,7 +664,7 @@ export class IdeaGitViewProvider implements vscode.WebviewViewProvider, vscode.T
           return;
         }
         case 'chooseWorktree': {
-          if (message.root !== client.workspaceRoot) return;
+          if (message.root !== client.workspaceRoot || this.operationRunning) return;
           const trees = await client.getWorktrees();
           // The workspace can be a subdirectory or a symlink. Find its most
           // specific containing worktree before displaying a Current label.
@@ -677,21 +677,35 @@ export class IdeaGitViewProvider implements vscode.WebviewViewProvider, vscode.T
           }).sort((a, b) => b.canonical.length - a.canonical.length)[0]?.tree;
           if (this.selectedWorkspace()?.uri.fsPath !== client.workspaceRoot) return;
           const choices = [
-            { label: '$(add) Create Worktree…', description: 'Create a separate working directory', action: 'create' as const },
+            { label: '$(add) Create Worktree…', description: 'Use an unused local branch', action: 'create' as const },
+            ...(current?.branch && current.head && /^(?:[a-f0-9]{40}|[a-f0-9]{64})$/i.test(current.head) && !/^0+$/.test(current.head) ? [{
+              label: '$(git-branch) New Branch Worktree from Current…', description: current.branch,
+              action: 'createFromCurrent' as const, base: { oid: current.head, label: current.branch }
+            }] : []),
+            { label: '$(trash) Remove Worktree…', description: 'Review removal of a clean linked worktree', action: 'remove' as const },
             ...trees.map(tree => ({
-              label: tree.branch || (tree.detached ? `Detached HEAD${tree.head ? ` · ${tree.head.slice(0, 8)}` : ''}` : tree.bare ? 'Bare repository' : 'Worktree'),
+              label: this.worktreeLabel(tree),
               detail: tree.path,
               description: [tree === current ? 'Current' : 'Other', tree.bare ? 'Bare' : '',
                 tree.locked !== undefined ? 'Locked' : '', tree.prunable !== undefined ? 'Unavailable · check directory' : ''].filter(Boolean).join(' · '),
               tree, action: 'open' as const
             }))
           ];
-          const chosen = await vscode.window.showQuickPick(choices, { title: 'Worktrees', placeHolder: 'Select another worktree to open in a new window' });
-          if (!chosen || this.selectedWorkspace()?.uri.fsPath !== client.workspaceRoot) return;
+          const chosen = await vscode.window.showQuickPick(choices, { title: 'Worktrees', placeHolder: 'Open or manage a worktree' });
+          if (!chosen || this.selectedWorkspace()?.uri.fsPath !== client.workspaceRoot || this.operationRunning) return;
           if (chosen.action === 'create') await this.createWorktreeWithReview(client, surface);
+          else if (chosen.action === 'createFromCurrent') await this.createWorktreeWithReview(client, surface, chosen.base);
+          else if (chosen.action === 'remove') await this.removeWorktreeWithReview(client, surface, trees.slice(1).filter(tree =>
+            tree !== current && !tree.bare && tree.locked === undefined && tree.prunable === undefined));
           else if (chosen.tree === current) void vscode.window.showInformationMessage('This worktree is already open in the current window.');
           else if (chosen.tree.bare || chosen.tree.prunable !== undefined) void vscode.window.showInformationMessage('This worktree cannot be opened. Check its directory and Git worktree registration.');
           else await this.openRegisteredWorktree(client, chosen.tree.path);
+          return;
+        }
+        case 'createWorktree': {
+          if (message.root !== client.workspaceRoot || typeof message.startPoint !== 'string' ||
+              !/^(?:[a-f0-9]{40}|[a-f0-9]{64})$/i.test(message.startPoint)) return;
+          await this.createWorktreeWithReview(client, surface, { oid: message.startPoint, label: 'Selected commit' });
           return;
         }
         case 'searchHistory': {
@@ -933,11 +947,16 @@ export class IdeaGitViewProvider implements vscode.WebviewViewProvider, vscode.T
           return;
         }
         case 'commit':
-          await this.operation('commit', 'Creating commit…', async () => client.commit(message.message, message.paths), 'Commit created', true);
+        case 'commitAndPush': {
+          if (message.root !== client.workspaceRoot || this.selectedWorkspace()?.uri.fsPath !== client.workspaceRoot) {
+            await this.postToView(surface, { type: 'notice', phase: 'error', message: 'Repository changed. Review the selected files again.' });
+            await this.refresh(true);
+            return;
+          }
+          if (message.type === 'commitAndPush') await this.commitAndPush(client, message.message, message.paths, surface);
+          else await this.operation('commit', 'Creating commit…', () => client.commit(message.message, message.paths), 'Commit created locally', true);
           return;
-        case 'commitAndPush':
-          await this.commitAndPush(client, message.message, message.paths, surface);
-          return;
+        }
         case 'reuseCommitMessage':
           await this.reuseCommitMessage(client, message.draft);
           return;
@@ -1433,18 +1452,29 @@ export class IdeaGitViewProvider implements vscode.WebviewViewProvider, vscode.T
     }
   }
 
-  private async createWorktreeWithReview(client: GitClient, surface: KivoSurface): Promise<void> {
+  private worktreeLabel(tree: WorktreeSummary): string {
+    return tree.branch || (tree.detached ? `Detached HEAD${tree.head ? ` · ${tree.head.slice(0, 8)}` : ''}` : tree.bare ? 'Bare repository' : 'Worktree');
+  }
+
+  private async createWorktreeWithReview(client: GitClient, surface: KivoSurface, base?: { oid: string; label: string }): Promise<void> {
     const current = () => this.selectedWorkspace()?.uri.fsPath === client.workspaceRoot && !this.operationRunning;
     if (!current()) return;
-    const branches = await client.listAvailableWorktreeBranches();
-    if (!current()) return;
-    if (!branches.length) {
-      void vscode.window.showInformationMessage('No available local branches. Create a branch first, or open its existing worktree.');
-      return;
+    let branch: string | undefined;
+    if (base) {
+      branch = await vscode.window.showInputBox({ title: 'Create Worktree: New Branch',
+        prompt: `Name a new branch from ${base.label} (${base.oid.slice(0, 8)}).`, placeHolder: 'feature/my-change',
+        validateInput: value => !value || value !== value.trim() ? 'Enter a branch name without surrounding spaces.' : undefined });
+    } else {
+      const branches = await client.listAvailableWorktreeBranches();
+      if (!current()) return;
+      if (!branches.length) {
+        void vscode.window.showInformationMessage('No available local branches. Create a new branch worktree or open an existing worktree.');
+        return;
+      }
+      branch = (await vscode.window.showQuickPick(branches.map(item => ({ label: item.name })), {
+        title: 'Create Worktree: Select a Local Branch', placeHolder: 'Only branches not used by another worktree are shown'
+      }))?.label;
     }
-    const branch = await vscode.window.showQuickPick(branches.map(item => ({ label: item.name })), {
-      title: 'Create Worktree: Select a Local Branch', placeHolder: 'Only branches not used by another worktree are shown'
-    });
     if (!branch || !current()) return;
     const parents = await vscode.window.showOpenDialog({ canSelectFolders: true, canSelectFiles: false, canSelectMany: false,
       openLabel: 'Select Parent Folder', title: 'Choose a parent folder for the new worktree' });
@@ -1457,19 +1487,69 @@ export class IdeaGitViewProvider implements vscode.WebviewViewProvider, vscode.T
     const name = await vscode.window.showInputBox({ title: 'Create Worktree: Directory Name',
       prompt: `A new folder will be created inside ${parents[0].fsPath}.`, validateInput: validateName });
     if (!name || validateName(name) || !current()) return;
-    const plan = await client.prepareWorktree(branch.label, path.join(parents[0].fsPath, name));
+    const target = path.join(parents[0].fsPath, name);
+    const plan = base ? await client.prepareNewBranchWorktree(branch, target, base.oid) : await client.prepareWorktree(branch, target);
     if (!current()) return;
+    const confirm = base ? 'Create and Open' : 'Create Worktree';
     const answer = await vscode.window.showInformationMessage('Create this worktree?', {
-      modal: true, detail: `Branch: ${plan.branch}\nCommit: ${plan.head}\nNew directory: ${plan.path}\n\nThe worktree has its own files and Git index.`
-    }, 'Create Worktree');
-    if (answer !== 'Create Worktree' || !current()) return;
+      modal: true, detail: `${base ? 'New branch' : 'Branch'}: ${plan.branch}\n${base ? `Base: ${base.label}\n` : ''}Commit: ${plan.head}\nNew directory: ${plan.path}\n\nThe worktree has its own files and Git index. The current checkout stays in place.`
+    }, confirm);
+    if (answer !== confirm || !current()) return;
     const success = await this.operation('branch', `Creating worktree for ${plan.branch}…`, async () => {
       if (this.selectedWorkspace()?.uri.fsPath !== client.workspaceRoot) throw new Error('The repository changed. Review the worktree again.');
       await client.createWorktree(plan);
     }, `Created worktree for ${plan.branch}`, false, surface);
     if (!success || !current()) return;
+    if (base) {
+      await this.openRegisteredWorktree(client, plan.path);
+      return;
+    }
     const open = await vscode.window.showInformationMessage(`Worktree created at ${plan.path}`, 'Open Worktree');
     if (open === 'Open Worktree' && current()) await this.openRegisteredWorktree(client, plan.path);
+  }
+
+  private async checkWorktreeNotOpenInWindow(target: string): Promise<void> {
+    const contains = (parent: string, child: string) => {
+      const relative = path.relative(parent, child);
+      return !relative || (relative !== '..' && !relative.startsWith(`..${path.sep}`) && !path.isAbsolute(relative));
+    };
+    const resolvedTarget = await fs.realpath(target).catch(() => target);
+    const inside = async (uri: vscode.Uri) => uri.scheme === 'file' && (contains(target, uri.fsPath) ||
+      contains(resolvedTarget, await fs.realpath(uri.fsPath).catch(() => uri.fsPath)));
+    const workspaceFolders = vscode.workspace.workspaceFolders || [];
+    if ((await Promise.all(workspaceFolders.map(folder => inside(folder.uri)))).some(Boolean)) {
+      throw new Error('Remove this worktree from the current VS Code workspace before deleting it.');
+    }
+    const dirtyFiles = vscode.workspace.textDocuments.filter(document => document.isDirty);
+    if ((await Promise.all(dirtyFiles.map(document => inside(document.uri)))).some(Boolean)) {
+      throw new Error('Save or close unsaved editors in this worktree before removing it.');
+    }
+  }
+
+  private async removeWorktreeWithReview(client: GitClient, surface: KivoSurface, candidates: WorktreeSummary[]): Promise<void> {
+    const current = () => this.selectedWorkspace()?.uri.fsPath === client.workspaceRoot && !this.operationRunning;
+    if (!candidates.length) {
+      void vscode.window.showInformationMessage('No linked worktrees available for removal. The main, current, locked and unavailable worktrees cannot be removed here.');
+      return;
+    }
+    const chosen = await vscode.window.showQuickPick(candidates.map(tree => ({ label: this.worktreeLabel(tree), detail: tree.path, tree })), {
+      title: 'Remove Worktree: Select a Linked Worktree', placeHolder: 'Git checks for local changes before allowing removal'
+    });
+    if (!chosen || !current()) return;
+    await this.checkWorktreeNotOpenInWindow(chosen.tree.path);
+    const plan = await client.prepareWorktreeRemoval(chosen.tree.path);
+    if (!current()) return;
+    const tree = plan.worktree;
+    const answer = await vscode.window.showWarningMessage('Remove this worktree and its directory?', {
+      modal: true, detail: `Checkout: ${this.worktreeLabel(tree)}\nCommit: ${tree.head}\nDirectory: ${tree.path}\n\nThe directory and its checked-out files will be deleted. No branch will be deleted. Close other windows using this worktree before removing it.`
+    }, 'Remove Worktree');
+    if (answer !== 'Remove Worktree' || !current()) return;
+    await this.operation('branch', `Removing worktree at ${tree.path}…`, async () => {
+      if (this.selectedWorkspace()?.uri.fsPath !== client.workspaceRoot) throw new Error('The repository changed. Review the worktree again.');
+      await this.checkWorktreeNotOpenInWindow(tree.path);
+      if (this.selectedWorkspace()?.uri.fsPath !== client.workspaceRoot) throw new Error('The repository changed. Review the worktree again.');
+      await client.removeWorktree(plan);
+    }, `Removed worktree at ${tree.path}`, false, surface);
   }
 
   private async openRegisteredWorktree(client: GitClient, target: string): Promise<void> {

@@ -406,9 +406,12 @@ try {
   }), true, 'Publish icon and label should share one compact toolbar row.');
   await page.locator('#commit-message').fill('Keep my publication draft');
   await page.locator('[data-select]').first().check({ force: true });
-  await page.locator('[data-action="commit-and-push"]').click();
-  assert.match(await page.locator('.commit-review-push').textContent(), /review where to publish this branch/);
+  const entry = page.getByRole('button', { name: 'Review Commit…', exact: true });
+  await entry.click();
+  assert.match(await page.locator('.commit-review-push').textContent(), /choose where to publish this branch.*Nothing is sent until you confirm/);
   await page.getByRole('button', { name: 'Back', exact: true }).click();
+  await page.waitForFunction(() => document.activeElement?.dataset.action === 'commit');
+  assert.equal(await page.evaluate(() => window.__vscodeMessages.some(message => ['commit', 'commitAndPush'].includes(message.type))), false);
   await page.locator('.commit-toolbar [data-action="push"]').click();
   await page.getByRole('dialog', { name: 'Publish branch', exact: true }).waitFor();
   assert.match(await page.locator('.push-publish-note').textContent(), /Creates this remote branch.*upstream/);
@@ -684,6 +687,29 @@ try {
   const commitMessage = await page.evaluate(() => window.__vscodeMessages.find((message) => message.type === 'commit'));
   assert.equal(commitMessage?.message, 'test: verify browser commit flow');
   assert.equal(commitMessage?.paths?.length, 1, 'Commit should include only the selected file.');
+  assert.equal(commitMessage?.root, await page.evaluate(() => fixture.root));
+
+  await openSurface(page, 'surface=changes&state=no-upstream');
+  await page.locator('[data-select]').first().check({ force: true });
+  await page.locator('#commit-message').fill(`test: commit before push review\n\n${'Long commit details stay scrollable while review actions remain visible.\n'.repeat(12)}`);
+  await page.setViewportSize({ width: 240, height: 420 });
+  await page.getByRole('button', { name: 'Review Commit…', exact: true }).click();
+  assert.match(await page.locator('.commit-review-target').textContent(), /ack-k8s.*feature/);
+  const reviewPush = page.getByRole('button', { name: 'Commit & Review Push…', exact: true });
+  const reviewLayout = await reviewPush.evaluate((button) => {
+    const dialog = button.closest('.commit-review-dialog');
+    const body = dialog.querySelector('.commit-review-body');
+    const before = button.getBoundingClientRect();
+    body.scrollTop = body.scrollHeight;
+    const after = button.getBoundingClientRect();
+    return { fits: before.left >= 0 && before.right <= innerWidth && before.top >= 0 && before.bottom <= innerHeight,
+      bodyScrolls: body.scrollTop > 0, footerStaysPut: before.y === after.y, noHorizontalScroll: body.scrollWidth === body.clientWidth };
+  });
+  assert.deepEqual(reviewLayout, { fits: true, bodyScrolls: true, footerStaysPut: true, noHorizontalScroll: true }, 'The narrow review must scroll its content, not its confirmation controls.');
+  await reviewPush.click();
+  assert.ok(await page.evaluate(() => window.__vscodeMessages.some(message => message.type === 'commitAndPush' && message.root === fixture.root && message.paths.length === 1)));
+  assert.equal(await page.evaluate(() => window.__vscodeMessages.some(message => message.type === 'respondPushReview')), false, 'Only the separate push review can authorize a push.');
+  await page.setViewportSize({ width: 360, height: 820 });
 
   await openSurface(page, 'surface=changes');
   await page.locator('[data-select]').nth(1).check({ force: true });
@@ -1050,7 +1076,22 @@ try {
     await page.locator('[data-select]').first().check({ force: true });
     await page.locator('[data-recent-commit]').first().click();
     await page.waitForSelector('[data-recent-file]');
-    await capture('02-commit-review');
+    await capture('02-recent-commit');
+    await page.locator('#commit-message').fill('Clarify provider selection and verify the checkout');
+    await page.locator('[data-action="commit"]').click();
+    await capture('17-commit-review-dark');
+    await page.keyboard.press('Escape');
+    await page.setViewportSize({ width: 240, height: 420 });
+    await page.evaluate(() => {
+      document.body.classList.add('vscode-light');
+      document.body.style.setProperty('--vscode-sideBar-background', '#f7f8fa');
+      document.body.style.setProperty('--vscode-editorWidget-background', '#ffffff');
+      document.body.style.setProperty('--vscode-input-background', '#f6f7fa');
+      document.body.style.setProperty('--vscode-foreground', '#242a34');
+      document.body.style.setProperty('--vscode-descriptionForeground', '#536073');
+    });
+    await page.locator('[data-action="commit"]').click();
+    await capture('18-commit-review-light-narrow');
 
     for (const viewport of [{ width: 1440, height: 460 }, { width: 960, height: 380 }]) {
       await page.setViewportSize(viewport);

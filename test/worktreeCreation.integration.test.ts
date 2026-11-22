@@ -136,6 +136,80 @@ describe('safe worktree creation', { timeout: 30000 }, () => {
     expect((await client.getWorktrees()).map(tree => tree.branch)).toEqual(['main']);
   });
 
+  it('creates a new attached branch at the reviewed commit without moving HEAD or changing local files', async () => {
+    const { root, parent, client } = await repository();
+    const oid = await git(root, 'rev-parse', 'HEAD');
+    await git(root, 'commit', '--allow-empty', '-m', 'newer tip');
+    const tip = await git(root, 'rev-parse', 'HEAD');
+    await fs.writeFile(path.join(root, 'file.txt'), 'local changes\n');
+    const target = path.join(parent, 'new branch');
+    const plan = await client.prepareNewBranchWorktree('topic/from-history', target, oid);
+    expect(plan).toMatchObject({ mode: 'new-branch', branch: 'topic/from-history', head: oid });
+    await expect(git(root, 'show-ref', '--verify', 'refs/heads/topic/from-history')).rejects.toThrow();
+    await expect(fs.stat(target)).rejects.toMatchObject({ code: 'ENOENT' });
+    const created = await client.createWorktree(plan);
+    expect(created).toMatchObject({ branch: 'topic/from-history', head: oid });
+    expect(await git(target, 'symbolic-ref', 'HEAD')).toBe('refs/heads/topic/from-history');
+    expect(await git(root, 'rev-parse', 'HEAD')).toBe(tip);
+    expect(await git(root, 'status', '--porcelain')).toBe('M file.txt');
+  });
+
+  it('rejects invalid names, existing or conflicting branches, and unpinned or non-commit revisions', async () => {
+    const { root, parent, client } = await repository();
+    const oid = await git(root, 'rev-parse', 'HEAD');
+    const treeOid = await git(root, 'rev-parse', 'HEAD^{tree}');
+    const target = path.join(parent, 'unused');
+    for (const name of ['--force', '@{-1}', 'invalid branch', 'feature', 'feature/nested']) {
+      await expect(client.prepareNewBranchWorktree(name, target, oid)).rejects.toThrow();
+    }
+    for (const revision of ['HEAD', oid.slice(0, 12), treeOid, 'a'.repeat(40)]) {
+      await expect(client.prepareNewBranchWorktree('new-branch', target, revision)).rejects.toThrow();
+    }
+    await expect(fs.stat(target)).rejects.toMatchObject({ code: 'ENOENT' });
+  });
+
+  it('reports the real branch and refuses to overwrite it if the branch name is taken during Git add', async () => {
+    const { root, parent, client } = await repository();
+    const head = await git(root, 'rev-parse', 'HEAD');
+    const target = path.join(parent, 'target');
+    const plan = await client.prepareNewBranchWorktree('new-branch', target, head);
+    await git(root, 'commit', '--allow-empty', '-m', 'competing branch tip');
+    const tip = await git(root, 'rev-parse', 'HEAD');
+    const original = (client as any).run.bind(client);
+    vi.spyOn(client as any, 'run').mockImplementation(async (args: unknown, ...rest: unknown[]) => {
+      if (Array.isArray(args) && args[0] === 'worktree' && args[1] === 'add') {
+        await git(root, 'branch', 'new-branch', tip);
+      }
+      return original(args, ...rest);
+    });
+    await expect(client.createWorktree(plan)).rejects.toMatchObject({ actualBranch: { name: 'new-branch', oid: tip } });
+    expect(await git(root, 'rev-parse', 'refs/heads/new-branch')).toBe(tip);
+    await expect(fs.stat(target)).rejects.toMatchObject({ code: 'ENOENT' });
+  });
+
+  it('preserves a non-empty destination created during new-branch Git add and reports observed refs', async () => {
+    const { root, parent, client } = await repository();
+    const head = await git(root, 'rev-parse', 'HEAD');
+    const target = path.join(parent, 'racing destination');
+    const plan = await client.prepareNewBranchWorktree('new-branch', target, head);
+    const original = (client as any).run.bind(client);
+    vi.spyOn(client as any, 'run').mockImplementation(async (args: unknown, ...rest: unknown[]) => {
+      if (Array.isArray(args) && args[0] === 'worktree' && args[1] === 'add') {
+        expect(args).toEqual(['worktree', 'add', '--no-track', '-b', 'new-branch', '--', plan.path, head]);
+        await fs.mkdir(target);
+        await fs.writeFile(path.join(target, 'keep.txt'), 'keep me');
+      }
+      return original(args, ...rest);
+    });
+    const error = await client.createWorktree(plan).catch(error => error);
+    expect(error).toBeInstanceOf(Error);
+    expect(error.created).toBeUndefined();
+    expect(error.pathExists).toBe(true);
+    const actualOid = await git(root, 'rev-parse', '--verify', 'refs/heads/new-branch').catch(() => undefined);
+    expect(error.actualBranch).toEqual(actualOid ? { name: 'new-branch', oid: head } : undefined);
+    expect(await fs.readFile(path.join(target, 'keep.txt'), 'utf8')).toBe('keep me');
+  });
+
   it('rejects relative paths', async () => {
     const { client } = await repository();
     await expect(client.prepareWorktree('feature', 'relative/worktree')).rejects.toThrow();
@@ -169,6 +243,20 @@ describe('safe worktree creation', { timeout: 30000 }, () => {
     await fs.symlink(path.join(parent, 'missing'), target);
     await expect(client.prepareWorktree('feature', target)).rejects.toThrow();
     expect((await fs.lstat(target)).isSymbolicLink()).toBe(true);
+  });
+
+  it('rejects a replaced common directory even when the reviewed commit and source path still match', async () => {
+    const { parent, root, client } = await repository();
+    const head = await git(root, 'rev-parse', 'HEAD');
+    const target = path.join(parent, 'target');
+    const plan = await client.prepareNewBranchWorktree('new-branch', target, head);
+    const gitDir = path.join(root, '.git');
+    const oldGitDir = path.join(parent, 'old-git-dir');
+    await fs.rename(gitDir, oldGitDir);
+    await fs.cp(oldGitDir, gitDir, { recursive: true });
+    expect(await git(root, 'rev-parse', 'HEAD')).toBe(head);
+    await expect(client.createWorktree(plan)).rejects.toThrow(/changed/);
+    await expect(fs.stat(target)).rejects.toMatchObject({ code: 'ENOENT' });
   });
 
   it('rechecks if the target parent is replaced after review', async () => {

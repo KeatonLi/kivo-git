@@ -2,6 +2,13 @@
 
 ## Unreleased
 
+## 0.6.1 - 2026-11-22
+
+- Use a smaller Marketplace icon without changing the design, and verify its size inside the VSIX.
+- Start from one Review Commit action. The refreshed review groups the repository, branch, message and file diffs, and keeps confirmation visible while content scrolls. Choose between committing locally and opening a separate push review. Reject confirmations from a different repository.
+- Create a new branch in a separate worktree from the current branch or a selected History commit. Review the exact commit and destination, then open the worktree without switching the current checkout.
+- Review and remove clean linked worktrees without deleting branches or forcing removal. Check the actual resulting state if Git reports a failure.
+
 ## 0.6.0
 
 - Show a Worktrees entry in History even when only one worktree exists, with current, detached, locked and unavailable states.

@@ -67,6 +67,7 @@ const messagesBySurface: Record<KivoSurface, ReadonlySet<string>> = {
     'moveFiles'
   ]),
   history: new Set([
+    'createWorktree',
     'cherryPick',
     'searchHistory',
     'loadMoreCommits',

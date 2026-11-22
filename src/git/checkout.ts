@@ -10,12 +10,25 @@ export interface WorktreeSummary {
   prunable?: string;
 }
 
-export interface WorktreeCreationPlan {
+export interface WorktreeDirectoryIdentity {
+  path: string;
+  device: number;
+  inode: number;
+}
+
+export interface WorktreeRepositoryIdentity {
   root: string;
   sourceRoot: string;
   sourceDevice: number;
   sourceInode: number;
   commonDir: string;
+  commonDevice: number;
+  commonInode: number;
+  sourceGitDir: WorktreeDirectoryIdentity;
+}
+
+export interface WorktreeCreationPlan extends WorktreeRepositoryIdentity {
+  mode: 'existing-branch' | 'new-branch';
   branch: string;
   path: string;
   head: string;
@@ -23,11 +36,32 @@ export interface WorktreeCreationPlan {
   parentInode: number;
 }
 
-/** An attempted creation may have registered a worktree even when Git fails. */
+/** An attempted creation may leave a registered worktree or branch even when Git fails. */
 export class WorktreeCreationError extends Error {
-  constructor(message: string, readonly created?: WorktreeSummary, readonly details = message) {
+  constructor(message: string, readonly created?: WorktreeSummary, readonly details = message,
+    readonly actualBranch?: { name: string; oid: string }, readonly pathExists?: boolean) {
     super(message);
     this.name = 'WorktreeCreationError';
+  }
+}
+
+export interface WorktreeRemovalPlan extends WorktreeRepositoryIdentity {
+  worktree: WorktreeSummary;
+  directory: WorktreeDirectoryIdentity;
+  gitDir: WorktreeDirectoryIdentity;
+}
+
+export interface WorktreeRemovalResult {
+  /** True only when the registration and directory are both gone. */
+  removed: boolean;
+  worktree?: WorktreeSummary;
+  pathExists: boolean;
+}
+
+export class WorktreeRemovalError extends Error {
+  constructor(message: string, readonly details = message, readonly actual?: WorktreeRemovalResult) {
+    super(message);
+    this.name = 'WorktreeRemovalError';
   }
 }
 

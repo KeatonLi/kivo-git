@@ -1,4 +1,5 @@
 import type { WorktreeSummary } from './checkout';
+export type { WorktreeCreationPlan, WorktreeRemovalPlan, WorktreeRemovalResult, WorktreeSummary } from './checkout';
 export type ChangeKind = 'modified' | 'added' | 'deleted' | 'renamed' | 'untracked' | 'conflict';
 
 export interface GitChange {

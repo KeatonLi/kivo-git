@@ -16,7 +16,7 @@ async function harness() {
   const nested = path.join(root, 'source'); await fs.mkdir(nested);
   const linked = path.join(root, 'linked'); await fs.mkdir(linked);
   const client = { workspaceRoot: nested, getWorktrees: vi.fn().mockResolvedValue([
-    { path: root, branch: 'main' },
+    { path: root, branch: 'main', head: 'a'.repeat(40) },
     { path: linked, detached: true, head: 'abcdef12'.repeat(5), locked: '' },
     { path: path.join(root, 'gone'), branch: 'missing', prunable: 'directory missing' },
     { path: path.join(root, 'bare.git'), bare: true }
@@ -25,7 +25,7 @@ async function harness() {
   const provider = Object.assign(Object.create(IdeaGitViewProvider.prototype), {
     getClient: vi.fn().mockResolvedValue(client),
     selectedWorkspace: () => ({ uri: { fsPath: selectedRoot } }),
-    openRegisteredWorktree: vi.fn(), createWorktreeWithReview: vi.fn(), postToView: vi.fn()
+    openRegisteredWorktree: vi.fn(), createWorktreeWithReview: vi.fn(), removeWorktreeWithReview: vi.fn(), postToView: vi.fn()
   });
   return { root, nested, linked, client, provider, select: (value: string) => { selectedRoot = value; } };
 }
@@ -38,10 +38,11 @@ describe('worktree overview', () => {
     const [choices, options] = ui.pick.mock.calls[0]!;
     expect(options.title).toBe('Worktrees');
     expect(choices[0].label).toContain('Create Worktree');
-    expect(choices[1]).toMatchObject({ label: 'main', detail: root, description: 'Current' });
-    expect(choices[2]).toMatchObject({ label: 'Detached HEAD · abcdef12', detail: linked, description: 'Other · Locked' });
-    expect(choices[3].description).toContain('Unavailable');
-    expect(choices[4]).toMatchObject({ label: 'Bare repository', description: 'Other · Bare' });
+    const worktrees = choices.filter((item: any) => item.action === 'open');
+    expect(worktrees[0]).toMatchObject({ label: 'main', detail: root, description: 'Current' });
+    expect(worktrees[1]).toMatchObject({ label: 'Detached HEAD · abcdef12', detail: linked, description: 'Other · Locked' });
+    expect(worktrees[2].description).toContain('Unavailable');
+    expect(worktrees[3]).toMatchObject({ label: 'Bare repository', description: 'Other · Bare' });
     expect(provider.openRegisteredWorktree).not.toHaveBeenCalled();
   });
 
@@ -64,6 +65,29 @@ describe('worktree overview', () => {
     ui.pick.mockImplementationOnce(async choices => choices[0]);
     await provider.handle('history', { type: 'chooseWorktree', root: nested });
     expect(provider.createWorktreeWithReview).toHaveBeenCalledWith(client, 'history');
+  });
+
+  it('routes new worktrees from the current branch and from exact History commits', async () => {
+    const { nested, client, provider } = await harness();
+    ui.pick.mockImplementationOnce(async choices => choices.find((item: any) => item.action === 'createFromCurrent'));
+    await provider.handle('history', { type: 'chooseWorktree', root: nested });
+    expect(provider.createWorktreeWithReview).toHaveBeenNthCalledWith(1, client, 'history', { oid: 'a'.repeat(40), label: 'main' });
+    const message = { type: 'createWorktree', root: nested, startPoint: 'b'.repeat(64) };
+    await provider.handle('changes', message);
+    await provider.handle('history', { ...message, root: '/other' });
+    await provider.handle('history', { ...message, startPoint: 'HEAD' });
+    await provider.handle('history', message);
+    expect(provider.createWorktreeWithReview).toHaveBeenCalledTimes(2);
+    expect(provider.createWorktreeWithReview).toHaveBeenNthCalledWith(2, client, 'history', { oid: message.startPoint, label: 'Selected commit' });
+  });
+
+  it('excludes main, current, locked, unavailable and bare worktrees from removal choices', async () => {
+    const { nested, root, provider, client } = await harness();
+    const removable = { path: path.join(root, 'removable'), branch: 'topic', head: 'b'.repeat(40) };
+    client.getWorktrees.mockResolvedValueOnce([...(await client.getWorktrees()), removable]);
+    ui.pick.mockImplementationOnce(async choices => choices.find((item: any) => item.action === 'remove'));
+    await provider.handle('history', { type: 'chooseWorktree', root: nested });
+    expect(provider.removeWorktreeWithReview).toHaveBeenCalledExactlyOnceWith(client, 'history', [removable]);
   });
 
   it('does not open or create after repository changes during the picker', async () => {

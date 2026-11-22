@@ -33,6 +33,30 @@ export async function verifyHistorySelection(page, openSurface) {
       await page.locator('#log-branch-search').fill('no-such-branch');
       assert.equal(await page.locator('.log-current-branch [data-log-branch]').getAttribute('data-log-branch'), checkout);
     }],
+    ['a single commit can start native worktree creation without changing checkout', async () => {
+      await openSurface('surface=history');
+      const hash = await hashAt(page, 2);
+      const worktreeAction = page.getByRole('menuitem', { name: 'New Branch in Worktree…', exact: true });
+      await row(page, hash).click({ button: 'right' });
+      assert.equal(await selected(page).count(), 1);
+      assert.equal(await selected(page).getAttribute('data-commit'), hash);
+      assert.equal(await page.getByRole('menuitem', { name: 'New Branch from Commit…', exact: true }).isEnabled(), true);
+      assert.equal(await worktreeAction.isEnabled(), true);
+      assert.equal(await page.evaluate(() => window.__vscodeMessages.some(message => message.type === 'createWorktree')), false);
+      await worktreeAction.click();
+      const { root, messages } = await page.evaluate(() => ({
+        root: fixture.root,
+        messages: window.__vscodeMessages.filter(message => ['createWorktree', 'createBranch', 'checkout', 'checkoutRevision'].includes(message.type))
+      }));
+      assert.deepEqual(messages, [{ type: 'createWorktree', root, startPoint: hash }]);
+      assert.equal(await page.locator('[data-commit-context], .workflow-dialog').count(), 0);
+      assert.equal(await selected(page).getAttribute('data-commit'), hash);
+
+      await page.evaluate(() => emit({ type: 'operation', root: fixture.root, phase: 'loading', message: 'Git operation in progress' }));
+      await row(page, hash).focus();
+      await page.keyboard.press('Shift+F10');
+      assert.equal(await worktreeAction.isDisabled(), true);
+    }],
     ['Ctrl/Cmd selection, ranges and context menus preserve the selected batch', async () => {
       for (const modifier of ['Control', 'Meta']) {
         await openSurface('surface=history');
@@ -48,6 +72,7 @@ export async function verifyHistorySelection(page, openSurface) {
         await row(page, hashes[1]).click({ button: 'right' });
         assert.equal(await selected(page).count(), 4, 'Right-clicking a selected row must preserve the whole selection.');
         assert.match(await page.locator('[data-commit-context-action="cherry-pick"]').textContent(), /4 Commits/);
+        assert.equal(await page.locator('[data-commit-context-action="worktree"]').count(), 0, 'Worktree creation is only offered for one commit.');
         await capture(page, '26-history-multi-select.png');
         await page.keyboard.press('Escape');
         assert.equal(await page.evaluate(() => document.activeElement?.dataset.commit), hashes[1], 'Closing the menu must restore its row before the next keyboard action.');

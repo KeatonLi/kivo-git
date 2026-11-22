@@ -6,7 +6,9 @@ import { createHash } from 'node:crypto';
 import { ChangelistStore } from './ChangelistStore';
 import { parsePorcelainV2 } from './statusParser';
 import { GitWorkflows } from './GitWorkflows';
-import { CheckoutError, GitCommandError, WorktreeCreationError, parseWorktrees, sameWorktreePath, type WorktreeSummary, type WorktreeCreationPlan } from './checkout';
+import { CheckoutError, GitCommandError, WorktreeCreationError, WorktreeRemovalError, parseWorktrees, sameWorktreePath,
+  type WorktreeSummary, type WorktreeCreationPlan, type WorktreeDirectoryIdentity, type WorktreeRepositoryIdentity,
+  type WorktreeRemovalPlan, type WorktreeRemovalResult } from './checkout';
 import type { BranchSummary, CommitDetails, CommitFile, CommitSummary, GitRef, LineBlame, PullStrategy, PushPreview, RepositorySnapshot } from './types';
 
 const execFileAsync = promisify(execFile);
@@ -498,59 +500,262 @@ export class GitClient {
     return actual;
   }
 
+  private static async directoryIdentity(location: string): Promise<WorktreeDirectoryIdentity> {
+    const canonical = await fs.realpath(location);
+    const stats = await fs.stat(canonical);
+    if (!stats.isDirectory()) throw new Error('Not a directory.');
+    return { path: canonical, device: stats.dev, inode: stats.ino };
+  }
+
+  private static sameDirectory(left: WorktreeDirectoryIdentity, right: WorktreeDirectoryIdentity): boolean {
+    return typeof right?.path === 'string' && sameWorktreePath(left.path, right.path) &&
+      left.device === right.device && left.inode === right.inode;
+  }
+
+  private static containsPath(parent: string, descendant: string): boolean {
+    const relative = path.relative(parent, descendant);
+    return !relative || (!path.isAbsolute(relative) && relative !== '..' && !relative.startsWith(`..${path.sep}`));
+  }
+
+  private async worktreeRepositoryIdentity(): Promise<WorktreeRepositoryIdentity> {
+    const identity = async (args: string[]) => GitClient.directoryIdentity((await this.run(['rev-parse', ...args])).replace(/\r?\n$/, ''));
+    const [source, common, sourceGitDir] = await Promise.all([
+      identity(['--show-toplevel']), identity(['--path-format=absolute', '--git-common-dir']), identity(['--absolute-git-dir'])
+    ]);
+    return { root: this.workspaceRoot, sourceRoot: source.path, sourceDevice: source.device, sourceInode: source.inode,
+      commonDir: common.path, commonDevice: common.device, commonInode: common.inode, sourceGitDir };
+  }
+
+  private static sameWorktreeRepository(left: WorktreeRepositoryIdentity, right: WorktreeRepositoryIdentity): boolean {
+    return left.root === right.root && typeof right.sourceRoot === 'string' && typeof right.commonDir === 'string' &&
+      sameWorktreePath(left.sourceRoot, right.sourceRoot) && left.sourceDevice === right.sourceDevice && left.sourceInode === right.sourceInode &&
+      sameWorktreePath(left.commonDir, right.commonDir) && left.commonDevice === right.commonDevice && left.commonInode === right.commonInode &&
+      GitClient.sameDirectory(left.sourceGitDir, right.sourceGitDir);
+  }
+
   /** Prepare a reviewable plan without creating files or changing Git state. */
   async prepareWorktree(branchName: string, targetPath: string): Promise<WorktreeCreationPlan> {
-    if (typeof branchName !== 'string' || !branchName || branchName.includes('\0')) throw new WorktreeCreationError('Choose an existing local branch.');
+    return this.prepareWorktreeCreation('existing-branch', branchName, targetPath);
+  }
+
+  /** Review a new local branch pinned to the selected full commit object ID. */
+  async prepareNewBranchWorktree(branchName: string, targetPath: string, commitOid: string): Promise<WorktreeCreationPlan> {
+    return this.prepareWorktreeCreation('new-branch', branchName, targetPath, commitOid);
+  }
+
+  private async prepareWorktreeCreation(mode: WorktreeCreationPlan['mode'], branchName: string, targetPath: string, commitOid?: string): Promise<WorktreeCreationPlan> {
+    if (typeof branchName !== 'string' || !branchName || branchName.includes('\0')) {
+      throw new WorktreeCreationError(mode === 'new-branch' ? 'Enter a valid new branch name.' : 'Choose an existing local branch.');
+    }
     const destination = await this.newWorktreePath(targetPath);
-    const [branches, trees, commonDir, topLevel] = await Promise.all([
-      this.localWorktreeBranches(),
-      this.getWorktrees(), this.run(['rev-parse', '--git-common-dir']), this.run(['rev-parse', '--show-toplevel'])
-    ]);
-    const branch = branches.find(item => item.name === branchName);
-    if (!branch?.oid) throw new WorktreeCreationError('The selected local branch no longer exists. Refresh and try again.');
-    const occupied = trees.find(tree => tree.branch === branch.name);
-    if (occupied) throw new WorktreeCreationError(`${branch.name} is already used by a worktree at ${occupied.path}.`);
-    const actualCommonDir = await fs.realpath(path.resolve(this.workspaceRoot, commonDir.replace(/\r?\n$/, '')));
-    const relativeToGit = path.relative(actualCommonDir, destination);
-    if (!relativeToGit || (!relativeToGit.startsWith(`..${path.sep}`) && relativeToGit !== '..' && !path.isAbsolute(relativeToGit))) {
+    const [branches, trees] = await Promise.all([this.localWorktreeBranches(), this.getWorktrees()]);
+    if (trees.some(tree => sameWorktreePath(tree.path, destination))) {
+      throw new WorktreeCreationError('A worktree is already registered at this path. Choose a different destination.');
+    }
+    const occupied = trees.find(tree => tree.branch === branchName);
+    if (occupied) throw new WorktreeCreationError(`${branchName} is already used by a worktree at ${occupied.path}.`);
+
+    let head: string;
+    if (mode === 'new-branch') {
+      const validatedName = await this.run(['check-ref-format', '--branch', branchName]).catch(() => '');
+      // `--branch` also expands @{-n}; only accept the literal name reviewed.
+      if (validatedName.replace(/\r?\n$/, '') !== branchName) throw new WorktreeCreationError('Enter a valid new branch name.');
+      // Git's ref storage also rejects a branch prefix/file collision. Catch it at review time.
+      const compare = (name: string) => process.platform === 'win32' ? name.toLowerCase() : name;
+      const requested = compare(branchName);
+      if (branches.some(({ name }) => compare(name) === requested || compare(name).startsWith(`${requested}/`) || requested.startsWith(`${compare(name)}/`))) {
+        throw new WorktreeCreationError(`A local branch already exists or conflicts with ${branchName}. Choose a different name.`);
+      }
+      if (typeof commitOid !== 'string' || !/^(?:[a-f\d]{40}|[a-f\d]{64})$/i.test(commitOid)) {
+        throw new WorktreeCreationError('Choose a commit from the history to start the new branch.');
+      }
+      head = (await this.run(['rev-parse', '--verify', '--end-of-options', `${commitOid}^{commit}`]).catch(() => '')).trim();
+      if (head !== commitOid.toLowerCase()) throw new WorktreeCreationError('The reviewed commit is no longer available. Choose a commit again.');
+    } else {
+      const branch = branches.find(item => item.name === branchName);
+      if (!branch?.oid) throw new WorktreeCreationError('The selected local branch no longer exists. Refresh and try again.');
+      head = branch.oid;
+    }
+
+    const [parent, repository] = await Promise.all([fs.stat(path.dirname(destination)), this.worktreeRepositoryIdentity()]);
+    if (GitClient.containsPath(repository.commonDir, destination) || GitClient.containsPath(repository.sourceGitDir.path, destination)) {
       throw new WorktreeCreationError('Choose a destination outside Git’s internal directory.');
     }
-    const parent = await fs.stat(path.dirname(destination));
-    const sourceRoot = await fs.realpath(topLevel.replace(/\r?\n$/, ''));
-    const source = await fs.stat(sourceRoot);
-    return { root: this.workspaceRoot, sourceRoot, sourceDevice: source.dev, sourceInode: source.ino,
-      commonDir: actualCommonDir, branch: branch.name, path: destination, head: branch.oid, parentDevice: parent.dev, parentInode: parent.ino };
+    return { ...repository, mode, branch: branchName, path: destination, head, parentDevice: parent.dev, parentInode: parent.ino };
   }
 
   /** Revalidate the reviewed plan, then check Git's actual state even on failure. */
   async createWorktree(plan: WorktreeCreationPlan): Promise<WorktreeSummary> {
-    if (!plan || plan.root !== this.workspaceRoot || typeof plan.commonDir !== 'string' || typeof plan.sourceRoot !== 'string' || typeof plan.head !== 'string') {
+    if (!plan || plan.root !== this.workspaceRoot || (plan.mode !== 'existing-branch' && plan.mode !== 'new-branch')) {
       throw new WorktreeCreationError('The repository changed. Review the worktree again.');
     }
-    const current = await this.prepareWorktree(plan.branch, plan.path);
-    if (!sameWorktreePath(current.commonDir, plan.commonDir) || !sameWorktreePath(current.sourceRoot, plan.sourceRoot) ||
-        current.sourceDevice !== plan.sourceDevice || current.sourceInode !== plan.sourceInode || !sameWorktreePath(current.path, plan.path) || current.head !== plan.head ||
-        current.parentDevice !== plan.parentDevice || current.parentInode !== plan.parentInode) {
+    const current = await this.prepareWorktreeCreation(plan.mode, plan.branch, plan.path, plan.head);
+    if (!GitClient.sameWorktreeRepository(current, plan) || !sameWorktreePath(current.path, plan.path) || current.head !== plan.head ||
+        current.parentDevice !== plan.parentDevice || current.parentInode !== plan.parentInode || await GitClient.worktreePathExists(current.path)) {
       throw new WorktreeCreationError('The repository, branch or destination changed. Review the worktree again.');
     }
     let failure: unknown;
     try {
-      // A short validated local branch name checks it out; refs/heads/... can
-      // make Git create a detached worktree. No --force or automatic cleanup.
-      await this.run(['worktree', 'add', '--', current.path, current.branch]);
+      // Existing branches must use their short local name to stay attached. New
+      // branches are atomically refused by `-b` if the name is taken, never reset.
+      // Pass the reviewed commit as an OID, not a ref that can advance.
+      await this.run(current.mode === 'new-branch'
+        ? ['worktree', 'add', '--no-track', '-b', current.branch, '--', current.path, current.head]
+        : ['worktree', 'add', '--', current.path, current.branch]);
     } catch (error) { failure = error; }
-    let trees: WorktreeSummary[];
-    try { trees = await this.getWorktrees(); }
-    catch {
-      throw new WorktreeCreationError('Could not verify the worktree after Git ran. Check Git worktree list and the destination before retrying.');
+    const repository = await this.worktreeRepositoryIdentity().catch(() => undefined);
+    if (!repository || !GitClient.sameWorktreeRepository(repository, current)) {
+      throw new WorktreeCreationError('The repository changed after Git ran. Check Git worktree list and the destination before retrying.');
     }
-    const created = trees.find(tree => sameWorktreePath(tree.path, current.path));
-    if (!failure && created?.branch === current.branch && created.head === current.head && !created.detached) return created;
-    const detail = failure instanceof Error ? failure.message : 'Git finished but the registered worktree did not match the reviewed branch and commit.';
+    const [trees, branches, destination] = await Promise.allSettled([
+      this.getWorktrees(), current.mode === 'new-branch' ? this.localWorktreeBranches() : Promise.resolve([]),
+      GitClient.worktreePathExists(current.path)
+    ]);
+    const created = trees.status === 'fulfilled' ? trees.value.find(tree => sameWorktreePath(tree.path, current.path)) : undefined;
+    const actualBranch = branches.status === 'fulfilled' ? branches.value.find(branch => branch.name === current.branch) : undefined;
+    const pathExists = destination.status === 'fulfilled' ? destination.value : undefined;
+    const details = failure instanceof Error ? failure.message : 'Git finished but the registered worktree did not match the reviewed branch and commit.';
+    if (trees.status === 'rejected' || branches.status === 'rejected' || pathExists === undefined) {
+      throw new WorktreeCreationError('Could not verify the worktree or branch after Git ran. Inspect both before retrying.', created, details, actualBranch, pathExists);
+    }
+    if (!failure && pathExists && created?.branch === current.branch && created.head === current.head && !created.detached &&
+        created.prunable === undefined && (current.mode === 'existing-branch' || actualBranch?.oid === current.head)) return created;
     if (created) {
-      throw new WorktreeCreationError('A worktree is registered at the selected path, but creation did not complete as reviewed. Inspect it before retrying.', created, detail);
+      throw new WorktreeCreationError('A worktree is registered at the selected path, but creation did not complete as reviewed. Inspect it before retrying.', created, details, actualBranch, pathExists);
     }
-    throw new WorktreeCreationError('Could not create the worktree. Check the destination and Git worktree list before retrying.', undefined, detail);
+    throw new WorktreeCreationError(actualBranch
+      ? 'The branch exists, but no worktree is registered at the selected path. Inspect it before retrying.'
+      : 'Could not create the worktree. Check the destination and Git worktree list before retrying.', undefined, details, actualBranch, pathExists);
+  }
+
+  private async removalWorktree(targetPath: string, sourceRoot: string): Promise<WorktreeSummary> {
+    const [primary, ...linked] = await this.getWorktrees();
+    if (sameWorktreePath(targetPath, sourceRoot)) throw new WorktreeRemovalError('The current worktree cannot be removed.');
+    if (primary && sameWorktreePath(primary.path, targetPath)) throw new WorktreeRemovalError('The primary worktree cannot be removed.');
+    const worktree = linked.find(tree => sameWorktreePath(tree.path, targetPath));
+    if (!worktree?.head || worktree.bare || worktree.prunable !== undefined) {
+      throw new WorktreeRemovalError('This worktree is unavailable. Refresh Worktrees before trying again.');
+    }
+    if (worktree.locked !== undefined) throw new WorktreeRemovalError('This worktree is locked and cannot be removed.');
+    const otherTrees = (primary ? [primary, ...linked] : linked).filter(tree => tree !== worktree);
+    const nested = await Promise.all(otherTrees.map(async tree =>
+      GitClient.containsPath(worktree.path, tree.path) ||
+      GitClient.containsPath(worktree.path, await fs.realpath(tree.path).catch(() => tree.path))));
+    if (nested.some(Boolean)) throw new WorktreeRemovalError('This worktree contains another registered worktree and cannot be removed.');
+    return worktree;
+  }
+
+  private static async verifyWorktreePointers(directory: WorktreeDirectoryIdentity, gitDir: WorktreeDirectoryIdentity): Promise<void> {
+    const forward = path.join(directory.path, '.git');
+    const backward = path.join(gitDir.path, 'gitdir');
+    if (!(await fs.lstat(forward)).isFile() || !(await fs.lstat(backward)).isFile()) {
+      throw new WorktreeRemovalError('The worktree registration does not match its directory.');
+    }
+    const [gitFile, backpointer] = await Promise.all([fs.readFile(forward, 'utf8'), fs.readFile(backward, 'utf8')]);
+    if (!gitFile.startsWith('gitdir: ') || !backpointer ||
+        !sameWorktreePath(await fs.realpath(path.resolve(directory.path, gitFile.slice(8).replace(/\r?\n$/, ''))), gitDir.path) ||
+        !sameWorktreePath(await fs.realpath(path.resolve(gitDir.path, backpointer.replace(/\r?\n$/, ''))), forward)) {
+      throw new WorktreeRemovalError('The worktree registration does not match its directory.');
+    }
+  }
+
+  /** Refuse to remove anything whose clean state or linked-worktree identity cannot be verified. */
+  async prepareWorktreeRemoval(targetPath: string): Promise<WorktreeRemovalPlan> {
+    if (typeof targetPath !== 'string' || !targetPath || targetPath.includes('\0') || !path.isAbsolute(targetPath)) {
+      throw new WorktreeRemovalError('Choose a registered worktree to remove.');
+    }
+    try {
+      const repository = await this.worktreeRepositoryIdentity();
+      // Normalize caller paths (e.g. Windows short names) without substituting a symlink at the worktree itself.
+      const parent = await fs.realpath(path.dirname(targetPath)).catch(() => path.dirname(targetPath));
+      const worktree = await this.removalWorktree(path.join(parent, path.basename(targetPath)), repository.sourceRoot);
+      const directory = await GitClient.directoryIdentity(worktree.path);
+      if (!sameWorktreePath(directory.path, worktree.path) || !(await fs.lstat(path.join(directory.path, '.git'))).isFile()) {
+        throw new WorktreeRemovalError('This worktree cannot be verified at its registered location.');
+      }
+      const target = new GitClient(directory.path);
+      const [targetRepository, head] = await Promise.all([
+        target.worktreeRepositoryIdentity(), target.run(['rev-parse', '--verify', 'HEAD'])
+      ]);
+      const gitDir = targetRepository.sourceGitDir;
+      if (!sameWorktreePath(targetRepository.sourceRoot, directory.path) ||
+          !sameWorktreePath(targetRepository.commonDir, repository.commonDir) || targetRepository.commonDevice !== repository.commonDevice ||
+          targetRepository.commonInode !== repository.commonInode ||
+          !sameWorktreePath(path.dirname(gitDir.path), path.join(repository.commonDir, 'worktrees')) ||
+          head.trim() !== worktree.head || (!worktree.branch && !worktree.detached)) {
+        throw new WorktreeRemovalError('This worktree or its HEAD changed. Refresh Worktrees before trying again.');
+      }
+      await GitClient.verifyWorktreePointers(directory, gitDir);
+      if (worktree.detached && !(await target.run(['for-each-ref', `--contains=${worktree.head}`, '--format=%(refname)', 'refs/heads', 'refs/tags'])).trim()) {
+        throw new WorktreeRemovalError('The detached HEAD is not reachable from any local branch or tag. Create a branch for it before removing this worktree.');
+      }
+      const markerNames = ['MERGE_HEAD', 'rebase-merge', 'rebase-apply', 'CHERRY_PICK_HEAD', 'REVERT_HEAD', 'sequencer', 'BISECT_START'];
+      const [status, indexed, operation] = await Promise.all([
+        target.run(['-c', 'core.fsmonitor=false', '-c', 'core.untrackedCache=false', 'status', '--porcelain=v1', '-z', '--untracked-files=all', '--ignored=traditional', '--ignore-submodules=none']),
+        target.run(['ls-files', '-v', '-z']),
+        Promise.all(markerNames.map(marker => GitClient.worktreePathExists(path.join(gitDir.path, marker)))).then(markers => markers.some(Boolean))
+      ]);
+      if (operation) throw new WorktreeRemovalError('Finish the Git operation in this worktree before removing it.');
+      if (status) throw new WorktreeRemovalError('This worktree has staged, unstaged, untracked or ignored files. Review its changes before removing it.');
+      // Status intentionally hides these entries. Refuse rather than risk deleting local content.
+      if (indexed.split('\0').some(entry => /^[a-zS] /.test(entry))) {
+        throw new WorktreeRemovalError('This worktree has index entries whose working files Git may not check. It cannot be safely removed here.');
+      }
+      return { ...repository, worktree, directory, gitDir };
+    } catch (error) {
+      if (error instanceof WorktreeRemovalError) throw error;
+      throw new WorktreeRemovalError('Could not verify that the worktree is available and clean. It was not removed.', error instanceof Error ? error.message : undefined);
+    }
+  }
+
+  private static async worktreePathExists(location: string): Promise<boolean> {
+    try { await fs.lstat(location); return true; }
+    catch (error) {
+      if ((error as NodeJS.ErrnoException).code === 'ENOENT') return false;
+      throw error;
+    }
+  }
+
+  /** Only Git removes worktrees. Never force, prune, delete a branch, or retry automatically. */
+  async removeWorktree(plan: WorktreeRemovalPlan): Promise<WorktreeRemovalResult> {
+    if (!plan?.worktree || plan.root !== this.workspaceRoot) throw new WorktreeRemovalError('The repository changed. Review the worktree again.');
+    const current = await this.prepareWorktreeRemoval(plan.worktree.path);
+    const matchesWorktree = (worktree: WorktreeSummary) => sameWorktreePath(worktree.path, plan.worktree.path) &&
+      worktree.head === plan.worktree.head && worktree.branch === plan.worktree.branch && worktree.detached === plan.worktree.detached;
+    const [repository, worktree, directory, gitDir] = await Promise.all([
+      this.worktreeRepositoryIdentity(), this.removalWorktree(current.worktree.path, current.sourceRoot),
+      GitClient.directoryIdentity(current.directory.path), GitClient.directoryIdentity(current.gitDir.path),
+      GitClient.verifyWorktreePointers(current.directory, current.gitDir)
+    ]).catch((error: unknown) => {
+      if (error instanceof WorktreeRemovalError) throw error;
+      throw new WorktreeRemovalError('Could not revalidate the worktree or repository. Nothing was removed.', error instanceof Error ? error.message : undefined);
+    });
+    if (!GitClient.sameWorktreeRepository(current, plan) || !GitClient.sameWorktreeRepository(repository, plan) ||
+        !matchesWorktree(current.worktree) || !matchesWorktree(worktree) ||
+        !GitClient.sameDirectory(current.directory, plan.directory) || !GitClient.sameDirectory(directory, plan.directory) ||
+        !GitClient.sameDirectory(current.gitDir, plan.gitDir) || !GitClient.sameDirectory(gitDir, plan.gitDir)) {
+      throw new WorktreeRemovalError('The repository, worktree or HEAD changed. Review the worktree again.');
+    }
+    let failure: unknown;
+    try { await this.run(['worktree', 'remove', '--', worktree.path]); }
+    catch (error) { failure = error; }
+    const afterRepository = await this.worktreeRepositoryIdentity().catch(() => undefined);
+    if (!afterRepository || !GitClient.sameWorktreeRepository(afterRepository, current)) {
+      throw new WorktreeRemovalError('The repository changed after Git ran. Check Git worktree list and the destination before retrying.');
+    }
+    let actual: WorktreeRemovalResult;
+    try {
+      const [trees, pathExists] = await Promise.all([this.getWorktrees(), GitClient.worktreePathExists(worktree.path)]);
+      const registered = trees.find(tree => sameWorktreePath(tree.path, worktree.path));
+      actual = { removed: !registered && !pathExists, worktree: registered, pathExists };
+    } catch (error) {
+      throw new WorktreeRemovalError('Could not verify the worktree after Git ran. Check Git worktree list and the destination before retrying.', error instanceof Error ? error.message : undefined);
+    }
+    if (!failure && actual.removed) return actual;
+    const message = actual.removed ? 'The worktree is gone, but Git reported an error.' : actual.worktree
+      ? 'The worktree is still registered. Inspect its state before retrying.'
+      : 'The worktree is no longer registered, but its directory still exists. Inspect it before retrying.';
+    throw new WorktreeRemovalError(message, failure instanceof Error ? failure.message : undefined, actual);
   }
 
   private async checkSwitchState(): Promise<void> {
