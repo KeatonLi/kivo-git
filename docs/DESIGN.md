@@ -4,6 +4,8 @@
 
 The active design target is defined in [`IDEA_PARITY.md`](./IDEA_PARITY.md). Until that contract passes user testing, implementation decisions are made by reference to Rebased and IntelliJ IDEA rather than by Kivo's own visual preferences. Kivo's name and mark remain, but spacing, hierarchy, density, motion, and interaction behavior must not be “improved” independently.
 
+For History presentation in 0.6.3, use the [History visual specification](./HISTORY_VISUAL_SPEC.md). It supersedes strict visual parity for History typography, layout and color, not for Git operation semantics.
+
 ## Product promise
 
 Kivo Git brings the Rebased/IntelliJ Git workflow to VS Code with the same two-surface mental model: commit work in the left tool window and inspect history in the bottom tool window. It keeps native VS Code editors for code, diff, and merge work.

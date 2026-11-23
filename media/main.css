@@ -196,8 +196,8 @@ button:disabled { cursor: default !important; }
 .graph-lane-1 { --lane-color: var(--vscode-textLink-foreground); }
 .graph-lane-2 { --lane-color: var(--success); }
 .graph-lane-3 { --lane-color: var(--warning); }
-.graph-lane-4 { --lane-color: #a78bfa; }
-.graph-lane-5 { --lane-color: #f472b6; }
+.graph-lane-4 { --lane-color: var(--vscode-charts-purple, var(--accent)); }
+.graph-lane-5 { --lane-color: var(--vscode-charts-orange, var(--muted)); }
 .graph-node { fill: var(--surface-base); stroke: var(--accent); stroke-width: 1.8; vector-effect: non-scaling-stroke; }
 .graph-node.graph-lane-1, .graph-node.graph-lane-2, .graph-node.graph-lane-3, .graph-node.graph-lane-4, .graph-node.graph-lane-5 { stroke: var(--lane-color); }
 .graph-node.merge { fill: var(--accent); stroke: var(--surface-base); stroke-width: 2.7; }
@@ -1718,12 +1718,12 @@ body.commit-zone-resizing, body.commit-zone-resizing * { cursor: row-resize !imp
 .parity-mode .log-workspace .commit-detail-head strong { font-size:var(--kivo-list-font-size); font-weight:600; line-height:1.45; }
 .parity-mode .log-workspace .commit-body { font-size:12px; line-height:1.5; }
 .parity-mode .log-history-pane .graph-row { height:auto; min-height:var(--graph-row-height); }
-.parity-mode .log-history-pane .graph-commit { display:flex; flex-direction:column; align-items:stretch; justify-content:center; gap:3px; padding:4px 8px; }
+.parity-mode .log-history-pane .graph-commit { display:flex; flex-direction:column; align-items:stretch; justify-content:center; gap:2px; padding:3px 8px; }
 .parity-mode .log-history-pane .log-subject { display:block; overflow:visible; }
 .parity-mode .log-history-pane .log-subject strong { display:block; white-space:normal; overflow-wrap:anywhere; line-height:1.35; }
 .parity-mode .log-history-pane .graph-commit .log-meta { display:flex; flex-wrap:wrap; align-items:baseline; min-width:0; gap:2px 8px; line-height:1.35; }
 .parity-mode .log-history-pane .log-meta :is(.log-author,.log-date) { max-width:100%; padding:0; white-space:normal; overflow-wrap:anywhere; text-align:start; }
-.parity-mode .log-history-pane .log-meta code { flex:none; }
+.parity-mode .log-history-pane .log-meta code { flex:none; font-size:inherit; font-family:var(--vscode-editor-font-family, monospace); }
 .parity-mode .log-history-pane .log-row-refs { max-width:100%; gap:4px; overflow:visible; }
 .parity-mode .log-history-pane .log-row-refs .graph-ref { max-width:100%; overflow-wrap:anywhere; white-space:normal; }
 .parity-mode .log-history-pane .log-row-refs .graph-ref > span { display:inline; overflow:visible; }
