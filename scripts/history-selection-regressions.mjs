@@ -98,6 +98,7 @@ export async function verifyHistorySelection(page, openSurface) {
     }],
     ['right-button dragging selects a range and offers batch cherry-pick on release', async () => {
       await openSurface('surface=history');
+      await page.setViewportSize({ width: 1280, height: 720 });
       const first = await page.locator('[data-commit]').nth(0).boundingBox(), fourth = await page.locator('[data-commit]').nth(3).boundingBox();
       await page.mouse.move(first.x + first.width / 2, first.y + first.height / 2);
       await page.mouse.down({ button: 'right' });

@@ -2,6 +2,12 @@
 
 ## Unreleased
 
+## 0.6.3
+
+- Read complete commit subjects in History. Long titles and metadata wrap rather than disappearing in narrow panels; the branch graph follows the height of each row without dropping merge edges.
+- Use the compact top toolbar to locate HEAD and access worktrees, stashes and sync actions. Browse refs without checking them out; use Advanced filters for author, date and path.
+- See local commit and push status separately in the Commit sidebar, including verified local saves, outgoing commits, diverged branches and missing upstreams.
+
 ## 0.6.1 - 2026-11-22
 
 - Use a smaller Marketplace icon without changing the design, and verify its size inside the VSIX.

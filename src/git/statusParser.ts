@@ -4,6 +4,7 @@ export interface ParsedStatus {
   branch: string;
   headOid?: string;
   upstream?: string;
+  trackingKnown?: true;
   ahead: number;
   behind: number;
   changes: GitChange[];
@@ -25,6 +26,7 @@ export function parsePorcelainV2(output: string): ParsedStatus {
   let upstream: string | undefined;
   let ahead = 0;
   let behind = 0;
+  let trackingKnown: true | undefined;
   const changes: GitChange[] = [];
   const records = output.split('\0');
 
@@ -49,6 +51,7 @@ export function parsePorcelainV2(output: string): ParsedStatus {
       if (match) {
         ahead = Number(match[1]);
         behind = Number(match[2]);
+        trackingKnown = true;
       }
       continue;
     }
@@ -93,5 +96,5 @@ export function parsePorcelainV2(output: string): ParsedStatus {
     }
   }
 
-  return { branch, headOid, upstream, ahead, behind, changes };
+  return { branch, headOid, upstream, trackingKnown, ahead, behind, changes };
 }

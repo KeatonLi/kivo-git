@@ -21,8 +21,8 @@ export async function verifyExperienceRegressions(page, openSurface) {
         { surface: 'changes', selector: '#change-search', open: '[data-action="search-changes"]' },
         { surface: 'changes', selector: '#branch-search', open: '[data-action="branches"]' },
         { surface: 'history', selector: '#graph-search' },
-        { surface: 'history', selector: '#graph-path' },
-        { surface: 'history', selector: '#graph-author' },
+        { surface: 'history', selector: '#graph-path', open: '[data-action="toggle-history-filters"]' },
+        { surface: 'history', selector: '#graph-author', open: '[data-action="toggle-history-filters"]' },
         { surface: 'history', selector: '#log-branch-search', open: '.log-branch-search' }
       ]) {
         await page.setViewportSize(surface === 'changes' ? { width: 360, height: 820 } : { width: 1450, height: 650 });
@@ -88,7 +88,9 @@ export async function verifyExperienceRegressions(page, openSurface) {
       await page.setViewportSize({ width: 1450, height: 650 });
       await openSurface('surface=history');
       const commits = await page.locator('.graph-row').count();
-      for (const selector of ['#graph-search', '#graph-path', '#graph-author']) await page.locator(selector).fill('no-such-value');
+      await page.locator('#graph-search').fill('no-such-value');
+      await page.locator('[data-action="toggle-history-filters"]').click();
+      for (const selector of ['#graph-path', '#graph-author']) await page.locator(selector).fill('no-such-value');
       await page.locator('[data-action="clear-graph-filters"]').click();
       for (const selector of ['#graph-search', '#graph-path', '#graph-author']) {
         assert.equal(await page.locator(selector).inputValue(), '', `${selector}: clearing History filters must clear its visible value.`);
@@ -121,6 +123,7 @@ export async function verifyExperienceRegressions(page, openSurface) {
       await page.locator('[data-commit-file="src/archive/Legacy.ts"]').click();
       assert.ok(await page.evaluate(hash => window.__vscodeMessages.some(message => message.type === 'openCommitDiff' && message.hash === hash && message.path === 'src/archive/Legacy.ts'), hash),
         'The searched commit must open its exact immutable file diff.');
+      await page.locator('[data-action="toggle-history-filters"]').click();
       await page.locator('[data-action="clear-graph-filters"]').click();
       await page.waitForFunction(() => document.querySelector('.commit-metadata')?.textContent.includes('History commit 1'));
       await page.evaluate(hash => emit({ type: 'commitDetails', payload: { hash, subject: 'STALE SEARCH DETAILS', files: [] } }), hash);

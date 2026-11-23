@@ -9,6 +9,9 @@ const workspace = path.join(root, '.vscode-test-workspace');
 const isolatedProfile = await mkdtemp(path.join(os.tmpdir(), 'kivo-git-extension-test-'));
 await mkdir(workspace, { recursive: true });
 
+// Embedded Electron terminals can export this for their own Node tools.
+// The test executable must start VS Code, not interpret the workspace as JS.
+delete process.env.ELECTRON_RUN_AS_NODE;
 await runTests({
   ...(process.env.KIVO_VSCODE_EXECUTABLE_PATH
     ? { vscodeExecutablePath: process.env.KIVO_VSCODE_EXECUTABLE_PATH }

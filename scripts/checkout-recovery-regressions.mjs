@@ -18,13 +18,15 @@ export async function verifyCheckoutRecovery(page, openSurface) {
   assert.ok(await page.evaluate(() => window.__vscodeMessages.some(message => message.type === 'chooseWorktree' && message.root === fixture.root)),
     'Worktrees must remain discoverable and keyboard accessible with a single registered worktree.');
   await page.setViewportSize({ width: 1440, height: 260 });
-  const lastRailAction = page.locator('.log-action-rail [data-action="toggle-history-focus"]');
-  await lastRailAction.focus();
-  assert.equal(await lastRailAction.evaluate(element => {
-    const container = element.closest('.log-action-rail');
-    const button = element.getBoundingClientRect(), bounds = container.getBoundingClientRect();
-    return button.top >= bounds.top && button.bottom <= bounds.bottom;
-  }), true, 'Keyboard focus must reveal the last History action in a short panel.');
+  const lastHistoryAction = page.getByRole('group', { name: 'History actions' }).getByRole('button', { name: 'Focus on commit history' });
+  await lastHistoryAction.focus();
+  assert.equal(await lastHistoryAction.evaluate(element => {
+    const toolbar = element.closest('.log-action-toolbar');
+    const button = element.getBoundingClientRect(), bounds = toolbar.getBoundingClientRect();
+    const workspace = toolbar.closest('.log-workspace').getBoundingClientRect();
+    return button.top >= bounds.top && button.bottom <= bounds.bottom
+      && bounds.top === workspace.top && bounds.width === workspace.width;
+  }), true, 'The last History action must remain keyboard accessible in the full-width top toolbar of a short panel.');
   await page.setViewportSize({ width: 1440, height: 600 });
   await page.evaluate(() => {
     window.__checkoutFailure = { id: 40, root: fixture.root, kind: 'checkout', title: 'feature/login is already open in another worktree.',

@@ -6,6 +6,7 @@ import { fileURLToPath } from 'node:url';
 import { mkdir } from 'node:fs/promises';
 import { verifyExperienceRegressions } from './webview-experience-regressions.mjs';
 import { verifyHistorySelection } from './history-selection-regressions.mjs';
+import { verifyHistoryPresentation } from './history-presentation-regressions.mjs';
 import { verifyCheckoutRecovery } from './checkout-recovery-regressions.mjs';
 import { verifyInteractionMotion } from './motion-regressions.mjs';
 
@@ -79,6 +80,7 @@ try {
   await verifyHistorySelection(page, query => openSurface(page, query));
   await verifyCheckoutRecovery(page, query => openSurface(page, query));
   await verifyInteractionMotion(page, query => openSurface(page, query));
+  await verifyHistoryPresentation(page, query => openSurface(page, query));
 
   await page.goto(`${baseUrl}/test/visual-preview.html?surface=changes&state=loading`);
   await page.waitForSelector('.repository-loading');
@@ -398,7 +400,9 @@ try {
   assert.equal(await page.locator('.unpushed-badge').count(), 0, 'Without a tracking branch, the UI should not guess which commits are unpushed.');
   assert.equal(await page.locator('[data-action="pull-menu"]').isEnabled(), false, 'Pull without a tracking branch should explain why it cannot run.');
   assert.equal(await page.locator('.commit-toolbar [data-action="push"]').isEnabled(), true, 'A local branch must be publishable before it has an upstream or outgoing count.');
-  assert.match(await page.locator('.commit-publish-hint').textContent(), /Local branch.*no upstream/);
+  const pushStatus = page.locator('[data-commit-status="push"]');
+  assert.equal(await pushStatus.getAttribute('data-state'), 'unpublished');
+  assert.match(await pushStatus.textContent(), /No upstream.*publish branch/);
   assert.equal(await page.locator('.publish-branch-button').evaluate(button => {
     const icon = button.querySelector('.codicon').getBoundingClientRect();
     const label = button.querySelector('span:last-child').getBoundingClientRect();
@@ -445,17 +449,20 @@ try {
     await page.screenshot({ path: path.join(process.env.KIVO_CAPTURE_DIR, '22-publish-branch.png'), animations: 'disabled' });
   }
   await page.locator('[data-action="confirm-push-review"]').click();
-  assert.equal(await page.locator('.commit-publish-hint').count(), 0, 'Successful publication should clear the no-upstream hint.');
+  assert.equal(await pushStatus.getAttribute('data-state'), 'none', 'Successful publication should replace the no-upstream state.');
+  assert.match(await pushStatus.textContent(), /No known outgoing commits/);
   assert.equal(await page.locator('.publish-branch-button').count(), 0);
   assert.equal(await page.evaluate(() => fixture.upstream), 'origin/feature/keaton/ACKk8s');
 
   await openSurface(page, 'surface=changes&state=upstream-gone');
-  assert.match(await page.locator('.commit-publish-hint').textContent(), /Remote branch missing/);
+  assert.equal(await pushStatus.getAttribute('data-state'), 'missing-upstream');
+  assert.match(await pushStatus.textContent(), /Remote branch missing.*publish again/);
   assert.equal(await page.locator('.commit-toolbar [data-action="push"]').isEnabled(), true);
   assert.equal(await page.locator('[data-action="pull-menu"]').isEnabled(), false);
 
   await openSurface(page, 'surface=changes&state=no-remote');
-  assert.match(await page.locator('.commit-publish-hint').textContent(), /No remote configured.*add a Git remote/);
+  assert.equal(await pushStatus.getAttribute('data-state'), 'missing-remote');
+  assert.match(await pushStatus.textContent(), /No remote configured.*add a Git remote/);
 
   await openSurface(page, 'surface=changes&state=no-upstream');
   await page.evaluate(() => { window.__holdPushReview = true; });
@@ -760,6 +767,7 @@ try {
   await page.locator('#graph-search').fill('2d4411f');
   await page.locator('.graph-row').first().waitFor();
   assert.equal(await page.locator('.graph-row').count(), 1, 'Commit search should match by short hash.');
+  await page.locator('[data-action="toggle-history-filters"]').click();
   await page.locator('[data-action="clear-graph-filters"]').first().click();
   assert.equal(await page.locator('.graph-row').count(), loadedCommitCount, 'Clearing filters should restore all loaded commits.');
   await page.locator('#graph-path').fill('config');
@@ -785,7 +793,7 @@ try {
   assert.ok(await page.evaluate(() => window.__vscodeMessages.some((message) => message.type === 'commitDetails' && message.hash === '2d4411f0a1b2c3d4e5f678901234567890abcd12')), 'Blame navigation should load commit details.');
 
   await openSurface(page, 'surface=history&state=multi');
-  await page.locator('.log-action-rail [data-action="choose-repository"]').click();
+  await page.getByRole('group', { name: 'History actions' }).getByRole('button', { name: /^Choose repository/ }).click();
   assert.ok(await page.evaluate(() => window.__vscodeMessages.some((message) => message.type === 'chooseRepository')), 'History should also allow repository switching.');
 
   await openSurface(page, 'surface=history');
@@ -794,7 +802,7 @@ try {
   assert.match(await page.locator('.log-date').first().getAttribute('title'), /^\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}$/, 'History dates should retain complete local timestamps on hover.');
   await page.setViewportSize({ width: 960, height: 380 });
   assert.ok(await page.locator('.graph-row .log-subject strong').first().evaluate(element => element.clientWidth >= 88), 'Narrow History must reserve readable space for the commit title.');
-  assert.equal(await page.locator('.log-time-compact').first().isVisible(), true, 'Narrow History should show compact dates instead of consuming title space.');
+  assert.equal(await page.locator('.log-time-full').first().isVisible(), false, 'Narrow History should compact or hide dates to prioritize the title.');
   await page.setViewportSize({ width: 1200, height: 500 });
   assert.equal(await page.locator('.log-head-group, .branch-pane-footer').count(), 0, 'History should not duplicate the current branch or reserve a status footer.');
   assert.match(await page.locator('.log-branch-row.current .branch-sync-indicator').getAttribute('title'), /2 incoming, 3 outgoing/);
@@ -887,15 +895,16 @@ try {
     previousScrollTop = current.scrollTop;
   }
   const beforeLoading = await page.locator('[data-graph-list]').evaluate(list => {
-    const height = list.scrollHeight;
+    const indicatorHeight = list.querySelector('.graph-load-sentinel').offsetHeight;
     list.scrollTop = list.scrollHeight;
     const top = list.scrollTop;
     list.dispatchEvent(new Event('scroll'));
-    return { height, top };
+    return { indicatorHeight, top };
   });
   await page.waitForFunction(() => document.querySelector('[data-graph-list]').getAttribute('aria-busy') === 'true');
-  const duringLoading = await page.locator('[data-graph-list]').evaluate(list => ({ height: list.scrollHeight, top: list.scrollTop }));
-  assert.deepEqual(duringLoading, beforeLoading, 'Loading feedback must not change scroll extent or reading position.');
+  const duringLoading = await page.locator('[data-graph-list]').evaluate(list => ({ indicatorHeight: list.querySelector('.graph-load-sentinel').offsetHeight, top: list.scrollTop }));
+  // Previously unseen wrapped rows may refine the scroll extent. Showing the spinner must not add height or move the reader.
+  assert.deepEqual(duringLoading, beforeLoading, 'Loading feedback must keep its slot height and reading position.');
   await page.mouse.wheel(0, -95);
   await page.waitForFunction(before => document.querySelector('[data-graph-list]').scrollTop < before - 50, duringLoading.top);
   await page.waitForTimeout(40);

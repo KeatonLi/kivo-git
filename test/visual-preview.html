@@ -125,6 +125,8 @@
       }
       fixture.commits.forEach((commit, index) => { if (fixture.upstream && index < fixture.ahead) commit.unpushedTo = fixture.upstream; });
       fixture.recentCommits = fixture.commits.slice(0, 5);
+      fixture.headOid = fixture.commits[0]?.hash;
+      fixture.trackingKnown = fixture.upstream && !fixture.upstreamGone ? true : undefined;
       fixture.branches.find(branch => branch.current).upstream = fixture.upstream || undefined;
       fixture.branches.find(branch => branch.current).upstreamGone = fixture.upstreamGone;
       window.__vscodeMessages = [];
@@ -173,6 +175,7 @@
                 if (p.branch === fixture.branch) {
                   fixture.upstream = p.upstream;
                   fixture.upstreamGone = undefined;
+                  fixture.trackingKnown = true;
                 }
               }
               fixture.ahead = 0;

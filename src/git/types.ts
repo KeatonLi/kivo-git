@@ -124,6 +124,8 @@ export interface RepositorySnapshot {
   upstream?: string;
   upstreamGone?: boolean;
   remotes?: string[];
+  /** Git returned an explicit ahead/behind comparison against the local tracking ref. */
+  trackingKnown?: true;
   ahead: number;
   behind: number;
   changes: GitChange[];

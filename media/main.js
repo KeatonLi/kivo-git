@@ -12,7 +12,7 @@ const initialRepositoryState = persisted.activeRoot && repositoryStates[persiste
 const surface = document.body.dataset.surface === 'history' ? 'history' : 'changes';
 const LOG_BRANCH_MIN_WIDTH = 156;
 const LOG_BRANCH_MAX_WIDTH = 420;
-const LOG_BRANCH_DEFAULT_WIDTH = 240;
+const LOG_BRANCH_DEFAULT_WIDTH = 216;
 const LOG_DETAIL_MIN_WIDTH = 220;
 const LOG_DETAIL_MAX_WIDTH = 520;
 const LOG_DETAIL_DEFAULT_WIDTH = 306;
@@ -26,9 +26,10 @@ const COMMIT_PANEL_DEFAULT_HEIGHT = 64;
 // Recent commits fit their contents until the user explicitly resizes the split.
 const COMMIT_ZONE_DEFAULT_PERCENT = 65;
 const BRANCH_PAGE_SIZE = 36;
-const GRAPH_MAX_WIDTH = 176;
+const GRAPH_MAX_WIDTH = 132;
+const GRAPH_LANE_WIDTH = 12;
 const GRAPH_MIN_WIDTH = 64;
-const GRAPH_ROW_HEIGHT = 30;
+const GRAPH_ROW_HEIGHT = 44;
 const GRAPH_BOTTOM_EPSILON = 2;
 const GRAPH_VIRTUAL_OVERSCAN = 12;
 const clamp = (value, minimum, maximum) => Math.max(minimum, Math.min(maximum, value));
@@ -115,6 +116,7 @@ const ui = {
   selectionAnchor: undefined,
   commitMessage: initialRepositoryState.commitMessage || '',
   commitReviewOpen: false,
+  commitPushOutcomes: new Map(),
   pushReview: undefined,
   pushPreparing: undefined,
   pushSelectedHash: undefined,
@@ -129,6 +131,7 @@ const ui = {
   graphBranchFilter: initialRepositoryState.graphBranchFilter || '',
   graphAuthorFilter: initialRepositoryState.graphAuthorFilter || '',
   graphAgeFilter: initialRepositoryState.graphAgeFilter || 'all',
+  historyFiltersOpen: false,
   graphLoadingMore: false,
   historySearch: undefined,
   historySearchLoading: false,
@@ -384,6 +387,7 @@ function restoreRepositoryState(root, state = {}) {
   ui.graphBranchFilter = state.graphBranchFilter || '';
   ui.graphAuthorFilter = state.graphAuthorFilter || '';
   ui.graphAgeFilter = state.graphAgeFilter || 'all';
+  ui.historyFiltersOpen = false;
   ui.logBranchQuery = state.logBranchQuery || '';
   ui.historyFocusMode = state.historyFocusMode === true;
   ui.logBranchWidth = Number.isFinite(branchWidth) ? clamp(branchWidth, LOG_BRANCH_MIN_WIDTH, LOG_BRANCH_MAX_WIDTH) : LOG_BRANCH_DEFAULT_WIDTH;
@@ -471,6 +475,7 @@ function graphCommits() {
   if (historySearchActive()) return ui.historySearch?.key === historySearchKey() ? ui.historySearch.commits : [];
   const commits = ui.snapshot?.commits ?? [];
   const query = ui.graphQuery.trim().toLowerCase();
+  if (!query && !ui.graphBranchFilter && !ui.graphAuthorFilter && !ui.graphPathFilter.trim() && ui.graphAgeFilter === 'all') return commits;
   const ageDays = { all: 0, '7d': 7, '30d': 30, '90d': 90 }[ui.graphAgeFilter] || 0;
   const after = ageDays ? Date.now() - ageDays * 24 * 60 * 60 * 1000 : 0;
   const reachable = ui.graphBranchFilter ? reachableCommitHashes(commits, ui.graphBranchFilter) : undefined;
@@ -535,43 +540,66 @@ function setHistoryRef(branch) {
 
 function graphWidthBudget() {
   if (!ui.graphViewportWidth) return GRAPH_MAX_WIDTH;
-  const compact = window.matchMedia('(max-width: 620px)').matches;
-  const narrow = window.matchMedia('(max-width: 1180px)').matches;
-  const authorWidth = compact ? 0 : narrow ? 80 : 108;
-  const dateWidth = compact ? 80 : narrow ? 106 : 142;
-  const commitMinimum = compact ? 132 : narrow ? 180 : 240;
-  return clamp(ui.graphViewportWidth - authorWidth - dateWidth - commitMinimum - 8, GRAPH_MIN_WIDTH, GRAPH_MAX_WIDTH);
+  const width = ui.graphViewportWidth;
+  return clamp(width * .22, GRAPH_MIN_WIDTH, GRAPH_MAX_WIDTH);
 }
 
+let historyGraphMetrics;
 function graphLayoutFor(commits) {
+  const maximumWidth = Math.floor(graphWidthBudget());
+  if (historyGraphMetrics?.commits === commits && historyGraphMetrics.maximumWidth === maximumWidth) return historyGraphMetrics.graph;
   const layout = globalThis.KivoGraphLayout?.layout;
-  if (typeof layout === 'function') return layout(commits, { maximumWidth: graphWidthBudget() });
-  const lanes = commits.flatMap((commit) => [commit.lane, ...(commit.incomingLanes || []), ...(commit.parentLanes || [])]);
-  const laneCount = lanes.length ? Math.max(1, Math.max(...lanes) + 1) : 1;
-  const graphWidth = Math.min(GRAPH_MAX_WIDTH, Math.max(GRAPH_MIN_WIDTH, laneCount * 16 + 20));
-  return { laneCount, laneWidth: 16, graphWidth, nodeRadius: 3.6, mergeNodeRadius: 4.5, compressed: graphWidth < laneCount * 16 + 20 };
+  let graph;
+  if (typeof layout === 'function') graph = layout(commits, { maximumWidth, laneWidth: GRAPH_LANE_WIDTH });
+  else {
+    let laneCount = 1;
+    for (const commit of commits) for (const lane of [commit.lane, ...(commit.incomingLanes || []), ...(commit.parentLanes || [])]) laneCount = Math.max(laneCount, lane + 1);
+    const laneWidth = Math.min(GRAPH_LANE_WIDTH, (maximumWidth - 20) / laneCount);
+    const graphWidth = Math.max(GRAPH_MIN_WIDTH, Math.ceil(laneCount * laneWidth + 20));
+    graph = { laneCount, laneWidth, graphWidth, nodeRadius: 2.7, mergeNodeRadius: 3.6, compressed: laneWidth < GRAPH_LANE_WIDTH };
+  }
+  historyGraphMetrics = { commits, maximumWidth, graph };
+  return graph;
+}
+
+// Cache measured heights for the current repository and column geometry;
+// unseen commits start at the minimum row size until mounted.
+const graphRowHeights = new Map();
+let graphRowGeometry;
+let graphOffsetCache;
+function graphOffsets(commits) {
+  const geometry = JSON.stringify([ui.snapshot?.root, ui.graphViewportWidth, graphLayoutFor(commits).graphWidth]);
+  if (geometry !== graphRowGeometry) {
+    graphRowGeometry = geometry;
+    graphRowHeights.clear();
+    graphOffsetCache = undefined;
+  }
+  if (graphOffsetCache?.commits === commits) return graphOffsetCache.offsets;
+  const offsets = [0];
+  for (const commit of commits) offsets.push(offsets.at(-1) + (graphRowHeights.get(commit.hash) ?? GRAPH_ROW_HEIGHT));
+  graphOffsetCache = { commits, offsets };
+  return offsets;
+}
+
+function graphIndexAt(offsets, position) {
+  let low = 0;
+  let high = offsets.length - 1;
+  while (low < high) {
+    const mid = Math.ceil((low + high) / 2);
+    if (offsets[mid] <= position) low = mid;
+    else high = mid - 1;
+  }
+  return Math.min(low, offsets.length - 2);
 }
 
 function graphRenderWindow(commits) {
-  const visibleRange = globalThis.KivoGraphLayout?.visibleRange;
-  const options = {
-    scrollTop: ui.graphScrollTop,
-    viewportHeight: ui.graphViewportHeight || GRAPH_ROW_HEIGHT * 18,
-    rowHeight: GRAPH_ROW_HEIGHT,
-    overscan: GRAPH_VIRTUAL_OVERSCAN
-  };
-  if (typeof visibleRange === 'function') return visibleRange(commits.length, options);
-  const firstVisible = Math.floor(Math.max(0, options.scrollTop) / GRAPH_ROW_HEIGHT);
-  const visibleRows = Math.max(1, Math.ceil(options.viewportHeight / GRAPH_ROW_HEIGHT));
-  const start = Math.max(0, firstVisible - GRAPH_VIRTUAL_OVERSCAN);
-  const end = Math.min(commits.length, firstVisible + visibleRows + GRAPH_VIRTUAL_OVERSCAN);
-  return {
-    start,
-    end,
-    topSpacer: start * GRAPH_ROW_HEIGHT,
-    bottomSpacer: Math.max(0, commits.length - end) * GRAPH_ROW_HEIGHT,
-    totalHeight: commits.length * GRAPH_ROW_HEIGHT
-  };
+  if (!commits.length) return { start: 0, end: 0, topSpacer: 0, bottomSpacer: 0 };
+  const offsets = graphOffsets(commits);
+  const top = ui.graphScrollTop;
+  const bottom = top + (ui.graphViewportHeight || GRAPH_ROW_HEIGHT * 18);
+  const start = Math.max(0, graphIndexAt(offsets, top) - GRAPH_VIRTUAL_OVERSCAN);
+  const end = Math.min(commits.length, graphIndexAt(offsets, bottom) + 1 + GRAPH_VIRTUAL_OVERSCAN);
+  return { start, end, topSpacer: offsets[start], bottomSpacer: offsets.at(-1) - offsets[end] };
 }
 
 function restoreGraphScroll(scrollTop) {
@@ -609,13 +637,24 @@ function syncGraphViewport(list) {
   const nextWidth = Math.round(list.clientWidth);
   const nextHeight = Math.round(list.clientHeight);
   if (!nextWidth || !nextHeight) return;
-  const widthChanged = Math.abs(nextWidth - ui.graphViewportWidth) >= 4;
-  const heightChanged = Math.abs(nextHeight - ui.graphViewportHeight) >= GRAPH_ROW_HEIGHT;
-  if (!widthChanged && !heightChanged) return;
-  const scrollTop = list.scrollTop;
+  const viewportChanged = nextWidth !== ui.graphViewportWidth || nextHeight !== ui.graphViewportHeight;
+  const commits = graphCommits();
+  const rows = [...list.querySelectorAll('[data-commit]')].map(row => [row.dataset.commit, row.getBoundingClientRect().height]);
+  const anchor = captureReadingAnchor(list, '[data-commit]');
   ui.graphViewportWidth = nextWidth;
   ui.graphViewportHeight = nextHeight;
-  ui.graphScrollTop = scrollTop;
+  graphOffsets(commits); // Validate the geometry before recording measurements.
+  let measured = false;
+  for (const [hash, height] of rows) {
+    if (height < GRAPH_ROW_HEIGHT || height === (graphRowHeights.get(hash) ?? GRAPH_ROW_HEIGHT)) continue;
+    if (height === GRAPH_ROW_HEIGHT) graphRowHeights.delete(hash);
+    else graphRowHeights.set(hash, height);
+    measured = true;
+  }
+  if (!viewportChanged && !measured) return;
+  if (measured) graphOffsetCache = undefined;
+  const index = anchor ? commits.findIndex(commit => commit.hash === anchor.key) : -1;
+  ui.graphScrollTop = index >= 0 ? Math.max(0, graphOffsets(commits)[index] - anchor.offset) : list.scrollTop;
   render();
 }
 
@@ -701,10 +740,11 @@ function revealGraphCommit(hash) {
   const list = app.querySelector('[data-graph-list]');
   const viewportHeight = list?.clientHeight || ui.graphViewportHeight || GRAPH_ROW_HEIGHT * 18;
   const currentTop = list?.scrollTop ?? ui.graphScrollTop;
-  const rowTop = index * GRAPH_ROW_HEIGHT;
-  const rowBottom = rowTop + GRAPH_ROW_HEIGHT;
+  const offsets = graphOffsets(commits);
+  const rowTop = offsets[index];
+  const rowBottom = offsets[index + 1];
   const viewportBottom = currentTop + viewportHeight;
-  const maximum = Math.max(0, commits.length * GRAPH_ROW_HEIGHT - viewportHeight);
+  const maximum = Math.max(0, offsets.at(-1) - viewportHeight);
   const nextTop = rowTop < currentTop
     ? rowTop
     : rowBottom > viewportBottom
@@ -1026,6 +1066,7 @@ function render() {
   });
   bind();
   positionPullMenu();
+  positionHistoryFilters();
   updateCommitMessageBudget();
   bindCommitViewport();
 }
@@ -1154,7 +1195,7 @@ function renderCommitToolbar(s) {
   const fetchIcon = syncing || ui.operationKind === 'fetch' ? 'loading' : 'refresh';
   const hasUpstream = Boolean(s.upstream) && !s.upstreamGone;
   const canPublish = !hasUpstream && s.branch !== '(detached)';
-  const preparing = ui.pushPreparing?.active;
+  const preparing = ui.pushPreparing?.active && (!ui.pushPreparing.branch || ui.pushPreparing.branch === s.branch);
   const pullTitle = hasUpstream
     ? s.behind ? `Pull ${s.behind} known incoming commit${s.behind === 1 ? '' : 's'} (checks remote)` : 'Pull from upstream (checks remote for new commits)'
     : s.upstreamGone ? 'Remote branch is missing. Publish it again before pulling.' : 'Publish or set an upstream branch before pulling';
@@ -1187,6 +1228,88 @@ function renderCommitToolbar(s) {
 
 function matchesChangeFilter(change) {
   return KivoChangeSelection.matches(change, ui.changeFilter, ui.changeQuery);
+}
+
+function commitPushContextKey({ root, branch }) {
+  return JSON.stringify([root, branch]);
+}
+
+function recordCommitPushOutcome(message) {
+  const { context, kind, phase, commitOid } = message;
+  if (!context?.root || context.root !== message.root || !context.branch || !['commit', 'push'].includes(kind)) return;
+  const outcomes = ui.commitPushOutcomes;
+  const key = commitPushContextKey(context);
+  const entries = outcomes.get(key) || {};
+  if (entries[kind]?.id > message.id) return;
+  entries[kind] = { ...context, id: message.id, phase, commitOid, detail: message.message };
+  if (kind === 'commit' && phase === 'success') entries.commit.seen = ui.snapshot?.branch === context.branch && ui.snapshot.headOid === commitOid;
+  outcomes.delete(key);
+  outcomes.set(key, entries);
+  if (outcomes.size > 32) outcomes.delete(outcomes.keys().next().value);
+}
+
+function reconcileCommitPushOutcomes(snapshot, fromSnapshot = false) {
+  const entries = ui.commitPushOutcomes.get(commitPushContextKey(snapshot));
+  if (!entries) return;
+  const { commit, push } = entries;
+  if (commit?.phase === 'success') {
+    if (commit.commitOid === snapshot.headOid) commit.seen = true;
+    else if (commit.seen || commit.head !== snapshot.headOid) delete entries.commit;
+  } else if ((commit?.phase === 'error' || commit?.phase === 'unverified') && commit.head !== snapshot.headOid) delete entries.commit;
+  if (push && push.phase !== 'loading' && (push.head !== snapshot.headOid || (snapshot.upstream && snapshot.upstream !== push.destination) ||
+      (fromSnapshot && push.phase === 'success' && (!snapshot.upstream || snapshot.upstreamGone || snapshot.ahead > 0 || snapshot.behind > 0)))) delete entries.push;
+}
+
+function commitPushStatusRows(s) {
+  const zh = document.body.dataset.locale === 'zh';
+  const text = (en, cn) => zh ? cn : en;
+  const statuses = ui.commitPushOutcomes.get(commitPushContextKey(s)) || {};
+  const commit = statuses.commit;
+  const push = statuses.push;
+  const preparing = ui.pushPreparing?.branch === s.branch ? ui.pushPreparing : undefined;
+  const state = (id, tone, symbol, label, detail = label) => ({ id, tone, symbol, label, detail });
+  const blocker = commitBlocker();
+  const blockers = {
+    'Finish the current Git operation or resolve conflicts before committing': text('Finish the Git operation', '完成当前 Git 操作'),
+    'A Git operation is in progress': text('Git is busy', 'Git 正忙'),
+    'Select at least one changed file': s.changes.length ? text('Select files', '选择文件') : text('Working tree clean', '工作区干净'),
+    'Review or remove hidden selected files before committing': text('Review hidden files', '检查隐藏的已选文件'),
+    'Resolve merge conflicts before committing': text('Resolve conflicts', '解决冲突'),
+    'Set your Git identity before committing': text('Set Git identity', '设置 Git 身份'),
+    'Write a commit message': text('Write a message', '填写提交说明')
+  };
+  let local;
+  if (commit?.phase === 'loading') local = state('committing', 'progress', 'loading', text('Committing…', '正在提交…'));
+  else if (commit?.phase === 'error') local = state('failed', 'error', 'error', text('Commit failed', '提交失败'), commit.detail);
+  else if (commit?.phase === 'unverified') local = state('unverified', 'warning', 'warning', text('Local commit unverified', '本地提交未核实'), text('Check Recent Commits before retrying.', '重试前请检查最近提交。'));
+  else if (commit?.phase === 'success' && /^(?:[0-9a-f]{40}|[0-9a-f]{64})$/i.test(commit.commitOid) && !ui.commitMessage.trim()) {
+    local = state('verified', 'success', 'check', `${text('Saved locally', '已提交到本地')} · ${commit.commitOid.slice(0, 7)}`, `${text('Verified local commit', '已核实的本地提交')} ${commit.commitOid}`);
+  } else if (!blocker) local = state('ready', 'ready', 'circle-filled', text('Ready to review', '可检查并提交'));
+  else local = state('not-ready', 'muted', 'circle-outline', blockers[blocker] || text('Not ready', '尚未就绪'), zh ? blockers[blocker] : blocker);
+
+  let remote;
+  if (push?.phase === 'loading') remote = state('pushing', 'progress', 'loading', text('Pushing…', '正在推送…'), push.destination);
+  else if (preparing?.active) remote = state('checking', 'progress', 'loading', text('Checking destination…', '正在检查目标…'));
+  else if (s.branch === '(detached)') remote = state('detached', 'muted', 'circle-outline', text('Detached HEAD', '分离的 HEAD'));
+  else if (s.remotes?.length === 0) remote = state('missing-remote', 'warning', 'warning', text('No remote configured · add a Git remote', '未配置远程仓库 · 请添加远程仓库'));
+  else if (push?.phase === 'error') remote = state('failed', 'error', 'error', text('Push failed', '推送失败'), push.detail);
+  else if (s.upstreamGone) remote = state('missing-upstream', 'warning', 'warning', text('Remote branch missing · publish again', '远程分支不存在 · 请重新发布'));
+  else if (s.behind > 0) remote = state(s.ahead > 0 ? 'diverged' : 'behind', 'warning', 'warning', s.ahead > 0 ? text('Diverged from upstream', '已与上游分叉') : text('Behind upstream', '落后于上游'), s.upstream);
+  else if (push?.phase === 'success' && push.head && push.head === s.headOid && push.destination && s.upstream === push.destination) {
+    remote = state('pushed', 'success', 'check', `${text('Pushed to', '已推送到')} ${push.destination}`);
+  } else if (preparing?.error) remote = state('review-failed', 'error', 'error', text('Push review failed', '检查推送失败'), preparing.error);
+  else if (!s.headOid) remote = state('no-head', 'muted', 'circle-outline', text('No commits yet', '尚无提交'));
+  else if (!s.upstream) remote = state('unpublished', 'warning', 'cloud-upload', text('No upstream · publish branch', '未设置上游 · 请发布分支'));
+  else if (s.ahead > 0) {
+    const count = s.ahead;
+    remote = state('ahead', 'ready', 'arrow-up', text(`${count} outgoing ${count === 1 ? 'commit' : 'commits'}`, `${count} 个待推送提交`), s.upstream);
+  } else if (s.trackingKnown === true) remote = state('none', 'muted', 'circle-outline', text('No known outgoing commits', '没有已知的待推送提交'));
+  else remote = state('unknown', 'muted', 'question', text('Outgoing status unknown', '待推送状态未知'));
+
+  return [[text('Commit', '提交'), 'commit', local], [text('Push', '推送'), 'push', remote]].map(([name, kind, item]) => {
+    const description = item.label === item.detail ? item.label : `${item.label} · ${item.detail}`;
+    return `<div class="commit-status-row" data-commit-status="${kind}" data-state="${item.id}" data-tone="${item.tone}" title="${escapeHtml(description)}"><span class="commit-status-name">${name}</span>${icon(item.symbol, item.tone === 'progress' ? 'codicon-modifier-spin' : '')}<span class="commit-status-value ${item.id === 'missing-remote' || item.id === 'missing-upstream' || item.id === 'unpublished' ? 'commit-publish-hint' : ''}">${escapeHtml(item.label)}</span></div>`;
+  }).join('');
 }
 
 function renderChanges(s) {
@@ -1227,7 +1350,7 @@ function renderChanges(s) {
     <div class="commit-upper" id="kivo-commit-upper" ${ui.commitZoneResized && !ui.recentCommitsCollapsed ? `style="flex-basis:${ui.commitZonePercent}%"` : ''}>
       ${renderCommitRepository(s)}
       ${renderCommitToolbar(s)}
-      ${s.branch !== '(detached)' && (!s.upstream || s.upstreamGone) ? `<div class="commit-publish-hint" role="status">${icon('cloud')}${escapeHtml(s.upstreamGone ? 'Remote branch missing · publish it again' : s.remotes?.length === 0 ? 'No remote configured · add a Git remote to publish' : 'Local branch · no upstream yet')}</div>` : ''}
+      <div class="commit-status-board" role="status" aria-atomic="true" lang="${document.body.dataset.locale === 'zh' ? 'zh' : 'en'}">${commitPushStatusRows(s)}</div>
       ${renderConflictState(s)}
       <div class="commit-changes-heading" role="heading" aria-level="2"><span class="changes-heading-label">${kivoIcon('changes', 'changes-heading-icon')}<span>Changes</span></span><small>${filtersActive ? `${filteredTotal}/${s.changes.length}` : s.changes.length} ${s.changes.length === 1 ? 'file' : 'files'}</small></div>
       ${ui.changeSearchOpen ? `<div class="commit-change-search"><input id="change-search" type="search" aria-label="Search changed files by path or status" placeholder="Path or status…" value="${escapeHtml(ui.changeQuery)}"><select id="change-filter" aria-label="Filter changed files by type or Git state"><option value="all" ${ui.changeFilter === 'all' ? 'selected' : ''}>All changes</option><option value="staged" ${ui.changeFilter === 'staged' ? 'selected' : ''}>Staged</option><option value="worktree" ${ui.changeFilter === 'worktree' ? 'selected' : ''}>Working tree</option><option value="modified" ${ui.changeFilter === 'modified' ? 'selected' : ''}>Modified</option><option value="added" ${ui.changeFilter === 'added' ? 'selected' : ''}>Added</option><option value="deleted" ${ui.changeFilter === 'deleted' ? 'selected' : ''}>Deleted</option><option value="renamed" ${ui.changeFilter === 'renamed' ? 'selected' : ''}>Renamed</option><option value="untracked" ${ui.changeFilter === 'untracked' ? 'selected' : ''}>Untracked</option><option value="conflict" ${ui.changeFilter === 'conflict' ? 'selected' : ''}>Conflicts</option></select><kbd>Esc</kbd></div>` : ''}
@@ -1523,6 +1646,7 @@ function graphPoint(lane, laneWidth = 18) {
 
 function renderGraphSvg(commit, graph, rowHeight = GRAPH_ROW_HEIGHT) {
   const lines = [];
+  const laneStyle = lane => `data-lane="${lane}"`;
   const { laneWidth, graphWidth, nodeRadius, mergeNodeRadius } = graph;
   const midpoint = rowHeight / 2;
   const transitions = commit.laneTransitions || [];
@@ -1532,31 +1656,33 @@ function renderGraphSvg(commit, graph, rowHeight = GRAPH_ROW_HEIGHT) {
     for (const transition of throughTransitions) {
       const from = graphPoint(transition.from, laneWidth);
       const to = graphPoint(transition.to, laneWidth);
-      lines.push(`<path class="graph-edge through graph-lane-${transition.from % 6}" d="M ${from} 0 C ${from} ${midpoint * .58}, ${to} ${midpoint * 1.42}, ${to} ${rowHeight}"/>`);
+      const path = from === to ? `M ${from} 0 V ${rowHeight}` : `M ${from} 0 C ${from} ${midpoint * .58}, ${to} ${midpoint * 1.42}, ${to} ${rowHeight}`;
+      lines.push(`<path class="graph-edge through graph-lane-${transition.from % 6}" ${laneStyle(transition.from)} d="${path}"/>`);
     }
     if (commit.hasIncoming) {
       const x = graphPoint(commit.lane, laneWidth);
-      lines.push(`<path class="graph-edge incoming graph-lane-${commit.lane % 6}" d="M ${x} 0 L ${x} ${midpoint}"/>`);
+      lines.push(`<path class="graph-edge incoming graph-lane-${commit.lane % 6}" ${laneStyle(commit.lane)} d="M ${x} 0 V ${midpoint}"/>`);
     }
     for (const transition of parentTransitions) {
       const from = graphPoint(commit.lane, laneWidth);
       const to = graphPoint(transition.to, laneWidth);
-      lines.push(`<path class="graph-edge outgoing graph-lane-${transition.to % 6}" d="M ${from} ${midpoint} C ${from} ${midpoint + midpoint * .44}, ${to} ${midpoint + midpoint * .52}, ${to} ${rowHeight}"/>`);
+      const path = from === to ? `M ${from} ${midpoint} V ${rowHeight}` : `M ${from} ${midpoint} C ${from} ${midpoint + midpoint * .35}, ${to} ${midpoint + midpoint * .65}, ${to} ${rowHeight}`;
+      lines.push(`<path class="graph-edge outgoing graph-lane-${transition.to % 6}" ${laneStyle(transition.to)} d="${path}"/>`);
     }
   } else {
     for (const incomingLane of commit.incomingLanes || []) {
       const from = graphPoint(incomingLane, laneWidth);
       const to = graphPoint(commit.lane, laneWidth);
-      lines.push(`<path class="graph-edge incoming graph-lane-${incomingLane % 6}" d="M ${from} 0 C ${from} ${midpoint * .48}, ${to} ${midpoint * .56}, ${to} ${midpoint}"/>`);
+      lines.push(`<path class="graph-edge incoming graph-lane-${incomingLane % 6}" ${laneStyle(incomingLane)} d="M ${from} 0 C ${from} ${midpoint * .48}, ${to} ${midpoint * .56}, ${to} ${midpoint}"/>`);
     }
     for (const parentLane of commit.parentLanes || []) {
       const from = graphPoint(commit.lane, laneWidth);
       const to = graphPoint(parentLane, laneWidth);
-      lines.push(`<path class="graph-edge outgoing graph-lane-${parentLane % 6}" d="M ${from} ${midpoint} C ${from} ${midpoint + midpoint * .44}, ${to} ${midpoint + midpoint * .52}, ${to} ${rowHeight}"/>`);
+      lines.push(`<path class="graph-edge outgoing graph-lane-${parentLane % 6}" ${laneStyle(parentLane)} d="M ${from} ${midpoint} C ${from} ${midpoint + midpoint * .44}, ${to} ${midpoint + midpoint * .52}, ${to} ${rowHeight}"/>`);
     }
   }
-  lines.push(`<circle class="graph-node graph-lane-${commit.lane % 6} ${commit.parents?.length > 1 ? 'merge' : ''}" cx="${graphPoint(commit.lane, laneWidth)}" cy="${midpoint}" r="${commit.parents?.length > 1 ? mergeNodeRadius : nodeRadius}"/>`);
-  return `<svg class="graph-svg" viewBox="0 0 ${graphWidth} ${rowHeight}" preserveAspectRatio="none" aria-hidden="true">${lines.join('')}</svg>`;
+  const node = `<circle class="graph-node graph-lane-${commit.lane % 6} ${commit.parents?.length > 1 ? 'merge' : ''}" ${laneStyle(commit.lane)} cx="${graphPoint(commit.lane, laneWidth)}" cy="${midpoint}" r="${commit.parents?.length > 1 ? mergeNodeRadius : nodeRadius}"/>`;
+  return `<svg class="graph-svg" viewBox="0 0 ${graphWidth} ${rowHeight}" preserveAspectRatio="none" aria-hidden="true">${lines.join('')}</svg><svg class="graph-node-svg" viewBox="0 0 ${graphWidth} ${rowHeight}" aria-hidden="true">${node}</svg>`;
 }
 
 function buildPathTree(items) {
@@ -1606,19 +1732,19 @@ function renderCommitDetails(s) {
   const metadataHeight = Math.round(Math.max(COMMIT_METADATA_MIN_HEIGHT, ui.commitMetadataHeight));
   return `<aside class="commit-detail" id="kivo-log-details" aria-label="Commit details" style="--commit-metadata-height:${metadataHeight}px">
     ${toolbar}
+    <div class="commit-metadata" tabindex="0" aria-label="Commit metadata">
+      <div class="commit-detail-head"><div><strong>${escapeHtml(commit.subject)}</strong></div></div>
+      <div class="commit-detail-meta"><span>${escapeHtml(commit.author)} · ${absoluteTime(commit.date)}</span><code title="${escapeHtml(commit.hash)}">${escapeHtml(commit.shortHash || commit.hash.slice(0, 7))}</code></div>
+      ${commit.refs?.length ? `<div class="commit-detail-refs">${commit.refs.map(renderRef).join('')}</div>` : ''}
+      ${details?.body && details.body !== details.subject ? `<p class="commit-body">${escapeHtml(details.body)}</p>` : ''}
+      ${details?.parents?.length ? `<div class="detail-parents"><span>Parents</span>${details.parents.map((parent) => `<code title="${escapeHtml(parent)}">${escapeHtml(parent.slice(0, 8))}</code>`).join('')}</div>` : ''}
+    </div>
+    <div class="commit-detail-splitter" data-commit-detail-splitter role="separator" aria-label="Resize commit information and changed files" aria-orientation="horizontal" aria-valuemin="${COMMIT_METADATA_MIN_HEIGHT}" aria-valuenow="${metadataHeight}" tabindex="0" title="Drag to resize. Double-click to reset."></div>
     <div class="commit-files-panel">
       <div class="details-section-heading"><span>Changed Files</span><span class="details-count">${details ? details.files.length : ''}</span></div>
       ${ui.commitDetailsLoading && !details ? `<div class="detail-loading">${icon('loading', 'codicon-modifier-spin')} Loading changed files…</div>` : ''}
       ${ui.commitDetailsError && !details ? `<div class="detail-error" role="alert">${icon('error')}<span>${escapeHtml(ui.commitDetailsError)}</span><button class="text-button" data-action="retry-commit">Retry</button></div>` : ''}
       ${details ? `<div class="commit-files file-tree">${details.files.length ? renderCommitFileTree(buildPathTree(details.files)) : '<span class="detail-muted">No file changes reported</span>'}</div>` : ''}
-    </div>
-    <div class="commit-detail-splitter" data-commit-detail-splitter role="separator" aria-label="Resize changed files and commit information" aria-orientation="horizontal" aria-valuemin="${COMMIT_METADATA_MIN_HEIGHT}" aria-valuenow="${metadataHeight}" tabindex="0" title="Drag to resize. Double-click to reset."></div>
-    <div class="commit-metadata" tabindex="0" aria-label="Commit metadata">
-      <div class="commit-detail-head"><div><span class="detail-kicker">${escapeHtml(commit.shortHash || commit.hash.slice(0, 7))}</span><strong>${escapeHtml(commit.subject)}</strong></div></div>
-      <div class="commit-detail-meta"><span>${escapeHtml(commit.author)} · ${absoluteTime(commit.date)}</span><code>${escapeHtml(commit.hash)}</code></div>
-      <div class="commit-detail-refs">${commit.refs.map(renderRef).join('') || '<span class="detail-muted">No branch label</span>'}</div>
-      ${details?.body && details.body !== details.subject ? `<p class="commit-body">${escapeHtml(details.body)}</p>` : ''}
-      ${details?.parents?.length ? `<div class="detail-parents"><span>Parents</span>${details.parents.map((parent) => `<code>${escapeHtml(parent.slice(0, 8))}</code>`).join('')}</div>` : ''}
     </div>
   </aside>`;
 }
@@ -1752,40 +1878,103 @@ function renderCommitContextMenu() {
   </div>`;
 }
 
-function renderLogActionRail(s) {
-  return `<aside class="log-action-rail" aria-label="History actions">
-    <button class="idea-toolbar-button" data-action="choose-worktree" aria-label="Manage Worktrees" title="Worktrees" ${ui.busy ? 'disabled' : ''}>${icon('folder-opened')}<span class="rail-text">Worktrees</span></button>
-    <button class="idea-toolbar-button" data-action="stashes" aria-label="Open saved Stashes" title="Stashes" ${ui.busy ? 'disabled' : ''}>${icon('archive')}<span class="rail-text">Stashes</span></button>
-    <button class="idea-toolbar-button" data-action="show-changes" aria-label="Open Commit tool window" title="Open Commit tool window">${kivoIcon('changes', 'kivo-toolbar-mark')}<span class="rail-text">Commit</span></button>
-    ${s.repositoryCount > 1 ? `<button class="idea-toolbar-button" data-action="choose-repository" aria-label="Choose repository, current ${escapeHtml(s.repositoryName)}" title="Repository: ${escapeHtml(s.repositoryName)}" ${ui.busy ? 'disabled' : ''}>${icon('repo')}<span class="rail-text">Repos</span></button>` : ''}
-    <button class="idea-toolbar-button" data-action="refresh" aria-label="Refresh History" title="Refresh History">${icon('refresh')}<span class="rail-text">Refresh</span></button>
-    <button class="idea-toolbar-button" data-action="fetch" aria-label="Fetch remote updates" title="Fetch remote updates" ${ui.busy || ui.syncPhase === 'fetching' ? 'disabled' : ''}>${icon(ui.syncPhase === 'fetching' ? 'loading' : 'cloud-download', ui.syncPhase === 'fetching' ? 'codicon-modifier-spin' : '')}<span class="rail-text">Fetch</span></button>
+function renderLogActionToolbar(s) {
+  const locate = document.body.dataset.locale === 'zh' ? '定位当前提交' : 'Locate current commit';
+  const head = s.headOid || s.commits.find(commit => commit.refs?.some(ref => ref.current))?.hash;
+  const canLocate = head && !ui.historyRefLoading && !ui.historySearchLoading && graphCommits().some(commit => commit.hash === head);
+  return `<div class="log-action-toolbar" role="group" aria-label="History actions">
+    <button class="idea-toolbar-button" data-action="choose-worktree" aria-label="Manage Worktrees" title="Worktrees" ${ui.busy ? 'disabled' : ''}>${icon('folder-opened')}<span class="log-action-label">Worktrees</span></button>
+    <button class="idea-toolbar-button" data-action="stashes" aria-label="Open saved Stashes" title="Stashes" ${ui.busy ? 'disabled' : ''}>${icon('archive')}<span class="log-action-label">Stashes</span></button>
+    <button class="idea-toolbar-button" data-action="show-changes" aria-label="Open Commit tool window" title="Open Commit tool window">${kivoIcon('changes', 'kivo-toolbar-mark')}<span class="log-action-label">Commit</span></button>
+    ${s.repositoryCount > 1 ? `<button class="idea-toolbar-button" data-action="choose-repository" aria-label="Choose repository, current ${escapeHtml(s.repositoryName)}" title="Repository: ${escapeHtml(s.repositoryName)}" ${ui.busy ? 'disabled' : ''}>${icon('repo')}<span class="log-action-label">Repos</span></button>` : ''}
+    <button class="idea-toolbar-button" data-action="refresh" aria-label="Refresh History" title="Refresh History">${icon('refresh')}<span class="log-action-label">Refresh</span></button>
+    <button class="idea-toolbar-button" data-action="fetch" aria-label="Fetch remote updates" title="Fetch remote updates" ${ui.busy || ui.syncPhase === 'fetching' ? 'disabled' : ''}>${icon(ui.syncPhase === 'fetching' ? 'loading' : 'cloud-download', ui.syncPhase === 'fetching' ? 'codicon-modifier-spin' : '')}<span class="log-action-label">Fetch</span></button>
     <span class="idea-toolbar-divider" aria-hidden="true"></span>
-    <button class="idea-toolbar-button" data-action="toggle-history-focus" aria-label="${ui.historyFocusMode ? 'Show History side panels' : 'Focus on commit history'}" title="${ui.historyFocusMode ? 'Show branches and commit details' : 'Focus on commit history'}" aria-pressed="${ui.historyFocusMode}">${icon(ui.historyFocusMode ? 'screen-full' : 'screen-normal')}<span class="rail-text">${ui.historyFocusMode ? 'Panels' : 'Focus'}</span></button>
-  </aside>`;
+    <button class="idea-toolbar-button" data-action="locate-history-head" data-head="${escapeHtml(head || '')}" aria-label="${locate}" title="${canLocate ? locate : document.body.dataset.locale === 'zh' ? '当前提交不在此列表中' : 'Current commit is outside this list'}" ${canLocate ? '' : 'disabled'}>${icon('target')}<span class="log-action-label">HEAD</span></button>
+    <button class="idea-toolbar-button" data-action="toggle-history-focus" aria-label="${ui.historyFocusMode ? 'Show History side panels' : 'Focus on commit history'}" title="${ui.historyFocusMode ? 'Show branches and commit details' : 'Focus on commit history'}" aria-pressed="${ui.historyFocusMode}">${icon(ui.historyFocusMode ? 'screen-full' : 'screen-normal')}<span class="log-action-label">${ui.historyFocusMode ? 'Panels' : 'Focus'}</span></button>
+  </div>`;
 }
 
-function renderLogFilterBar(s, commits, filtersActive) {
-  const branchOptions = [...new Set([...s.branches, ...(s.tags || [])].map((branch) => branch.name))].sort((a, b) => a.localeCompare(b));
+function renderLogFilterBar(s, commits) {
+  const zh = document.body.dataset.locale === 'zh';
+  const text = (en, cn) => zh ? cn : en;
+  const ref = ui.graphBranchFilter;
+  const branchOptions = [...new Set([ref, ...[...s.branches, ...(s.tags || [])].map((branch) => branch.name)])]
+    .filter(Boolean).sort((a, b) => a.localeCompare(b));
   const authorOptions = [...new Set(s.commits.map((commit) => commit.author))].sort((a, b) => a.localeCompare(b));
+  const filterCount = [ui.graphAuthorFilter.trim(), ui.graphAgeFilter !== 'all', ui.graphPathFilter.trim()].filter(Boolean).length;
+  const canReset = Boolean(filterCount || ref || ui.graphQuery.trim());
   const countLabel = historySearchActive()
-    ? ui.historySearchLoading ? 'Searching history…' : `${commits.length}${ui.historySearch?.hasMore ? '+ matching' : ' matching'}`
-    : filtersActive ? `${commits.length} of ${s.commits.length}${s.commitsHasMore ? ' loaded' : ''}` : `${s.commits.length}${s.commitsHasMore ? '+ loaded' : ''}`;
-  return `<div class="log-filter-bar"><div class="graph-toolbar-head">
-    <label class="graph-search log-search">${icon('search')}<input id="graph-search" aria-label="Search by text or hash" placeholder="Search commits or hash" value="${escapeHtml(ui.graphQuery)}"></label>
-    <div class="graph-filters" aria-label="History filters">
-      <label class="graph-filter"><span>Ref</span><select data-graph-filter="branch" aria-label="Filter by branch or tag"><option value="">All refs</option>${branchOptions.map((branch) => `<option value="${escapeHtml(branch)}" ${ui.graphBranchFilter === branch ? 'selected' : ''}>${escapeHtml(branch)}</option>`).join('')}</select></label>
-      <label class="graph-filter"><span>User</span><input id="graph-author" aria-label="Filter by author" list="graph-author-options" placeholder="Any" value="${escapeHtml(ui.graphAuthorFilter)}"><datalist id="graph-author-options">${authorOptions.map((author) => `<option value="${escapeHtml(author)}"></option>`).join('')}</datalist></label>
-      <label class="graph-filter"><span>Date</span><select data-graph-filter="age" aria-label="Filter by date"><option value="all" ${ui.graphAgeFilter === 'all' ? 'selected' : ''}>All</option><option value="7d" ${ui.graphAgeFilter === '7d' ? 'selected' : ''}>7 days</option><option value="30d" ${ui.graphAgeFilter === '30d' ? 'selected' : ''}>30 days</option><option value="90d" ${ui.graphAgeFilter === '90d' ? 'selected' : ''}>90 days</option></select></label>
-      <label class="graph-filter path-filter"><span>Paths</span><input id="graph-path" aria-label="Filter by path" placeholder="Any" value="${escapeHtml(ui.graphPathFilter)}"></label>
-      ${filtersActive ? '<button class="text-button graph-clear" data-action="clear-graph-filters">Clear</button>' : ''}
-    </div><span class="log-result-count" aria-live="polite">${countLabel}</span>
+    ? ui.historySearchLoading ? text('Searching history…', '正在搜索历史记录…')
+      : `${commits.length}${ui.historySearch?.hasMore ? '+' : ''}${text(' matching', ' 条匹配')}`
+    : ref ? `${commits.length}${text(' of ', ' / ')}${s.commits.length}${text(s.commitsHasMore ? ' loaded' : '', ' 条')}`
+      : text(`${s.commits.length}${s.commitsHasMore ? '+ loaded' : ''}`, `已加载 ${s.commits.length}${s.commitsHasMore ? '+' : ''} 条`);
+  const allRefs = text('All refs', '所有引用');
+  const filters = text('Advanced filters', '高级筛选');
+  const filterLabel = filterCount ? `${filters}${text(`, ${filterCount} active`, `，已启用 ${filterCount} 项`)}` : filters;
+  const resetLabel = text('Reset search and filters', '重置搜索和筛选条件');
+  return `<div class="log-filter-bar" lang="${zh ? 'zh' : 'en'}"><div class="graph-toolbar-head">
+    <label class="graph-search log-search">${icon('search')}<input id="graph-search" aria-label="${text('Search by text or hash', '按文本或哈希搜索')}" placeholder="${text('Search commits or hash', '搜索提交或哈希')}" value="${escapeHtml(ui.graphQuery)}"></label>
+    <select id="kivo-history-filter-ref" class="history-ref-select" data-graph-filter="branch" aria-label="${text('Filter by branch or tag', '按分支或标签筛选')}" title="${escapeHtml(ref || allRefs)}"><option value="" ${ref ? '' : 'selected'}>${allRefs}</option>${branchOptions.map((branch) => `<option value="${escapeHtml(branch)}" ${ref === branch ? 'selected' : ''}>${escapeHtml(branch)}</option>`).join('')}</select>
+    <div class="history-filter-disclosure">
+      <button type="button" id="kivo-history-filters-trigger" class="history-filters-trigger" data-action="toggle-history-filters" aria-controls="kivo-history-filters" aria-expanded="${ui.historyFiltersOpen}" aria-label="${filterLabel}" title="${filterLabel}">${icon('filter')}<span>${filters}</span><span class="history-filters-count" aria-hidden="true" ${filterCount ? '' : 'hidden'}>${filterCount}</span>${icon('chevron-down')}</button>
+      <div class="history-filters-panel" id="kivo-history-filters" role="group" aria-labelledby="kivo-history-filters-title" ${ui.historyFiltersOpen ? '' : 'hidden'}>
+        <strong id="kivo-history-filters-title">${filters}</strong>
+        <div class="graph-filters">
+          <label class="graph-filter"><span>${text('Author', '作者')}</span><input id="graph-author" aria-label="${text('Filter by author', '按作者筛选')}" list="graph-author-options" placeholder="${text('Any', '不限')}" value="${escapeHtml(ui.graphAuthorFilter)}"><datalist id="graph-author-options">${authorOptions.map((author) => `<option value="${escapeHtml(author)}"></option>`).join('')}</datalist></label>
+          <label class="graph-filter"><span>${text('Date', '日期')}</span><select id="kivo-history-filter-date" data-graph-filter="age" aria-label="${text('Filter by date', '按日期筛选')}"><option value="all" ${ui.graphAgeFilter === 'all' ? 'selected' : ''}>${text('All', '不限')}</option><option value="7d" ${ui.graphAgeFilter === '7d' ? 'selected' : ''}>${text('7 days', '最近 7 天')}</option><option value="30d" ${ui.graphAgeFilter === '30d' ? 'selected' : ''}>${text('30 days', '最近 30 天')}</option><option value="90d" ${ui.graphAgeFilter === '90d' ? 'selected' : ''}>${text('90 days', '最近 90 天')}</option></select></label>
+          <label class="graph-filter path-filter"><span>${text('Paths', '路径')}</span><input id="graph-path" aria-label="${text('Filter by path', '按路径筛选')}" placeholder="${text('Any', '不限')}" value="${escapeHtml(ui.graphPathFilter)}"></label>
+        </div>
+        <footer><button type="button" id="kivo-history-filters-reset" class="text-button graph-clear" data-action="clear-graph-filters" aria-label="${resetLabel}" title="${resetLabel}" ${canReset ? '' : 'disabled'}>${text('Reset', '重置')}</button></footer>
+      </div>
+    </div>
+    <span class="log-result-count" aria-live="polite" title="${countLabel}">${countLabel}</span>
   </div></div>`;
 }
 
+function positionHistoryFilters() {
+  if (!ui.historyFiltersOpen) return;
+  const panel = app.querySelector('#kivo-history-filters');
+  const row = panel?.closest('.graph-toolbar-head');
+  if (!row) return;
+  const { top, bottom } = row.getBoundingClientRect();
+  const below = window.innerHeight - bottom - 10;
+  const above = top - 10;
+  const opensAbove = above > below && panel.scrollHeight + 2 > below;
+  panel.classList.toggle('opens-above', opensAbove);
+  panel.style.setProperty('--history-filters-max-height', `${Math.max(0, opensAbove ? above : below)}px`);
+}
+
+function focusHistoryFilter(selector) {
+  if (ui.historyFiltersOpen) app.querySelector(selector)?.focus();
+}
+
+function closeHistoryFilters(returnFocus = false) {
+  if (!ui.historyFiltersOpen) return;
+  ui.historyFiltersOpen = false;
+  render();
+  if (returnFocus) app.querySelector('#kivo-history-filters-trigger')?.focus({ preventScroll: true });
+}
+
+const historyDateFormats = new Map();
 function renderLogDate(date) {
   const full = absoluteTime(date);
-  return `<time class="log-date" datetime="${escapeHtml(date)}" title="${escapeHtml(full)}" aria-label="${escapeHtml(full)}"><span class="log-time-full">${full}</span><span class="log-time-compact" aria-hidden="true">${full.slice(5, 16)}</span></time>`;
+  const timestamp = new Date(date);
+  const now = new Date();
+  const locale = document.body.dataset.locale === 'zh' ? 'zh-CN' : 'en';
+  const age = now - timestamp;
+  const day = value => Date.UTC(value.getFullYear(), value.getMonth(), value.getDate());
+  if (!historyDateFormats.has(locale)) historyDateFormats.set(locale, {
+    relative: new Intl.RelativeTimeFormat(locale, { numeric: 'auto', style: 'short' }),
+    recent: new Intl.DateTimeFormat(locale, { month: 'short', day: 'numeric' }),
+    older: new Intl.DateTimeFormat(locale, { year: 'numeric', month: 'short', day: 'numeric' })
+  });
+  const { relative, recent, older } = historyDateFormats.get(locale);
+  const label = !Number.isFinite(age) ? full : age >= 0 && age < 3600000 ? relative.format(-Math.floor(age / 60000), 'minute')
+    : age >= 0 && day(now) === day(timestamp) ? relative.format(-Math.floor(age / 3600000), 'hour')
+    : day(now) - day(timestamp) === 86400000 ? relative.format(-1, 'day')
+    : (timestamp.getFullYear() === now.getFullYear() ? recent : older).format(timestamp);
+  return `<time class="log-date" datetime="${escapeHtml(date)}" title="${escapeHtml(full)}" aria-label="${escapeHtml(full)}"><span class="log-time-compact" aria-hidden="true">${escapeHtml(label)}</span></time>`;
 }
 
 function renderGraph(s) {
@@ -1793,12 +1982,11 @@ function renderGraph(s) {
   const hasMore = historySearchActive() ? ui.historySearch?.hasMore : s.commitsHasMore;
   const windowed = graphRenderWindow(commits);
   const visibleCommits = commits.slice(windowed.start, windowed.end);
-  const graph = graphLayoutFor(visibleCommits);
+  const graph = graphLayoutFor(commits);
   const { laneCount, graphWidth } = graph;
   const focusHash = ui.focusedCommitHash && commits.some((commit) => commit.hash === ui.focusedCommitHash)
     ? ui.focusedCommitHash
     : commits[0]?.hash;
-  const filtersActive = Boolean(ui.graphBranchFilter || ui.graphAuthorFilter || ui.graphAgeFilter !== 'all' || ui.graphQuery.trim() || ui.graphPathFilter.trim());
   const searchingHash = /^[0-9a-f]{4,64}$/i.test(ui.graphQuery.trim());
   const branchWidth = Math.round(clamp(ui.logBranchWidth, LOG_BRANCH_MIN_WIDTH, LOG_BRANCH_MAX_WIDTH));
   const detailWidth = Math.round(clamp(ui.logDetailWidth, LOG_DETAIL_MIN_WIDTH, LOG_DETAIL_MAX_WIDTH));
@@ -1809,15 +1997,15 @@ function renderGraph(s) {
   const detailMaximum = detailUsesRows ? Math.max(LOG_DETAIL_DEFAULT_HEIGHT * 2, detailHeight) : LOG_DETAIL_MAX_WIDTH;
   return `<div class="graph-view log-view" role="tabpanel" aria-label="Kivo Git History">
     <div class="log-workspace ${ui.historyFocusMode ? 'history-focus' : ''}" style="--log-branch-width:${branchWidth}px;--log-detail-width:${detailWidth}px;--log-detail-height:${detailHeight}px">
-      ${renderLogActionRail(s)}
+      ${renderLogActionToolbar(s)}
       ${renderLogBranchPane(s)}
       <div class="log-splitter" data-log-splitter role="separator" aria-label="Resize History branch tree" aria-controls="kivo-log-branches kivo-log-history" aria-orientation="vertical" aria-valuemin="${LOG_BRANCH_MIN_WIDTH}" aria-valuemax="${LOG_BRANCH_MAX_WIDTH}" aria-valuenow="${branchWidth}" tabindex="0" title="Drag to resize the branch tree. Double-click to reset."></div>
       <section class="log-history-pane" id="kivo-log-history" aria-label="Commit history">${renderConflictState(s)}
-        ${renderLogFilterBar(s, commits, filtersActive)}
+        ${renderLogFilterBar(s, commits)}
         ${ui.selectedCommitHashes.size > 1 && !ui.commitRangeDragging ? `<div class="history-selection-bar"><span role="status">${ui.selectedCommitHashes.size} commits selected</span><button class="history-selection-action" data-action="cherry-pick-selected" title="${escapeHtml(cherryPickUnavailable() || `Apply to ${s.branch}`)}" ${cherryPickUnavailable() ? 'disabled' : ''}>Cherry-pick…</button><button class="idea-toolbar-button" data-action="close-commit" aria-label="Clear selected commits">${icon('close')}</button></div>` : ''}
-        <div class="log-column-header" aria-hidden="true" style="--graph-width:${graphWidth}px"><span>AUTHOR</span><span>GRAPH</span><span>COMMIT</span><span>DATE</span></div>
-        <div class="graph-list ${graph.compressed ? 'graph-compressed' : ''} ${ui.graphLoadingMore ? 'is-loading' : ''}" id="kivo-graph-list" data-graph-list role="listbox" aria-multiselectable="true" aria-label="Commit history${graph.compressed ? `, compact ${laneCount}-lane topology` : ''}" aria-busy="${ui.graphLoadingMore || ui.historyRefLoading || ui.historySearchLoading}" aria-setsize="${commits.length}" style="--lane-count:${laneCount};--graph-width:${graphWidth}px;--graph-row-height:${GRAPH_ROW_HEIGHT}px">${ui.historyRefLoading || ui.historySearchLoading && !commits.length ? `<div class="inline-empty" role="status">${icon('loading', 'codicon-modifier-spin')} ${ui.historyRefLoading ? 'Loading branch history…' : 'Searching complete history…'}</div>` : commits.length ? `<div class="graph-rows" id="kivo-graph-rows" style="height:${windowed.totalHeight}px"><div class="graph-virtual-spacer" id="kivo-graph-top" aria-hidden="true" style="height:${windowed.topSpacer}px"></div><div class="graph-row-window" id="kivo-graph-window" data-graph-window data-window-start="${windowed.start}" data-window-end="${windowed.end}" style="height:${visibleCommits.length * GRAPH_ROW_HEIGHT}px">${visibleCommits.map((commit, index) => `<article class="graph-row ${commit.unpushedTo ? 'unpushed' : ''} ${commit.parents.length > 1 ? 'merge-row' : ''} ${ui.selectedCommitHashes.has(commit.hash) ? 'selected' : ''}" data-commit="${escapeHtml(commit.hash)}" data-hash="${escapeHtml(commit.hash)}" role="option" aria-selected="${ui.selectedCommitHashes.has(commit.hash)}" aria-posinset="${windowed.start + index + 1}" tabindex="${focusHash === commit.hash ? '0' : '-1'}">
-          <span class="log-author" title="${escapeHtml(commit.author)}">${escapeHtml(commit.author)}</span><div class="graph-canvas">${renderGraphSvg(commit, graph)}</div><div class="graph-commit"><div class="log-subject">${renderUnpushedBadge(commit)}<strong title="${escapeHtml(commit.subject)}">${escapeHtml(commit.subject)}</strong>${renderRowRefs(commit.refs)}</div><span class="log-meta"><code>${escapeHtml(commit.shortHash)}</code>${commit.parents?.length > 1 ? '<span class="merge-note">Merge</span>' : ''}</span></div>${renderLogDate(commit.date)}
+        <div class="log-column-header" aria-hidden="true" style="--graph-width:${graphWidth}px"><span data-log-column="graph">${document.body.dataset.locale === 'zh' ? '分支图' : 'Graph'}</span><span data-log-column="commit">${document.body.dataset.locale === 'zh' ? '提交' : 'Commit'}</span></div>
+        <div class="graph-list ${graph.compressed ? 'graph-compressed' : ''} ${ui.graphLoadingMore ? 'is-loading' : ''}" id="kivo-graph-list" data-graph-list role="listbox" aria-multiselectable="true" aria-label="Commit history${graph.compressed ? `, compact ${laneCount}-lane topology` : ''}" aria-busy="${ui.graphLoadingMore || ui.historyRefLoading || ui.historySearchLoading}" aria-setsize="${commits.length}" style="--lane-count:${laneCount};--graph-width:${graphWidth}px;--graph-row-height:${GRAPH_ROW_HEIGHT}px">${ui.historyRefLoading || ui.historySearchLoading && !commits.length ? `<div class="inline-empty" role="status">${icon('loading', 'codicon-modifier-spin')} ${ui.historyRefLoading ? 'Loading branch history…' : 'Searching complete history…'}</div>` : commits.length ? `<div class="graph-rows" id="kivo-graph-rows"><div class="graph-virtual-spacer" id="kivo-graph-top" aria-hidden="true" style="height:${windowed.topSpacer}px"></div><div class="graph-row-window" id="kivo-graph-window" data-graph-window data-window-start="${windowed.start}" data-window-end="${windowed.end}">${visibleCommits.map((commit, index) => `<article class="graph-row ${commit.unpushedTo ? 'unpushed' : ''} ${commit.parents.length > 1 ? 'merge-row' : ''} ${ui.selectedCommitHashes.has(commit.hash) ? 'selected' : ''}" data-commit="${escapeHtml(commit.hash)}" data-hash="${escapeHtml(commit.hash)}" role="option" aria-selected="${ui.selectedCommitHashes.has(commit.hash)}" aria-posinset="${windowed.start + index + 1}" tabindex="${focusHash === commit.hash ? '0' : '-1'}">
+          <div class="graph-canvas">${renderGraphSvg(commit, graph)}</div><div class="graph-commit"><div class="log-subject"><strong title="${escapeHtml(commit.subject)}">${escapeHtml(commit.subject)}</strong></div><div class="log-meta"><span class="log-author">${escapeHtml(commit.author)}</span><code title="${escapeHtml(commit.hash)}">${escapeHtml(commit.shortHash)}</code>${renderLogDate(commit.date)}${renderUnpushedBadge(commit)}${renderRowRefs(commit.refs)}</div></div><span class="commit-row-menu" data-commit-row-menu aria-hidden="true" title="Commit actions">${icon('ellipsis')}</span>
         </article>`).join('')}</div><div class="graph-virtual-spacer" id="kivo-graph-bottom" aria-hidden="true" style="height:${windowed.bottomSpacer}px"></div></div>` : `<div class="inline-empty" role="status">${ui.historySearchError ? `Search failed. <button data-action="retry-history-search">Retry</button>` : historySearchActive() ? 'No matching commits in this repository' : 'No commits yet'}</div>`}${commits.length && !ui.historyRefLoading ? `<div class="graph-load-sentinel" role="status">${ui.graphLoadingMore ? `${icon('loading', 'codicon-modifier-spin')}<span>Loading older commits…</span>` : hasMore ? 'Scroll to the bottom for older commits' : 'End of history'}</div>` : ''}</div>
       </section>
       <div class="log-detail-splitter" data-log-detail-splitter role="separator" aria-label="Resize commit history and details" aria-controls="kivo-log-history kivo-log-details" aria-orientation="${detailUsesRows ? 'horizontal' : 'vertical'}" aria-valuemin="${detailMinimum}" aria-valuemax="${detailMaximum}" aria-valuenow="${detailSize}" tabindex="0" title="Drag to resize. Double-click to reset."></div>
@@ -1832,13 +2020,12 @@ function logBranchBounds(splitter) {
   const workspace = splitter.closest('.log-workspace');
   const compact = window.matchMedia('(max-width: 860px)').matches;
   const narrow = window.matchMedia('(max-width: 1180px)').matches;
-  const railWidth = compact || narrow ? 30 : 56;
   const detailWidth = compact ? 0 : ui.logDetailWidth;
   const historyMinimum = compact ? 220 : narrow ? 300 : 430;
   const splitterWidth = compact ? 6 : 12;
   const availableWidth = workspace?.clientWidth || 0;
   const maximum = availableWidth
-    ? Math.min(LOG_BRANCH_MAX_WIDTH, Math.max(LOG_BRANCH_MIN_WIDTH, availableWidth - railWidth - splitterWidth - detailWidth - historyMinimum))
+    ? Math.min(LOG_BRANCH_MAX_WIDTH, Math.max(LOG_BRANCH_MIN_WIDTH, availableWidth - splitterWidth - detailWidth - historyMinimum))
     : LOG_BRANCH_MAX_WIDTH;
   return { minimum: LOG_BRANCH_MIN_WIDTH, maximum };
 }
@@ -1878,9 +2065,8 @@ function startLogResize(event) {
   const pointerId = event.pointerId;
   const move = (pointerEvent) => {
     if (pointerEvent.pointerId !== pointerId) return;
-    const railWidth = app.querySelector('.log-action-rail')?.getBoundingClientRect().width || 32;
     const dividerWidth = splitter.getBoundingClientRect().width || 6;
-    applyLogBranchWidth(splitter, pointerEvent.clientX - workspace.getBoundingClientRect().left - railWidth - dividerWidth / 2);
+    applyLogBranchWidth(splitter, pointerEvent.clientX - workspace.getBoundingClientRect().left - dividerWidth / 2);
   };
   const complete = (pointerEvent) => {
     if (pointerEvent.pointerId === pointerId) finishLogResize(true);
@@ -2033,8 +2219,9 @@ function bindContextMenuDelegation() {
     ui.commitRangeDragging = true;
     const bounds = list.getBoundingClientRect();
     const commits = graphCommits();
-    const index = clamp(Math.floor((clamp(y, bounds.top, bounds.bottom - 1) - bounds.top + list.scrollTop) / GRAPH_ROW_HEIGHT), 0, commits.length - 1);
-    const hash = commits[index]?.hash;
+    const hit = document.elementFromPoint(clamp(x, bounds.left + 1, bounds.right - 2), clamp(y, bounds.top, bounds.bottom - 1))?.closest('[data-commit]');
+    const index = graphIndexAt(graphOffsets(commits), clamp(y, bounds.top, bounds.bottom - 1) - bounds.top + list.scrollTop);
+    const hash = (hit && list.contains(hit) ? hit.dataset.commit : commits[index]?.hash);
     if (!hash || hash === drag.lastHash) return;
     ui.commitSelectionAnchor = drag.anchor;
     drag.lastHash = hash;
@@ -2182,17 +2369,17 @@ function logDetailBounds(splitter) {
   const workspace = splitter.closest('.log-workspace');
   const usesRows = logDetailUsesRows();
   if (usesRows) {
+    const toolbarHeight = workspace?.querySelector('.log-action-toolbar')?.offsetHeight || 0;
     const maximum = workspace?.clientHeight
-      ? Math.max(LOG_DETAIL_MIN_HEIGHT, workspace.clientHeight - 138)
+      ? Math.max(LOG_DETAIL_MIN_HEIGHT, workspace.clientHeight - toolbarHeight - 138)
       : LOG_DETAIL_DEFAULT_HEIGHT * 2;
     return { minimum: LOG_DETAIL_MIN_HEIGHT, maximum };
   }
-  const railWidth = app.querySelector('.log-action-rail')?.getBoundingClientRect().width || 32;
-  const branchWidth = app.querySelector('.log-branch-pane')?.getBoundingClientRect().width || ui.logBranchWidth;
+  const branchWidth = workspace?.querySelector('.log-branch-pane')?.getBoundingClientRect().width || ui.logBranchWidth;
   const historyMinimum = window.matchMedia('(max-width: 1180px)').matches ? 300 : 430;
   const availableWidth = workspace?.clientWidth || 0;
   const maximum = availableWidth
-    ? Math.min(LOG_DETAIL_MAX_WIDTH, Math.max(LOG_DETAIL_MIN_WIDTH, availableWidth - railWidth - branchWidth - 12 - historyMinimum))
+    ? Math.min(LOG_DETAIL_MAX_WIDTH, Math.max(LOG_DETAIL_MIN_WIDTH, availableWidth - branchWidth - 12 - historyMinimum))
     : LOG_DETAIL_MAX_WIDTH;
   return { minimum: LOG_DETAIL_MIN_WIDTH, maximum };
 }
@@ -2329,7 +2516,7 @@ function startCommitDetailResize(event) {
   const pointerId = event.pointerId;
   const move = (pointerEvent) => {
     if (pointerEvent.pointerId !== pointerId) return;
-    applyCommitMetadataHeight(splitter, details.getBoundingClientRect().bottom - pointerEvent.clientY);
+    applyCommitMetadataHeight(splitter, pointerEvent.clientY - details.querySelector('.commit-metadata').getBoundingClientRect().top);
   };
   const complete = (pointerEvent) => {
     if (pointerEvent.pointerId === pointerId) finishCommitDetailResize(true);
@@ -2354,7 +2541,7 @@ function adjustCommitMetadataHeight(event) {
     ? minimum
     : event.key === 'End'
       ? maximum
-      : ui.commitMetadataHeight + (event.key === 'ArrowUp' ? step : -step);
+      : ui.commitMetadataHeight + (event.key === 'ArrowDown' ? step : -step);
   event.preventDefault();
   applyCommitMetadataHeight(splitter, height);
   persist();
@@ -2634,7 +2821,10 @@ function bind() {
   once('[data-file-menu]', 'click', (event) => openFileContextMenu(event, event.currentTarget.closest('[data-file-row]')));
   once('[data-graph-list]', 'scroll', onGraphScroll);
   bindGraphViewport();
-  once('[data-commit]', 'click', (event) => selectCommit(event.currentTarget.dataset.commit, { toggle: event.ctrlKey || event.metaKey, range: event.shiftKey }));
+  once('[data-commit]', 'click', (event) => {
+    if (event.target.closest('[data-commit-row-menu]')) return openCommitContextMenu(event);
+    selectCommit(event.currentTarget.dataset.commit, { toggle: event.ctrlKey || event.metaKey, range: event.shiftKey });
+  });
   once('[data-recent-commit]', 'click', (event) => selectRecentCommit(event.currentTarget.dataset.recentCommit));
   once('[data-recent-retry]', 'click', (event) => selectRecentCommit(event.currentTarget.dataset.recentRetry, true));
   once('[data-recent-history]', 'click', (event) => post('showRecentCommit', { hash: event.currentTarget.dataset.recentHistory }));
@@ -2682,6 +2872,16 @@ function bind() {
       originalPath: button.dataset.commitOriginal || undefined,
       kind: button.dataset.commitKind
     });
+  });
+  once('.history-filter-disclosure', 'keydown', (event) => {
+    if (event.key !== 'Escape' || !ui.historyFiltersOpen) return;
+    event.stopPropagation();
+    if (event.defaultPrevented || event.isComposing) return;
+    event.preventDefault();
+    closeHistoryFilters(true);
+  });
+  once('.history-filter-disclosure', 'focusout', (event) => {
+    if (event.relatedTarget && !event.currentTarget.contains(event.relatedTarget)) closeHistoryFilters();
   });
   const graphSearch = app.querySelector('#graph-search');
   if (graphSearch && !graphSearch.__ideaGitListeners) {
@@ -2781,7 +2981,6 @@ function bind() {
     const select = event.currentTarget;
     if (select.dataset.graphFilter === 'branch') {
       setHistoryRef(select.value);
-      requestAnimationFrame(() => app.querySelector('[data-graph-filter="branch"]')?.focus());
       return;
     }
     if (select.dataset.graphFilter === 'age') ui.graphAgeFilter = select.value || 'all';
@@ -3148,6 +3347,11 @@ function handleAction(action) {
     if (ui.toolbarMenuOpen) requestAnimationFrame(() => app.querySelector('[data-toolbar-action]:not(:disabled)')?.focus());
     return;
   }
+  if (action === 'locate-history-head') {
+    const head = app.querySelector('[data-action="locate-history-head"]')?.dataset.head;
+    if (head) selectCommit(head, { focus: true });
+    return;
+  }
   if (action === 'toggle-history-focus') {
     ui.historyFocusMode = !ui.historyFocusMode;
     persist();
@@ -3195,6 +3399,15 @@ function handleAction(action) {
   }
   if (action === 'load-more-commits') requestMoreHistory(ui.graphScrollTop);
   if (action === 'retry-history-search') requestHistorySearch(true, 0);
+  if (action === 'toggle-history-filters') {
+    if (ui.historyFiltersOpen) closeHistoryFilters(true);
+    else {
+      ui.historyFiltersOpen = true;
+      render();
+      focusHistoryFilter('#graph-author');
+    }
+    return;
+  }
   if (action === 'clear-graph-filters') {
     clearTimeout(historySearchTimer);
     ui.historySearchRequestId += 1;
@@ -3216,6 +3429,8 @@ function handleAction(action) {
     } else reconcileHistorySelection();
     persist();
     render();
+    focusHistoryFilter('#graph-author');
+    return;
   }
   if (action === 'branches') {
     ui.branchOpen = !ui.branchOpen;
@@ -3303,6 +3518,11 @@ function syncCommitActionState() {
     button.disabled = !enabled;
     button.title = `${hint || 'Review the selected files before committing'} (${commandKey}+Enter)`;
   }
+  const board = app.querySelector('.commit-status-board');
+  if (board && ui.snapshot) {
+    const rows = commitPushStatusRows(ui.snapshot);
+    if (board.innerHTML !== rows) board.innerHTML = rows;
+  }
 }
 
 function canReviewCommitPush(snapshot) {
@@ -3326,10 +3546,10 @@ function submitReviewedCommit(andPush = false) {
   if (blocker) { toast(blocker, 'error'); return; }
   if (andPush && !canReviewCommitPush(ui.snapshot)) return;
   const paths = changeSelection().selectedChanges.map((change) => change.path);
-  const root = ui.snapshot.root;
+  const { root, branch, headOid } = ui.snapshot;
   ui.commitReviewOpen = false;
   render();
-  post(andPush ? 'commitAndPush' : 'commit', { root, message: ui.commitMessage, paths });
+  post(andPush ? 'commitAndPush' : 'commit', { root, branch, ...(headOid ? { head: headOid } : {}), message: ui.commitMessage, paths });
 }
 
 function toast(message, phase = 'success') {
@@ -3385,7 +3605,7 @@ window.addEventListener('message', (event) => {
   const message = event.data;
   if (message.type === 'pushPreparing') {
     if (message.root !== ui.snapshot?.root || ui.pushPreparing?.requestId > message.requestId) return;
-    ui.pushPreparing = { requestId: message.requestId, active: message.active };
+    ui.pushPreparing = { requestId: message.requestId, branch: message.branch, head: message.head, active: message.active, error: message.error };
     render();
     return;
   }
@@ -3480,6 +3700,7 @@ window.addEventListener('message', (event) => {
     requestHistorySearch(true, 0);
   }
   if (message.type === 'applyPathFilter') {
+    ui.historyFiltersOpen = surface === 'history';
     ui.graphPathFilter = message.path || '';
     ui.graphBranchFilter = '';
     ui.graphAuthorFilter = '';
@@ -3495,9 +3716,10 @@ window.addEventListener('message', (event) => {
     render();
     post('setHistoryRef', { branch: '' });
     restoreGraphScroll(0);
-    requestAnimationFrame(() => app.querySelector('#graph-path')?.focus());
+    requestAnimationFrame(() => focusHistoryFilter('#graph-path'));
   }
   if (message.type === 'applyBranchFilter') {
+    ui.historyFiltersOpen = false;
     ui.graphBranchFilter = message.branch || '';
     ui.graphPathFilter = '';
     ui.graphQuery = '';
@@ -3513,7 +3735,7 @@ window.addEventListener('message', (event) => {
     render();
     post('setHistoryRef', { branch: ui.graphBranchFilter });
     restoreGraphScroll(0);
-    requestAnimationFrame(() => app.querySelector('[data-graph-filter="branch"]')?.focus());
+    if (surface === 'history') requestAnimationFrame(() => app.querySelector('#kivo-history-filter-ref')?.focus({ preventScroll: true }));
   }
   if (message.type === 'revealFile') {
     const filePath = message.path;
@@ -3558,6 +3780,7 @@ window.addEventListener('message', (event) => {
     lastSnapshot = fingerprint;
     ui.emptyMessage = undefined;
     ui.snapshot = message.payload;
+    if (surface === 'changes') reconcileCommitPushOutcomes(ui.snapshot, true);
     const version = ui.failureVersions.get(nextRoot) || 0;
     if (previousRoot !== nextRoot) { clearTimeout(checkoutFeedbackTimer); ui.failure = undefined; ui.busy = false; ui.operationKind = undefined; ui.checkoutPending = false; ui.operationMessage = ''; }
     if (message.payload.failure && message.payload.failure.id >= version && message.payload.failure.id > (ui.failureVersions.get(`dismissed:${nextRoot}`) || 0)) {
@@ -3566,7 +3789,7 @@ window.addEventListener('message', (event) => {
     }
     if (historyAnchor && previousRoot === nextRoot && previousBranch === message.payload.branch) {
       const index = graphCommits().findIndex(commit => commit.hash === historyAnchor.key);
-      if (index >= 0) ui.graphScrollTop = Math.max(0, index * GRAPH_ROW_HEIGHT - historyAnchor.offset);
+      if (index >= 0) ui.graphScrollTop = Math.max(0, graphOffsets(graphCommits())[index] - historyAnchor.offset);
     }
     if (ui.pushReview) {
       const p = ui.pushReview.preview;
@@ -3654,23 +3877,30 @@ window.addEventListener('message', (event) => {
   }
   if (message.type === 'openSavedStash' && message.root === ui.snapshot?.root) requestWorkflow('stashDetails', { hash: message.hash });
   if (message.type === 'operation') {
+    if (surface === 'changes') recordCommitPushOutcome(message);
     if (message.root && message.root !== ui.snapshot?.root) return;
     if (message.id && message.id < ui.operationId) return;
     if (message.id) ui.operationId = message.id;
     const loadingToasts = [...document.querySelectorAll('.toast.loading')];
+    if (surface === 'changes' && ui.snapshot) reconcileCommitPushOutcomes(ui.snapshot);
+    const inContext = !message.context || message.context.branch === ui.snapshot?.branch;
+    const clearsCommit = message.phase === 'success' && message.clearsCommit && inContext &&
+      (!message.context || ui.snapshot.headOid === message.context.head || ui.snapshot.headOid === message.commitOid);
     ui.busy = message.phase === 'loading';
     ui.operationKind = message.phase === 'loading' ? message.kind : undefined;
     updateCheckoutFeedback(message);
     if (message.phase === 'loading') ui.pullMenuOpen = false;
-    if (message.phase === 'success' && message.clearsCommit) { ui.commitMessage = ''; ui.selected.clear(); persist(); }
+    if (clearsCommit) { ui.commitMessage = ''; ui.selected.clear(); persist(); }
     if (message.kind === 'stash' && message.phase !== 'loading' && ui.workflow && (!message.feedbackSurface || message.feedbackSurface === surface)) {
       if (message.phase === 'success') { ui.stashMessage = ''; requestWorkflow('stashes'); }
       else { ui.workflow.error = message.message; ui.workflow.loading = false; }
     }
     render();
     loadingToasts.forEach((item) => dismissToast(item));
-    if (message.phase !== 'error' && !(message.phase === 'loading' && ['checkout', 'branch'].includes(message.kind)) && (!message.feedbackSurface || message.feedbackSurface === surface)) toast(message.message, message.phase);
-    if (message.phase === 'success' && message.clearsCommit) {
+    if (inContext && message.phase !== 'error' && !(message.phase === 'loading' && ['checkout', 'branch'].includes(message.kind)) && (!message.feedbackSurface || message.feedbackSurface === surface)) {
+      toast(message.message, message.phase === 'unverified' ? 'error' : message.phase);
+    }
+    if (clearsCommit) {
       const textarea = app.querySelector('#commit-message');
       if (textarea) textarea.value = '';
     }
@@ -3851,6 +4081,7 @@ function closeContextMenusOutside(target) {
 }
 
 document.addEventListener('pointerdown', (event) => {
+  if (ui.historyFiltersOpen && !event.target.closest?.('.history-filter-disclosure')) closeHistoryFilters();
   closeContextMenusOutside(event.target);
 }, true);
 
@@ -3875,7 +4106,7 @@ setInterval(() => {
   if (ui.snapshot && ui.lastFetchedAt && ui.syncPhase !== 'fetching') render();
 }, 60000);
 
-window.addEventListener('resize', () => { positionPullMenu(); updateCommitMessageBudget(); });
+window.addEventListener('resize', () => { positionPullMenu(); positionHistoryFilters(); updateCommitMessageBudget(); });
 window.addEventListener('beforeunload', persist);
 
 post('ready', { historyRef: surface === 'history' ? ui.graphBranchFilter : undefined });

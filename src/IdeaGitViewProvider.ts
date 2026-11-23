@@ -48,7 +48,7 @@ type WebviewMessage =
   | { type: 'showBranchHistory'; branch: string }
   | { type: 'revealInExplorer'; path: string }
   | { type: 'openCommitDiff'; hash: string; path: string; originalPath?: string; kind?: string }
-  | { type: 'commit' | 'commitAndPush'; root: string; message: string; paths: string[] }
+  | { type: 'commit' | 'commitAndPush'; root: string; branch: string; head?: string; message: string; paths: string[] }
   | { type: 'reuseCommitMessage'; draft: string }
   | { type: 'configureGitIdentity' | 'configureUpstream' }
   | { type: 'chooseRepository' }
@@ -70,6 +70,7 @@ type WebviewMessage =
   | { type: 'setActiveChangelist'; id: string }
   | { type: 'moveFiles'; paths: string[]; listId: string };
 type OperationKind = 'commit' | 'checkout' | 'branch' | 'tag' | 'changelist' | 'move' | 'track' | 'rollback' | 'fetch' | 'pull' | 'push' | 'identity' | 'stash' | 'conflict' | 'cherry-pick';
+type CommitPushContext = { root: string; branch: string; head?: string; destination?: string };
 type WebviewRepositorySnapshot = RepositorySnapshot & { failure?: OperationFailure; fileIcons: Record<string, WebviewFileIcon>; repositoryCount: number; allRepositoryChanges: number };
 const HISTORY_PAGE_SIZE = 80;
 
@@ -953,8 +954,16 @@ export class IdeaGitViewProvider implements vscode.WebviewViewProvider, vscode.T
             await this.refresh(true);
             return;
           }
-          if (message.type === 'commitAndPush') await this.commitAndPush(client, message.message, message.paths, surface);
-          else await this.operation('commit', 'Creating commit…', () => client.commit(message.message, message.paths), 'Commit created locally', true);
+          const { root, branch, head } = message;
+          const target = { root, branch, head };
+          if (!branch || this.lastSnapshot?.root !== root || this.lastSnapshot.branch !== branch || this.lastSnapshot.headOid !== head) {
+            await this.postToView(surface, { type: 'notice', phase: 'error', message: 'Branch or HEAD changed. Review the selected files again.' });
+            await this.refresh(true);
+            return;
+          }
+          let oid: string | undefined;
+          const committed = await this.operation('commit', 'Creating commit…', async () => oid = await client.commit(message.message, message.paths, target), 'Commit created locally', true, surface, target);
+          if (committed && oid && message.type === 'commitAndPush') await this.reviewPushAfterCommit(client, surface, { ...target, head: oid });
           return;
         }
         case 'reuseCommitMessage':
@@ -1184,11 +1193,9 @@ export class IdeaGitViewProvider implements vscode.WebviewViewProvider, vscode.T
     await this.operation('changelist', 'Deleting changelist…', () => client.deleteChangelist(id), 'Changelist deleted');
   }
 
-  private async commitAndPush(client: GitClient, message: string, paths: string[], surface: KivoSurface): Promise<void> {
-    const committed = await this.operation('commit', 'Creating commit…', () => client.commit(message, paths), 'Commit created', true);
-    if (!committed) return;
+  private async reviewPushAfterCommit(client: GitClient, surface: KivoSurface, target: CommitPushContext): Promise<void> {
     try {
-      if (!await this.pushWithPreview(client, surface, true)) {
+      if (!await this.pushWithPreview(client, surface, true, undefined, target)) {
         void vscode.window.showInformationMessage('The commit is saved locally. You can push it later from Kivo Git.');
       }
     } catch (error) {
@@ -1196,18 +1203,26 @@ export class IdeaGitViewProvider implements vscode.WebviewViewProvider, vscode.T
     }
   }
 
-  private async pushWithPreview(client: GitClient, surface: KivoSurface, afterCommit = false, branch?: string): Promise<boolean> {
-    if (this.operationRunning) return false;
+  private async pushWithPreview(client: GitClient, surface: KivoSurface, afterCommit = false, branch?: string, committed?: CommitPushContext): Promise<boolean> {
+    if (this.operationRunning || this.selectedWorkspace()?.uri.fsPath !== client.workspaceRoot) return false;
+    const snapshot = this.lastSnapshot?.root === client.workspaceRoot ? this.lastSnapshot : undefined;
+    const context = committed || {
+      root: client.workspaceRoot,
+      branch: branch || snapshot?.branch,
+      head: branch ? snapshot?.branches.find(candidate => !candidate.remote && candidate.name === branch)?.oid : snapshot?.headOid
+    };
     const requestId = ++this.pushPreviewRequestId;
     const generation = this.syncGeneration;
     const previous = this.pushReview.current;
     this.pushReview.clear();
     if (previous) await this.postToView(previous.surface, { type: 'pushReviewClosed', id: previous.id });
     const isCurrent = () => requestId === this.pushPreviewRequestId && generation === this.syncGeneration && this.selectedWorkspace()?.uri.fsPath === client.workspaceRoot;
-    await this.postToView(surface, { type: 'pushPreparing', root: client.workspaceRoot, requestId, active: true });
+    let failure: string | undefined;
+    await this.postToView(surface, { type: 'pushPreparing', ...context, requestId, active: true });
     try {
       const target = await client.pushTarget(branch);
       if (!isCurrent()) return false;
+      if (context.branch && target.branch !== context.branch) throw new Error('The current branch changed. Open Push again.');
       let remote = target.remote;
       if (!remote) {
         const choice = await vscode.window.showQuickPick(target.remotes.map((name) => ({ label: name })), {
@@ -1218,6 +1233,7 @@ export class IdeaGitViewProvider implements vscode.WebviewViewProvider, vscode.T
       }
       const preview = branch ? await client.pushBranchPreview(target.branch, remote) : await client.pushPreview(remote);
       if (!isCurrent() || preview.branch !== target.branch) return false;
+      if (committed && preview.head !== committed.head) throw new Error('HEAD changed after the local commit. Open Push again.');
       if (!preview.ahead && !preview.publish && !preview.setUpstream) {
         void vscode.window.showInformationMessage('There are no outgoing commits to push.');
         return false;
@@ -1225,8 +1241,11 @@ export class IdeaGitViewProvider implements vscode.WebviewViewProvider, vscode.T
       const review = this.pushReview.open({ surface, root: client.workspaceRoot, preview, afterCommit, branch });
       await this.postToView(surface, { type: 'pushReview', ...review });
       return true;
+    } catch (error) {
+      if (isCurrent()) failure = this.errorText(error);
+      throw error;
     } finally {
-      await this.postToView(surface, { type: 'pushPreparing', root: client.workspaceRoot, requestId, active: false });
+      await this.postToView(surface, { type: 'pushPreparing', ...context, requestId, active: false, error: failure });
     }
   }
 
@@ -1240,7 +1259,9 @@ export class IdeaGitViewProvider implements vscode.WebviewViewProvider, vscode.T
     if (message.choice === 'fetch') { await this.fetchAndReview(client, surface); return; }
     if (review.preview.behind || review.rejection) return;
     const { preview, branch } = review;
-    const pushed = await this.operation('push', preview.publish ? 'Publishing branch…' : 'Pushing…', () => branch ? client.pushBranch(branch, preview) : client.push(preview), preview.setUpstream ? `Tracking ${preview.remote}/${preview.targetBranch}` : 'Push complete', false, surface);
+    const destination = `${preview.remote}/${preview.targetBranch}`;
+    const target = { root: client.workspaceRoot, branch: preview.branch, head: preview.head, destination };
+    const pushed = await this.operation('push', preview.publish ? 'Publishing branch…' : 'Pushing…', () => branch ? client.pushBranch(branch, preview) : client.push(preview), preview.setUpstream ? `Tracking ${destination}` : 'Push complete', false, surface, target);
     if (!pushed && /rejected|non-fast-forward|fetch first|failed to push/i.test(this.syncError || '')) {
       if (this.selectedWorkspace()?.uri.fsPath !== client.workspaceRoot) return;
       const rejected = this.pushReview.open({ ...review, rejection: 'The remote rejected this push. Fetch the latest commits and review the branch before pushing again.' });
@@ -1580,28 +1601,33 @@ export class IdeaGitViewProvider implements vscode.WebviewViewProvider, vscode.T
     if (message.action === 'stashes' && failure.stashHash) await this.postToView(surface, { type: 'openSavedStash', root: failure.root, hash: failure.stashHash });
   }
 
-  private async operation(kind: OperationKind, label: string, action: () => Promise<void>, success: string, clearsCommit = false, feedbackSurface?: KivoSurface): Promise<boolean> {
+  private async operation(kind: OperationKind, label: string, action: () => Promise<void | string>, success: string, clearsCommit = false, feedbackSurface?: KivoSurface, context?: CommitPushContext): Promise<boolean> {
     if (this.operationRunning) throw new Error('Another Git operation is already running.');
+    if (context && this.selectedWorkspace()?.uri.fsPath !== context.root) return false;
     this.operationRunning = true;
-    const root = this.selectedWorkspace()?.uri.fsPath;
+    const root = context?.root ?? this.selectedWorkspace()?.uri.fsPath;
     const id = ++this.operationId;
+    const event = { type: 'operation', root, id, kind, context, feedbackSurface };
     let writeStarted = false;
     try {
-      await this.postToReadyViews({ type: 'operation', root, id, kind, phase: 'loading', message: label, feedbackSurface });
+      await this.postToReadyViews({ ...event, phase: 'loading', message: label });
       if (this.autoFetchPromise) await this.autoFetchPromise;
       this.coordinator.beginWrite();
       writeStarted = true;
-      await vscode.window.withProgress({ location: vscode.ProgressLocation.SourceControl, title: `${IdeaGitViewProvider.productName}: ${label}` }, action);
+      const result = await vscode.window.withProgress({ location: vscode.ProgressLocation.SourceControl, title: `${IdeaGitViewProvider.productName}: ${label}` }, action);
       if (kind === 'commit' || kind === 'pull' || kind === 'cherry-pick' || kind === 'conflict') this.repositoryEmitter.fire();
-      if (kind === 'fetch') await this.setSyncState('idle', Date.now());
-      else if (kind === 'pull' || kind === 'push') await this.setSyncState('idle', Date.now());
-      await this.postToReadyViews({ type: 'operation', root, id, kind, phase: 'success', message: success, clearsCommit, feedbackSurface });
+      if (kind === 'fetch' || kind === 'pull' || kind === 'push') await this.setSyncState('idle', Date.now());
+      if (kind === 'commit' && typeof result !== 'string') {
+        await this.postToReadyViews({ ...event, phase: 'unverified', message: 'Git finished the commit command, but the new HEAD could not be verified. Check Recent Commits before retrying.' });
+        return false;
+      }
+      await this.postToReadyViews({ ...event, phase: 'success', message: success, clearsCommit, commitOid: typeof result === 'string' ? result : undefined });
       return true;
     } catch (error) {
       this.coordinator.reset();
       if (kind === 'fetch' || kind === 'pull' || kind === 'push') await this.setSyncState('error', undefined, this.errorText(error));
       if (root) await this.recordOperationFailure(error, root, kind, id);
-      await this.postToReadyViews({ type: 'operation', root, id, kind, phase: 'error', message: this.errorText(error), feedbackSurface });
+      await this.postToReadyViews({ ...event, phase: 'error', message: this.errorText(error) });
       return false;
     } finally {
       this.operationRunning = false;
@@ -1786,6 +1812,7 @@ export class IdeaGitViewProvider implements vscode.WebviewViewProvider, vscode.T
     const selectionUri = webview.asWebviewUri(vscode.Uri.joinPath(this.context.extensionUri, 'media', 'change-selection.js'));
     const jsUri = webview.asWebviewUri(vscode.Uri.joinPath(this.context.extensionUri, 'media', 'main.js'));
     const nonce = Math.random().toString(36).slice(2);
+    const locale = /^zh(?:-|$)/i.test(vscode.env.language) ? 'zh' : 'en';
     return `<!doctype html>
       <html lang="en">
       <head>
@@ -1797,7 +1824,7 @@ export class IdeaGitViewProvider implements vscode.WebviewViewProvider, vscode.T
         <style id="kivo-file-icon-fonts" nonce="${nonce}">${this.fileIconTheme.fontCss(webview)}</style>
         <title>${IdeaGitViewProvider.productName}</title>
       </head>
-      <body class="parity-mode" data-surface="${surface}">
+      <body class="parity-mode" data-surface="${surface}" data-locale="${locale}">
         <svg class="kivo-icon-sprite" aria-hidden="true" focusable="false">
           <symbol id="kivo-graph" viewBox="0 0 24 24"><path d="M6.5 4.5v15m0-7.5h1.8c2.8 0 4.7-1.9 4.7-4.6V6.2l2.2-1.7"/><circle cx="6.5" cy="4.5" r="2"/><circle cx="6.5" cy="19.5" r="2"/><circle cx="17" cy="4.5" r="2"/></symbol>
           <symbol id="kivo-changes" viewBox="0 0 24 24"><path d="M5 7.5h14M5 12h14M5 16.5h9"/><path d="M4 4.5h16v15H4z"/></symbol>

@@ -404,14 +404,18 @@ export class GitClient {
     await this.store!.move(paths, listId);
   }
 
-  async commit(message: string, paths: string[]): Promise<void> {
+  async commit(message: string, paths: string[], expected?: { branch: string; head?: string }): Promise<string | undefined> {
     if (typeof message !== 'string' || !Array.isArray(paths) || paths.some((file) => typeof file !== 'string' || !file || file.includes('\0'))) {
       throw new Error('Invalid commit selection. Refresh and select the files again.');
     }
     const trimmed = message.trim();
     if (!trimmed) throw new Error('Write a commit message first.');
     if (!paths.length) throw new Error('Select at least one changed file.');
-    const changes = parsePorcelainV2(await this.run(['status', '--porcelain=v2', '-z', '--untracked-files=all'])).changes;
+    const before = parsePorcelainV2(await this.run(['status', '--porcelain=v2', '--branch', '--no-ahead-behind', '-z', '--untracked-files=all']));
+    if (expected && (before.branch !== expected.branch || before.headOid !== expected.head)) {
+      throw new Error('The current branch or HEAD changed. Review the selected files and try again.');
+    }
+    const { changes } = before;
     const byPath = new Map(changes.map((change) => [change.path, change]));
     if (changes.some((change) => change.kind === 'conflict')) throw new Error('Resolve merge conflicts before committing.');
     const selected = [...new Set(paths)].map((file) => {
@@ -441,6 +445,11 @@ export class GitClient {
       }
       throw error;
     }
+    // A zero exit from git commit is not enough to paint a verified HEAD on a
+    // possibly changed checkout. A post-command read failure must not roll back.
+    const after = await this.run(['status', '--porcelain=v2', '--branch', '--no-ahead-behind', '-z', '--untracked-files=no'])
+      .then(parsePorcelainV2, () => undefined);
+    return after?.branch === before.branch && after.headOid !== before.headOid ? after.headOid : undefined;
   }
 
   async restoreFilesToHead(paths: string[]): Promise<void> {

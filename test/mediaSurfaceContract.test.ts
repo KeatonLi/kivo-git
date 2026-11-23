@@ -22,7 +22,7 @@ describe('webview surface composition', () => {
     expect(main).toContain('Review Commit…');
     expect(main).toContain('data-action="confirm-commit-and-review-push"');
     expect(main).not.toContain('data-action="commit-and-push"');
-    expect(main).toContain('function renderLogActionRail(s)');
+    expect(main).toContain('function renderLogActionToolbar(s)');
     expect(main).toContain('class="log-branch-pane"');
     expect(main).toContain('class="branch-sync-indicator');
     expect(main).not.toContain('class="branch-pane-footer"');
@@ -31,7 +31,7 @@ describe('webview surface composition', () => {
     expect(main).toContain('data-log-detail-splitter');
     expect(main).toContain('Resize commit history and details');
     expect(main).toContain('data-commit-detail-splitter');
-    expect(main).toContain('Resize changed files and commit information');
+    expect(main).toContain('Resize commit information and changed files');
     expect(main).toContain('data-commit-panel-splitter');
     expect(main).toContain('Resize changes and commit message');
     expect(main).toContain('data-branch-context-action="new"');
@@ -69,7 +69,9 @@ describe('webview surface composition', () => {
     expect(main).toContain("post('createTag', { hash: menu.hash })");
     expect(main).toContain("post('checkoutRevision', { hash: menu.hash })");
     expect(main).not.toContain('class="amend-row"');
-    expect(main).toContain('<span>AUTHOR</span><span>GRAPH</span><span>COMMIT</span><span>DATE</span>');
+    expect(main).toMatch(/data-log-column="graph".*data-log-column="commit"/);
+    expect(main).toMatch(/class="log-meta".*class="log-author".*renderLogDate\(commit\.date\)/);
+    expect(main).not.toContain('data-log-column="author"');
     expect(main).toContain('data-graph-list');
     expect(main).toContain("once('[data-graph-list]', 'scroll', onGraphScroll)");
     expect(main).toContain('function graphRenderWindow(commits)');
@@ -193,7 +195,7 @@ describe('webview surface composition', () => {
     expect(provider).toContain('changes.title = `${snapshot.repositoryName} · Commit`');
     expect(provider).toContain("history.title = 'History'");
     expect(provider).toContain('history.description = snapshot.branch');
-    expect(provider).toContain('private async commitAndPush');
+    expect(provider).toContain('private async reviewPushAfterCommit');
     expect(provider).toContain("'media', 'graph-layout.js'");
     expect(provider).toContain('const HISTORY_PAGE_SIZE = 80;');
     expect(provider).toContain('this.commitLimit += HISTORY_PAGE_SIZE;');

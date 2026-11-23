@@ -21,12 +21,12 @@
       GRAPH_MIN_WIDTH,
       Math.floor(options.maximumWidth ?? 176)
     );
-    const lanes = (commits || []).flatMap(laneValues);
-    const laneCount = lanes.length ? Math.max(1, Math.max(...lanes) + 1) : 1;
-    const laneWidth = Math.min(
-      GRAPH_DEFAULT_LANE_WIDTH,
-      Math.max(1, (maximumWidth - GRAPH_PADDING) / laneCount)
-    );
+    const preferredLaneWidth = options.laneWidth ?? GRAPH_DEFAULT_LANE_WIDTH;
+    let laneCount = 1;
+    for (const commit of commits || []) {
+      for (const lane of laneValues(commit)) laneCount = Math.max(laneCount, lane + 1);
+    }
+    const laneWidth = Math.min(preferredLaneWidth, (maximumWidth - GRAPH_PADDING) / laneCount);
     const graphWidth = clamp(
       Math.ceil(laneCount * laneWidth + GRAPH_PADDING),
       GRAPH_MIN_WIDTH,
@@ -39,7 +39,7 @@
       graphWidth,
       nodeRadius,
       mergeNodeRadius: clamp(nodeRadius + .9, 1.8, 4.5),
-      compressed: laneWidth < GRAPH_DEFAULT_LANE_WIDTH
+      compressed: laneWidth < preferredLaneWidth
     };
   }
 
