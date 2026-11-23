@@ -1,5 +1,7 @@
 # Kivo Git
 
+**English** · [简体中文](README.zh-CN.md)
+
 > A tactile, graph-first Git workbench for Visual Studio Code.
 
 [![CI](https://github.com/KeatonLi/kivo-git/actions/workflows/ci.yml/badge.svg)](https://github.com/KeatonLi/kivo-git/actions/workflows/ci.yml)
