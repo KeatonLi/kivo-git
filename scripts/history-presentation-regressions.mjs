@@ -177,7 +177,7 @@ async function verifyGraphAndDetails(page, openSurface) {
   await page.setViewportSize({ width: 400, height: 520 });
   const long = '修复并验证分支和文件历史在窄面板中的完整显示 · preserve every visible detail when the History panel is narrow · END OF SUBJECT';
   await page.evaluate(({ inspected, long }) => {
-    fixture.commits = fixture.commits.map(commit => commit.hash === inspected ? { ...commit, subject: long, refs: [{ name: 'feature/long-branch-label-that-must-remain-readable', kind: 'local' }], unpushedTo: 'origin/main' } : commit);
+    fixture.commits = fixture.commits.map(commit => commit.hash === inspected ? { ...commit, subject: long, author: '欧阳明', refs: [{ name: 'feature/long-branch-label-that-must-remain-readable', kind: 'local' }], unpushedTo: 'origin/main' } : commit);
     emit({ type: 'snapshot', payload: fixture });
   }, { inspected, long });
   await page.waitForFunction(hash => document.querySelector(`[data-commit="${hash}"] .log-subject strong`)?.textContent.endsWith('END OF SUBJECT'), inspected);
@@ -185,16 +185,30 @@ async function verifyGraphAndDetails(page, openSurface) {
     const title = element.querySelector('strong');
     const meta = element.querySelector('.log-meta');
     const bounds = element.getBoundingClientRect();
-    const last = document.createRange();
-    last.selectNodeContents(title);
-    const titleRects = [...last.getClientRects()];
-    return titleRects.length > 1 && element.offsetHeight > 44 && titleRects.every(rect => rect.right <= bounds.right + 1) &&
+    const style = getComputedStyle(title);
+    return title.getBoundingClientRect().height <= parseFloat(style.lineHeight) + 1 && style.whiteSpace === 'nowrap' && title.scrollWidth > title.clientWidth &&
       ['.log-author', 'code', 'time', '.unpushed-badge', '.graph-ref'].every(selector => {
         const item = meta.querySelector(selector);
         const rect = item.getBoundingClientRect();
         return rect.width > 0 && rect.bottom <= bounds.bottom + 1 && item.scrollWidth <= item.clientWidth + 1;
       });
-  }), 'Long titles wrap and every key metadata field stays within the same row on narrow panels.');
+  }), 'Long titles stay on one line and every key metadata field remains visible on narrow panels.');
+  const avatar = target.locator('.commit-author-avatar');
+  assert.equal(await avatar.textContent(), '欧');
+  assert.equal(await avatar.getAttribute('aria-hidden'), 'true');
+  assert.equal(await target.locator('.commit-author-name').textContent(), '欧阳明');
+  await subject.hover();
+  const preview = page.locator('.commit-subject-preview');
+  await preview.waitFor({ state: 'visible' });
+  assert.equal(await preview.textContent(), long);
+  await page.keyboard.press('Escape');
+  await preview.waitFor({ state: 'hidden' });
+  await search.hover();
+  await search.focus();
+  await page.keyboard.press('Tab'); // Enter keyboard focus modality before focusing the virtual row.
+  await target.focus();
+  await preview.waitFor({ state: 'visible' });
+  assert.equal(await preview.textContent(), long);
 }
 
 async function verifyFilterDisclosure(page, openSurface) {

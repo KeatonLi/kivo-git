@@ -19,7 +19,7 @@ export function surfaceForViewType(viewType: string): KivoSurface | undefined {
 
 const sharedMessages = new Set([
   'ready',
-  'operationRecovery', 'openWorktree', 'chooseWorktree',
+  'operationRecovery', 'openWorktree', 'chooseWorktree', 'worktreeReviewOpen',
   'workflowRequest', 'closeWorkflow', 'openWorkflowDiff',
   'stashCreate', 'stashApply', 'stashDrop',
   'openConflict', 'resolveConflict', 'continueOperation', 'abortOperation', 'skipOperation',
@@ -67,6 +67,7 @@ const messagesBySurface: Record<KivoSurface, ReadonlySet<string>> = {
     'moveFiles'
   ]),
   history: new Set([
+    'worktreeReviewList', 'worktreeReviewDetails', 'worktreeReviewCommit', 'worktreeReviewDiff', 'worktreeReviewMark', 'worktreeReviewClose',
     'createWorktree',
     'cherryPick',
     'searchHistory',

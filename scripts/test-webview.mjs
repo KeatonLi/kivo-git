@@ -7,6 +7,7 @@ import { mkdir } from 'node:fs/promises';
 import { verifyExperienceRegressions } from './webview-experience-regressions.mjs';
 import { verifyHistorySelection } from './history-selection-regressions.mjs';
 import { verifyHistoryPresentation } from './history-presentation-regressions.mjs';
+import { verifyWorktreeReview } from './worktree-review-regressions.mjs';
 import { verifyCheckoutRecovery } from './checkout-recovery-regressions.mjs';
 import { verifyInteractionMotion } from './motion-regressions.mjs';
 
@@ -81,6 +82,7 @@ try {
   await verifyCheckoutRecovery(page, query => openSurface(page, query));
   await verifyInteractionMotion(page, query => openSurface(page, query));
   await verifyHistoryPresentation(page, query => openSurface(page, query));
+  await verifyWorktreeReview(page, query => openSurface(page, query));
 
   await page.goto(`${baseUrl}/test/visual-preview.html?surface=changes&state=loading`);
   await page.waitForSelector('.repository-loading');
@@ -762,8 +764,9 @@ try {
   await page.locator('[data-action="toggle-history-focus"]').click();
   assert.equal(await page.locator('.log-workspace.history-focus').count(), 0, 'History side panels should be recoverable.');
   const loadedCommitCount = await page.locator('.graph-row').count();
-  const firstSubject = page.locator('.graph-row strong').first();
-  assert.equal(await firstSubject.getAttribute('title'), await firstSubject.textContent(), 'Truncated commit subjects should expose their full text on hover.');
+  const firstSubject = page.locator('.graph-row [data-commit-subject]').first();
+  assert.ok((await firstSubject.textContent()).trim(), 'The complete subject must remain in the row text for assistive technology.');
+  assert.equal(await firstSubject.getAttribute('title'), null, 'Do not show a competing native tooltip over the shared subject preview.');
   await page.locator('#graph-search').fill('2d4411f');
   await page.locator('.graph-row').first().waitFor();
   assert.equal(await page.locator('.graph-row').count(), 1, 'Commit search should match by short hash.');

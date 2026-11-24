@@ -1624,7 +1624,7 @@ body.commit-zone-resizing, body.commit-zone-resizing * { cursor: row-resize !imp
 .push-commit-files [data-push-retry] { background: transparent; color: var(--vscode-textLink-foreground, var(--accent)); padding: 2px 4px; cursor: pointer; font-size: 11px; }
 .push-commit-dot { width: 5px; height: 5px; align-self: center; border-radius: 50%; background: var(--unpushed-color); }
 .push-review-commit code { color: var(--muted); padding: 0; border: 0; background: transparent; font: 10px var(--vscode-editor-font-family, Consolas, monospace); }
-.push-review-commit > span:last-child { overflow: hidden; display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 2; overflow-wrap: anywhere; }
+.push-review-commit > .push-commit-subject { overflow: hidden; display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 2; overflow-wrap: anywhere; }
 .push-review-dialog .push-review-more { padding: 5px 0 3px 12px; font-size: 10px; }
 .push-review-dialog .push-review-warning { display: flex; gap: 6px; margin: 0 0 10px; padding: 8px; background: color-mix(in srgb, var(--warning) 10%, transparent); color: var(--vscode-editorWarning-foreground, var(--warning)); border-radius: 3px; }
 .push-review-warning .codicon { flex: 0 0 13px; font-size: 13px; }
@@ -1657,6 +1657,81 @@ body.commit-zone-resizing, body.commit-zone-resizing * { cursor: row-resize !imp
 .workflow-stash small { display: flex; flex-wrap: wrap; gap: 5px 10px; color: var(--muted); font-size: 10px; }
 .workflow-stash-heading { display: flex; flex-direction: column; gap: 6px; margin: 10px 0; overflow-wrap: anywhere; }
 .workflow-stash-heading small { color: var(--muted); font-size: 10px; }
+.parity-mode :is(.commit-repository-header, .log-action-toolbar) .worktree-review-trigger {
+  flex: 0 0 auto;
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  width: auto;
+  max-width: 100%;
+  height: 25px;
+  padding: 0 5px;
+  white-space: nowrap;
+  font-size: 11px;
+}
+.parity-mode .commit-repository-header .worktree-review-trigger { margin-left: auto; }
+.worktree-review-trigger > .codicon { color: var(--vscode-textLink-foreground, var(--accent)); font-size: 14px; }
+.worktree-review-overlay { z-index: 86; }
+.worktree-review-dialog { width: min(730px, 100%); }
+.worktree-review-dialog:focus { outline: none; }
+.worktree-review-dialog button:focus-visible { outline: 1px solid var(--vscode-focusBorder, var(--accent)); outline-offset: -1px; }
+.worktree-review-summary { display: flex; flex-wrap: wrap; justify-content: space-between; align-items: baseline; gap: 4px 12px; padding: 0 16px 10px; }
+.worktree-review-summary strong { font-size: 12px; font-weight: 600; }
+.worktree-review-dialog :is(.worktree-review-banner, .worktree-review-feedback) p { padding: 6px 16px; overflow-wrap: anywhere; }
+.worktree-review-dialog .worktree-review-feedback .codicon { color: var(--success); vertical-align: middle; }
+.worktree-review-dialog .worktree-review-error { color: var(--vscode-errorForeground, var(--danger)); overflow-wrap: anywhere; font-size: 11px; }
+.worktree-review-layout { display: grid; grid-template-columns: minmax(146px, .86fr) minmax(0, 2fr); min-height: 0; border-top: 1px solid var(--border-subtle); }
+.worktree-review-list, .worktree-review-detail { min-width: 0; min-height: 0; overflow: auto; scrollbar-width: thin; }
+.worktree-review-list { border-right: 1px solid var(--border-subtle); padding: 0 5px 5px; background: color-mix(in srgb, var(--vscode-sideBar-background, var(--surface-base)) 60%, transparent); }
+.worktree-review-group h3 { padding: 9px 6px 4px; margin: 0; color: var(--muted); font-size: 10px; font-weight: 600; }
+.worktree-review-row { width: 100%; display: grid; justify-items: start; gap: 3px; min-width: 0; padding: 7px 6px; border-radius: 3px; background: transparent; color: var(--vscode-foreground); text-align: left; cursor: pointer; }
+.worktree-review-row:hover { background: var(--vscode-list-hoverBackground, var(--surface-soft)); }
+.worktree-review-row[aria-pressed="true"] { background: var(--vscode-list-inactiveSelectionBackground, var(--idea-selection)); box-shadow: inset 2px 0 var(--vscode-focusBorder, var(--accent)); }
+.worktree-review-row > span { display: flex; align-items: center; min-width: 0; max-width: 100%; gap: 5px; }
+.worktree-review-row strong { font-size: 12px; font-weight: 500; }
+.worktree-review-row :is(strong, code) { min-width: 0; max-width: 100%; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
+.worktree-review-row :is(code, small), .worktree-review-detail small { color: var(--muted); font-size: 10px; }
+.worktree-review-row small[data-pending="true"] { color: var(--vscode-textLink-foreground, var(--accent)); }
+.worktree-review-detail { padding: 10px 12px 12px; }
+.worktree-review-selection { display: grid; gap: 5px; overflow-wrap: anywhere; }
+.worktree-review-selection h3 { display: flex; align-items: baseline; gap: 5px; margin: 0; font-size: 13px; }
+.worktree-review-selection > code { font-size: 11px; }
+.worktree-review-placeholder { padding: 9px 5px; }
+.worktree-review-tabs { margin: 8px 0 7px; }
+.worktree-review-tabs [aria-pressed="true"] { color: var(--vscode-foreground); box-shadow: inset 0 -2px var(--vscode-focusBorder, var(--accent)); }
+.worktree-review-description { padding-bottom: 6px; }
+.worktree-review-detail .push-review-warning { margin: 4px 0; }
+.worktree-review-commits, .worktree-review-changes { padding: 0; margin: 0; list-style: none; }
+.worktree-review-commit.push-review-commit { grid-template-columns: 12px max-content minmax(0, 1fr); }
+.worktree-review-commit-full-subject { margin: 1px 0 5px; font-weight: 500; overflow-wrap: anywhere; }
+.worktree-review-commit-meta { display: flex; flex-wrap: wrap; align-items: center; gap: 3px 8px; margin-bottom: 5px; overflow-wrap: anywhere; font-size: 10px; color: var(--muted); }
+.commit-author { display: inline-flex; align-items: center; gap: 4px; min-width: 0; max-width: 100%; }
+.commit-author-name { min-width: 0; overflow-wrap: anywhere; }
+.commit-author-avatar {
+  --avatar-tint: var(--vscode-charts-blue, var(--accent));
+  flex: 0 0 auto; display: inline-grid; place-items: center; width: 16px; height: 16px; border-radius: 50%;
+  background: color-mix(in srgb, var(--avatar-tint) 25%, var(--vscode-panel-background, var(--surface-base)));
+  color: var(--vscode-foreground); font-size: 8px; font-weight: 650; line-height: 1; user-select: none;
+}
+.commit-author-avatar[data-tone="1"] { --avatar-tint: var(--vscode-charts-green, var(--success)); }
+.commit-author-avatar[data-tone="2"] { --avatar-tint: var(--vscode-charts-purple, var(--accent)); }
+.commit-author-avatar[data-tone="3"] { --avatar-tint: var(--vscode-charts-orange, var(--warning)); }
+.commit-author-avatar[data-tone="4"] { --avatar-tint: var(--vscode-charts-yellow, var(--warning)); }
+.commit-detail-meta:has(.commit-author) { flex-wrap: wrap; align-items: center; gap: 3px 6px; }
+@media (forced-colors: active) { .commit-author-avatar { border: 1px solid currentColor; } }
+.worktree-review-changes li { display: grid; grid-template-columns: 14px minmax(0, 1fr) auto; gap: 5px; align-items: baseline; border-bottom: 1px solid var(--border-subtle); padding: 5px 0; }
+.worktree-review-changes li code { overflow-wrap: anywhere; }
+.worktree-review-dialog [aria-disabled="true"] { cursor: default; }
+.worktree-review-dialog footer [aria-disabled="true"] { opacity: .55; }
+@media (max-width: 530px) {
+  .worktree-review-layout { display: flex; flex-direction: column; min-height: 0; overflow: auto; }
+  .worktree-review-list { flex: 0 0 auto; max-height: min(33vh, 210px); border-right: 0; border-bottom: 1px solid var(--border-subtle); }
+  .worktree-review-detail { flex: 0 0 auto; overflow: visible; }
+}
+@media (max-width: 236px) {
+  .parity-mode .commit-repository-header { flex: 0 0 auto; flex-wrap: wrap; }
+  .parity-mode .commit-repository-header .worktree-review-trigger { flex-basis: 100%; justify-content: flex-start; }
+}
 .conflict-state { flex: 0 0 auto; display: flex; flex-direction: column; min-height: 0; max-height: min(200px, 42vh); gap: 6px; padding: 8px 10px; border-bottom: 1px solid var(--border-subtle); background: color-mix(in srgb, var(--warning) 7%, transparent); font-size: 11px; }
 .conflict-state-heading { display: flex; flex-wrap: wrap; gap: 5px; align-items: center; }
 .conflict-state-heading > .codicon { color: var(--warning); }
@@ -1715,12 +1790,14 @@ body.commit-zone-resizing, body.commit-zone-resizing * { cursor: row-resize !imp
 .graph-row:is(:hover,:focus-visible,.selected) .commit-row-menu { visibility:visible; opacity:1; }
 .commit-row-menu:hover { background:var(--vscode-toolbar-hoverBackground,var(--idea-hover)); }
 @media(prefers-reduced-motion:no-preference){.commit-row-menu { transition:opacity 100ms ease-out; }}
-.parity-mode .log-workspace .commit-detail-head strong { font-size:var(--kivo-list-font-size); font-weight:600; line-height:1.45; }
+.parity-mode .log-workspace .commit-detail-head strong { font-size:var(--kivo-list-font-size); font-weight:600; line-height:1.45; white-space:normal; overflow-wrap:anywhere; }
 .parity-mode .log-workspace .commit-body { font-size:12px; line-height:1.5; }
 .parity-mode .log-history-pane .graph-row { height:auto; min-height:var(--graph-row-height); }
 .parity-mode .log-history-pane .graph-commit { display:flex; flex-direction:column; align-items:stretch; justify-content:center; gap:2px; padding:3px 8px; }
 .parity-mode .log-history-pane .log-subject { display:block; overflow:visible; }
-.parity-mode .log-history-pane .log-subject strong { display:block; white-space:normal; overflow-wrap:anywhere; line-height:1.35; }
+.parity-mode .log-history-pane .log-subject strong { line-height:1.35; }
+[data-commit-subject] { display:block; min-width:0; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+.commit-subject-preview { position:fixed; z-index:90; width:max-content; max-width:min(36rem,calc(100vw - 16px)); padding:5px 8px; border:1px solid var(--vscode-editorHoverWidget-border,var(--vscode-widget-border,var(--border-subtle))); border-radius:var(--radius-md); background:var(--vscode-editorHoverWidget-background,var(--surface-base)); color:var(--vscode-editorHoverWidget-foreground,var(--vscode-foreground)); box-shadow:var(--shadow-popover); font-size:12px; line-height:1.4; overflow-wrap:anywhere; pointer-events:none; }
 .parity-mode .log-history-pane .graph-commit .log-meta { display:flex; flex-wrap:wrap; align-items:baseline; min-width:0; gap:2px 8px; line-height:1.35; }
 .parity-mode .log-history-pane .log-meta :is(.log-author,.log-date) { max-width:100%; padding:0; white-space:normal; overflow-wrap:anywhere; text-align:start; }
 .parity-mode .log-history-pane .log-meta code { flex:none; font-size:inherit; font-family:var(--vscode-editor-font-family, monospace); }

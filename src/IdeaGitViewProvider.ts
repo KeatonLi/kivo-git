@@ -8,9 +8,10 @@ import { GitClient } from './git/GitClient';
 import type { CherryPickPreview, CommitDetails, PullStrategy, RepositorySnapshot, WorkflowFile, WorktreeSummary } from './git/types';
 import { SnapshotCoordinator } from './SnapshotCoordinator';
 import { PushReviewSession } from './PushReviewSession';
+import { WorktreeReviewController, type WorktreeReviewMessage } from './WorktreeReviewController';
 import { isMessageAllowedOnSurface, KivoViewTypes, type KivoSurface, surfaceForViewType } from './viewLayout';
 
-type WebviewMessage =
+type WebviewMessage = WorktreeReviewMessage
   | { type: 'operationRecovery'; root: string; id: number; action: RecoveryAction | 'dismiss' }
   | { type: 'openWorktree'; root: string; branch: string }
   | { type: 'chooseWorktree'; root: string }
@@ -103,6 +104,7 @@ export class IdeaGitViewProvider implements vscode.WebviewViewProvider, vscode.T
   private operationOutput?: vscode.OutputChannel;
   private operationRunning = false;
   private readonly pushReview = new PushReviewSession();
+  private readonly worktreeReview: WorktreeReviewController;
   private readonly workflowSessions = new Map<KivoSurface, { root: string; id: number; files: WorkflowFile[]; cherryPick?: CherryPickPreview }>();
   private pushPreviewRequestId = 0;
   private lastFetchAttemptAt = 0;
@@ -124,6 +126,7 @@ export class IdeaGitViewProvider implements vscode.WebviewViewProvider, vscode.T
       this.lastSnapshot = snapshot;
       this.updateViewTitles(snapshot);
       await this.postSnapshotToReadyViews(snapshot);
+      this.refreshWorktreeReview();
       await this.deliverPendingNavigation('history');
       if (this.hasVisibleView() && vscode.workspace.getConfiguration('ideaGit').get<boolean>('autoFetch', true)) void this.autoFetchIfDue();
     },
@@ -135,7 +138,20 @@ export class IdeaGitViewProvider implements vscode.WebviewViewProvider, vscode.T
   readonly onDidChangeRepository = this.repositoryEmitter.event;
 
   constructor(private readonly context: vscode.ExtensionContext) {
+    this.worktreeReview = new WorktreeReviewController(
+      context.globalState,
+      () => this.selectedWorkspace()?.uri.fsPath,
+      () => this.hasVisibleView() && vscode.window.state.focused,
+      (surface, message) => surface === undefined ? this.postToReadyViews(message) : this.readyViews.has(surface)
+        ? Promise.resolve(this.views.get(surface)?.webview.postMessage(message)) : Promise.resolve(false),
+      () => this.showLog(),
+      (client, hash, file, original, kind, details) => this.openCommitDiff(client, hash, file, original, kind, details, true)
+    );
     this.context.subscriptions.push(
+      vscode.window.onDidChangeWindowState(state => {
+        if (!state.focused) this.worktreeReview.stopListening();
+        else this.refreshWorktreeReview();
+      }),
       vscode.workspace.onDidSaveTextDocument(() => { this.scheduleRefresh(40); this.scheduleBadgeRefresh(); }),
       vscode.workspace.onDidCreateFiles(() => { this.scheduleRefresh(); this.scheduleBadgeRefresh(); }),
       vscode.workspace.onDidDeleteFiles(() => { this.scheduleRefresh(); this.scheduleBadgeRefresh(); }),
@@ -177,6 +193,7 @@ export class IdeaGitViewProvider implements vscode.WebviewViewProvider, vscode.T
         this.views.delete(surface);
         this.readyViews.delete(surface);
         this.workflowSessions.delete(surface);
+        if (surface === 'history') this.worktreeReview.closeReview();
         if (this.pushReview.current?.surface === surface) this.pushReview.clear();
       }
       this.configurePolling();
@@ -343,6 +360,11 @@ export class IdeaGitViewProvider implements vscode.WebviewViewProvider, vscode.T
     const reason = !workspace || /not a git repository/i.test(message) ? 'no-repository' : 'error';
     await this.postToReadyViews({ type: 'empty', message, reason,
       canInitialize: reason === 'no-repository' && workspace?.uri.scheme === 'file', workspaceName: workspace?.name });
+  }
+
+  private refreshWorktreeReview(): void {
+    const root = this.lastSnapshot?.root;
+    if (root && this.hasVisibleView() && vscode.window.state.focused) void this.worktreeReview.refresh(root);
   }
 
   private hasVisibleView(): boolean {
@@ -516,6 +538,7 @@ export class IdeaGitViewProvider implements vscode.WebviewViewProvider, vscode.T
   }
 
   private resetRepository(): void {
+    this.worktreeReview.reset();
     this.workflowSessions.clear();
     this.pushReview.clear();
     this.pushPreviewRequestId++;
@@ -596,9 +619,17 @@ export class IdeaGitViewProvider implements vscode.WebviewViewProvider, vscode.T
       }
       this.readyViews.add(surface);
       await this.setSyncState(this.autoFetchPromise ? 'fetching' : this.syncError ? 'error' : 'idle', undefined, this.syncError);
-      if (this.lastSnapshot) await this.postSnapshotToView(surface, this.lastSnapshot);
+      if (this.lastSnapshot) {
+        await this.postSnapshotToView(surface, this.lastSnapshot);
+        await this.worktreeReview.ready(surface, this.lastSnapshot.root);
+      }
       await this.deliverPendingNavigation(surface);
       await this.refresh(true);
+      return;
+    }
+    if (message.type === 'worktreeReviewOpen' || message.type === 'worktreeReviewClose' || message.type === 'worktreeReviewList' ||
+      message.type === 'worktreeReviewDetails' || message.type === 'worktreeReviewCommit' || message.type === 'worktreeReviewDiff' || message.type === 'worktreeReviewMark') {
+      await this.worktreeReview.handle(surface, message);
       return;
     }
     if (message.type === 'refresh') {
@@ -1713,10 +1744,17 @@ export class IdeaGitViewProvider implements vscode.WebviewViewProvider, vscode.T
   private configurePolling(): void {
     if (this.refreshTimer) clearInterval(this.refreshTimer);
     if (this.autoFetchTimer) clearInterval(this.autoFetchTimer);
-    if (!this.hasVisibleView()) return;
+    if (!this.hasVisibleView()) {
+      this.worktreeReview.stopListening();
+      return;
+    }
+    this.refreshWorktreeReview();
     const configuration = vscode.workspace.getConfiguration('ideaGit');
     const interval = configuration.get<number>('autoRefreshInterval', 30000);
-    this.refreshTimer = setInterval(() => void this.refresh(true), interval);
+    this.refreshTimer = setInterval(() => {
+      this.refreshWorktreeReview();
+      void this.refresh(true);
+    }, interval);
     void this.refresh(true);
     if (configuration.get<boolean>('autoFetch', true)) {
       const autoFetchInterval = configuration.get<number>('autoFetchInterval', 60000);
@@ -1842,6 +1880,7 @@ export class IdeaGitViewProvider implements vscode.WebviewViewProvider, vscode.T
   }
 
   dispose(): void {
+    this.worktreeReview.dispose();
     this.pushReview.clear();
     for (const listener of this.gitStateListeners.values()) listener.dispose();
     this.gitStateListeners.clear();

@@ -2,6 +2,9 @@
 
 ## Unreleased
 
+- Discover linked worktrees and changes to their HEAD from the Commit and History views, including worktrees created by external tools. Review pinned commits and native file diffs without checking out the branch, inspect uncommitted files separately, and explicitly mark the observed HEAD as reviewed.
+- Keep commit subjects on one line in History and Worktree Review. Hover or focus a clipped subject for its full text, or select the commit to read it in the details. Author initials are generated locally without an avatar service.
+
 ## 0.6.3
 
 - Read complete commit subjects in History. Long titles and metadata wrap rather than disappearing in narrow panels; the branch graph follows the height of each row without dropping merge edges.

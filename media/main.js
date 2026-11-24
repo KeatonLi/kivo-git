@@ -48,6 +48,10 @@ const ui = {
   failureVersions: new Map(),
   workflow: undefined,
   workflowRequestId: 0,
+  worktreeReview: undefined,
+  worktreeReviewRequestId: 0,
+  worktreeReviewStatus: new Map(),
+  pendingWorktreeReviewRoot: undefined,
   stashMessage: '',
   snapshot: undefined,
   repositoryLoading: true,
@@ -274,6 +278,18 @@ const commandKey = /Mac|iPhone|iPad/.test(navigator.platform) ? '⌘' : 'Ctrl';
 const escapeHtml = (value = '') => String(value)
   .replaceAll('&', '&amp;').replaceAll('<', '&lt;').replaceAll('>', '&gt;')
   .replaceAll('"', '&quot;').replaceAll("'", '&#039;');
+
+const authorGraphemes = new Intl.Segmenter(undefined, { granularity: 'grapheme' });
+function renderCommitAuthor(author) {
+  const name = String(author ?? '').trim().normalize('NFC');
+  const words = name.match(/[\p{L}\p{N}][\p{L}\p{M}\p{N}]*/gu) || [];
+  const initial = word => authorGraphemes.segment(word)[Symbol.iterator]().next().value?.segment || '';
+  const cjk = /^[\p{Script=Han}\p{Script=Hiragana}\p{Script=Katakana}\p{Script=Hangul}]/u.test(words[0] || '');
+  const initials = words.length ? (cjk ? initial(words[0]) : (initial(words[0]) + (words.length > 1 ? initial(words.at(-1)) : '')).toUpperCase()) : '?';
+  let tone = 0;
+  for (const char of name.toLowerCase()) tone = (Math.imul(tone, 31) + char.codePointAt(0)) >>> 0;
+  return `<span class="commit-author"><span class="commit-author-avatar" data-tone="${tone % 5}" aria-hidden="true">${escapeHtml(initials)}</span><span class="commit-author-name">${escapeHtml(name || (document.body.dataset.locale === 'zh' ? '未知作者' : 'Unknown author'))}</span></span>`;
+}
 
 const iconFor = (kind) => ({ modified: 'M', added: 'A', deleted: 'D', renamed: 'R', untracked: '?', conflict: '!' })[kind] || 'M';
 const describeFileState = (status) => ({ '.': 'unchanged', M: 'modified', A: 'added', D: 'deleted', R: 'renamed', C: 'copied', U: 'conflicted', '?': 'untracked' })[status] || 'changed';
@@ -1038,8 +1054,9 @@ function render() {
     bind();
     return;
   }
+  const worktreeHadFocus = document.activeElement?.closest('#worktree-review-dialog');
   patchApp(`
-    <section class="content ${surface}-content ${surface === 'changes' && ui.commitZoneResized && !ui.recentCommitsCollapsed ? 'recent-resized' : ''} ${surface === 'changes' && ui.recentCommitsCollapsed ? 'recent-collapsed' : ''}" data-root="${escapeHtml(s.root)}" aria-busy="${ui.busy}" ${ui.commitReviewOpen || ui.pushReview || ui.workflow ? 'inert' : ''}>
+    <section class="content ${surface}-content ${surface === 'changes' && ui.commitZoneResized && !ui.recentCommitsCollapsed ? 'recent-resized' : ''} ${surface === 'changes' && ui.recentCommitsCollapsed ? 'recent-collapsed' : ''}" data-root="${escapeHtml(s.root)}" aria-busy="${ui.busy}" ${ui.commitReviewOpen || ui.pushReview || ui.workflow || ui.worktreeReview ? 'inert' : ''}>
       <div id="kivo-operation-failure-slot">${renderOperationFailure()}</div>
       ${surface === 'changes' ? renderChanges(s) : renderGraph(s)}
     </section>
@@ -1048,7 +1065,9 @@ function render() {
     ${surface === 'changes' && ui.commitReviewOpen ? renderCommitReview(s) : ''}
     ${ui.pushReview ? renderPushReview(s) : ''}
     ${ui.workflow ? renderWorkflow(s) : ''}
+    ${ui.worktreeReview ? renderWorktreeReview(s) : ''}
   `);
+  if (worktreeHadFocus && ui.worktreeReview && document.activeElement === document.body) app.querySelector('#worktree-review-dialog')?.focus({ preventScroll: true });
   const textarea = app.querySelector('#commit-message');
   if (textarea && (renderedRoot !== s.root || document.activeElement !== textarea) && textarea.value !== ui.commitMessage) textarea.value = ui.commitMessage;
   renderedRoot = s.root;
@@ -1069,6 +1088,7 @@ function render() {
   positionHistoryFilters();
   updateCommitMessageBudget();
   bindCommitViewport();
+  if (shownCommitSubject || hoveredCommitSubject || focusedCommitSubject) updateCommitSubjectPreview();
 }
 
 function bindCommitViewport() {
@@ -1174,6 +1194,227 @@ function renderWorkflow(s) {
   return `<div class="push-review-overlay workflow-overlay"><div class="push-review-scrim" data-action="close-workflow"></div><section class="push-review-dialog workflow-dialog" role="dialog" aria-modal="true" aria-labelledby="workflow-title"><header><div><small>${icon('repo')} ${escapeHtml(s.repositoryName)}</small><h2 id="workflow-title">${title}</h2></div><button data-action="close-workflow" aria-label="Close workflow">${icon('close')}</button></header><div class="push-review-body">${body}</div><footer>${footer || '<button class="push-review-cancel" data-action="close-workflow">Close</button>'}</footer></section></div>`;
 }
 
+function worktreeText(en, zh) {
+  return document.body.dataset.locale === 'zh' ? zh : en;
+}
+
+function worktreeCountLabel(status) {
+  if (!status) return worktreeText('Worktrees …', '工作树 …');
+  return worktreeText(`Worktrees ${status.count} · ${status.pending} to review`, `工作树 ${status.count} · ${status.pending} 待审查`);
+}
+
+function renderWorktreeReviewTrigger(s) {
+  const status = ui.worktreeReviewStatus.get(s.root);
+  const label = worktreeCountLabel(status);
+  const title = status?.stale ? `${label} — ${worktreeText('Last known counts; refresh in Worktree Review', '上次的统计结果；请在工作树审查中刷新')}` : label;
+  return `<button class="idea-toolbar-button worktree-review-trigger" id="worktree-review-trigger" data-action="open-worktree-review" lang="${worktreeText('en', 'zh')}" title="${escapeHtml(title)}" ${surface === 'history' ? 'aria-haspopup="dialog"' : ''}>${icon('git-compare')}<span>${escapeHtml(label)}</span></button>`;
+}
+
+function openWorktreeReview(root) {
+  if (surface !== 'history' || root !== ui.snapshot?.root) return;
+  if (ui.worktreeReview) {
+    if (!document.activeElement?.closest('#worktree-review-dialog')) app.querySelector('#worktree-review-dialog')?.focus({ preventScroll: true });
+    return;
+  }
+  if (ui.workflow) {
+    post('closeWorkflow', { requestId: ui.workflow.requestId });
+    ui.workflow = undefined;
+  }
+  ui.branchContextMenu = undefined;
+  ui.commitContextMenu = undefined;
+  ui.fileContextMenu = undefined;
+  ui.worktreeReview = { root, section: 'commits' };
+  requestWorktreeReviewList();
+  app.querySelector('#worktree-review-dialog')?.focus({ preventScroll: true });
+}
+
+function closeWorktreeReview(restoreFocus = true) {
+  const review = ui.worktreeReview;
+  if (!review) return;
+  post('worktreeReviewClose', { root: review.root });
+  ui.worktreeReview = undefined;
+  if (!restoreFocus) return;
+  render();
+  app.querySelector('#worktree-review-trigger')?.focus({ preventScroll: true });
+}
+
+function requestWorktreeReviewList() {
+  const review = ui.worktreeReview;
+  if (!review || review.markRequest || review.listRequest) return;
+  review.listRequest = ++ui.worktreeReviewRequestId;
+  review.listError = undefined;
+  review.markError = undefined;
+  render();
+  post('worktreeReviewList', { root: review.root, requestId: review.listRequest });
+}
+
+function requestWorktreeReviewDetails(entry, preserveSelection = false) {
+  const review = ui.worktreeReview;
+  if (!review || review.markRequest || review.listRequest) return;
+  review.selected = entry;
+  if (!preserveSelection) {
+    review.section = 'commits';
+    review.selectedHash = undefined;
+  }
+  review.details = undefined;
+  review.detailsError = undefined;
+  review.markError = undefined;
+  review.marked = false;
+  review.commitRequest = undefined;
+  review.commitDetails = undefined;
+  review.commitError = undefined;
+  review.diffError = undefined;
+  review.diffFile = undefined;
+  review.detailsRequest = ++ui.worktreeReviewRequestId;
+  render();
+  post('worktreeReviewDetails', { root: review.root, requestId: review.detailsRequest, id: entry.id, version: entry.version });
+}
+
+function requestWorktreeReviewCommit(hash) {
+  const review = ui.worktreeReview;
+  if (!review?.selected || !review.details?.commits.some(commit => commit.hash === hash)) return;
+  const { root, selected: { id, version } } = review;
+  review.selectedHash = hash;
+  review.commitRequest = ++ui.worktreeReviewRequestId;
+  review.commitDetails = undefined;
+  review.commitError = undefined;
+  review.diffError = undefined;
+  review.diffFile = undefined;
+  render();
+  post('worktreeReviewCommit', { root, id, version, requestId: review.commitRequest, hash });
+}
+
+function openWorktreeReviewDiff(path) {
+  const review = ui.worktreeReview;
+  if (!review?.selected || !review.commitDetails?.files.some(file => file.path === path)) return;
+  const { root, selected: { id, version }, selectedHash: hash } = review;
+  review.diffError = undefined;
+  review.diffFile = path;
+  render();
+  post('worktreeReviewDiff', { root, id, version, hash, path });
+}
+
+function canMarkWorktreeReview(review) {
+  const entry = review?.selected;
+  const inspected = review?.details || entry?.kind === 'removed' && review.detailsError;
+  return Boolean(entry && (entry.pending || entry.head && !entry.previousReviewHead) && inspected && !review.listRequest && !review.markRequest && !review.stale);
+}
+
+function markWorktreeReview() {
+  const review = ui.worktreeReview;
+  if (!canMarkWorktreeReview(review)) return;
+  const { root, selected: { id, version } } = review;
+  review.markRequest = ++ui.worktreeReviewRequestId;
+  review.markError = undefined;
+  render();
+  post('worktreeReviewMark', { root, id, version, requestId: review.markRequest });
+}
+
+function worktreeReviewBranch(entry) {
+  return entry.branch || (entry.detached ? worktreeText('Detached HEAD', '分离的 HEAD') : worktreeText('No branch', '无分支'));
+}
+
+function worktreeReviewKind(entry) {
+  if (entry.kind === 'removed') return worktreeText('Removed', '已移除');
+  if (!entry.pending) return entry.previousReviewHead ? worktreeText('Reviewed', '已审查') : worktreeText('No review pending', '暂无待审查');
+  if (entry.kind === 'discovered') return worktreeText('Discovered · To review', '已发现 · 待审查');
+  if (entry.kind === 'changed') return worktreeText('Changed · To review', '有更新 · 待审查');
+  return worktreeText('To review', '待审查');
+}
+
+function renderWorktreeReviewList(review) {
+  const entries = review.entries || [];
+  const groups = [
+    [worktreeText('Current worktree', '当前工作树'), entries.filter(entry => entry.isCurrent && entry.kind !== 'removed')],
+    [worktreeText('Other worktrees', '其他工作树'), entries.filter(entry => !entry.isCurrent && entry.kind !== 'removed')],
+    [worktreeText('Removed worktrees', '已移除的工作树'), entries.filter(entry => entry.kind === 'removed')]
+  ];
+  return groups.filter(([, items]) => items.length).map(([label, items]) => `<section class="worktree-review-group"><h3>${label}</h3>${items.map(entry => {
+    const branch = escapeHtml(worktreeReviewBranch(entry));
+    return `<button id="worktree-review-entry-${escapeHtml(entry.id)}" class="worktree-review-row" data-worktree-review-entry="${escapeHtml(entry.id)}" aria-pressed="${review.selected?.id === entry.id}" aria-controls="worktree-review-detail" aria-disabled="${Boolean(review.listRequest || review.markRequest)}" title="${escapeHtml(entry.path)}"><span>${icon(entry.kind === 'removed' ? 'history' : 'git-branch')}<strong>${branch}</strong></span><code>${escapeHtml(entry.path)}</code><small data-pending="${entry.pending}">${worktreeReviewKind(entry)}${entry.kind === 'removed' && entry.pending ? ` · ${worktreeText('To review', '待审查')}` : ''}</small></button>`;
+  }).join('')}</section>`).join('');
+}
+
+function renderWorktreeReviewChanges(details) {
+  if (!details?.changes || details.statusError) return `<p>${worktreeText('Uncommitted files are unavailable for this worktree.', '无法读取此工作树的未提交文件。')}</p>`;
+  if (!details.changes.length) return `<p>${worktreeText('No uncommitted files.', '没有未提交的文件。')}</p>`;
+  const changeLabels = {
+    added: worktreeText('Added', '新增'), modified: worktreeText('Modified', '已修改'), deleted: worktreeText('Deleted', '已删除'),
+    renamed: worktreeText('Renamed', '已重命名'), untracked: worktreeText('Untracked', '未跟踪'), conflict: worktreeText('Conflict', '冲突'),
+    copied: worktreeText('Copied', '已复制'), ignored: worktreeText('Ignored', '已忽略')
+  };
+  return `<ul class="worktree-review-changes">${details.changes.map(change => `<li>${icon('file')}<code>${escapeHtml(change.path)}</code><small>${escapeHtml(changeLabels[change.kind] || change.kind)}</small></li>`).join('')}</ul>`;
+}
+
+function renderWorktreeReviewCommit(review, commit) {
+  const hash = escapeHtml(commit.hash);
+  const open = review.selectedHash === commit.hash;
+  const details = open && review.commitDetails;
+  const date = absoluteTime(commit.date);
+  const subject = escapeHtml(commit.subject);
+  return `<li><button id="worktree-review-commit-${hash}" class="push-review-commit worktree-review-commit" data-worktree-review-commit="${hash}" aria-expanded="${open}">${icon(open ? 'chevron-down' : 'chevron-right', 'push-commit-disclosure')}<code title="${escapeHtml(`${commit.hash} · ${commit.author} · ${date}`)}">${escapeHtml(commit.shortHash || commit.hash.slice(0, 8))}</code><span class="worktree-review-commit-subject" data-commit-subject>${subject}</span></button>${open ? `<div class="push-commit-files">
+    <p class="worktree-review-commit-full-subject">${subject}</p>
+    <div class="worktree-review-commit-meta"><code>${hash}</code>${renderCommitAuthor(commit.author)}<span>${escapeHtml(date)}</span></div>
+    ${review.commitRequest ? `<p role="status">${worktreeText('Loading committed files…', '正在加载已提交的文件…')}</p>` : ''}
+    ${review.commitError ? `<div class="worktree-review-error" role="alert">${escapeHtml(review.commitError)} <button class="text-button" data-action="retry-worktree-review-commit">${worktreeText('Retry', '重试')}</button></div>` : ''}
+    ${details ? details.files.map(file => {
+      const { kind } = commitFileState(file);
+      const label = worktreeText('Open diff', '打开差异');
+      const path = escapeHtml(file.path);
+      return `<button class="commit-recent-file ${kind}" data-worktree-review-file="${path}" title="${label}: ${escapeHtml(file.originalPath ? `${file.originalPath} → ${file.path}` : file.path)}" aria-label="${label}: ${path}">${renderFileTypeIcon(file)}${renderCompactCommitFile(file)}</button>`;
+    }).join('') || `<p>${worktreeText('No file differences in this commit.', '此提交没有文件差异。')}</p>` : ''}
+    ${review.diffError ? `<p class="worktree-review-error" role="alert">${escapeHtml(review.diffError)}</p>` : ''}
+  </div>` : ''}</li>`;
+}
+
+function renderWorktreeReviewDetails(review) {
+  const { selected, details } = review;
+  if (!selected) return `<p class="worktree-review-placeholder">${worktreeText('Select a worktree to review its commits and check for uncommitted files.', '选择工作树后可审查其提交并检查未提交的文件。')}</p>`;
+  const branch = escapeHtml(worktreeReviewBranch(selected));
+  const flags = [selected.kind === 'removed' && worktreeText('Removed', '已移除'), selected.locked !== undefined && worktreeText('Locked', '已锁定'), selected.prunable !== undefined && worktreeText('Prunable', '可清理'), selected.bare && worktreeText('Bare', '裸仓库')].filter(Boolean);
+  const mode = {
+    recent: worktreeText('Recent commits from the observed HEAD.', '从观察到的 HEAD 开始的最近提交。'),
+    since: worktreeText('Commits from the observed HEAD that are not in the reviewed HEAD.', '观察到的 HEAD 中尚未在上次审查的 HEAD 中出现的提交。'),
+    rewritten: worktreeText('History was rewritten. Showing recent commits at the observed HEAD, not a new-commit range.', '提交历史已改写。此处显示观察到的 HEAD 的最近提交，而不是新增提交的范围。'),
+    'baseline-unavailable': worktreeText('The previously reviewed HEAD is unavailable. Only recent commits can be shown.', '上次审查的 HEAD 不可用，因此仅显示最近的提交。')
+  };
+  const knownChanges = details?.changes && !details.statusError;
+  return `<div class="worktree-review-selection"><h3>${icon('git-branch')}${branch}</h3><code>${escapeHtml(selected.path)}</code>${selected.head ? `<small>HEAD <code>${escapeHtml(selected.head)}</code></small>` : ''}${flags.length ? `<small>${flags.join(' · ')}</small>` : ''}</div>
+    ${review.detailsRequest ? `<p class="worktree-review-placeholder" role="status">${worktreeText('Loading worktree details…', '正在加载工作树详情…')}</p>` : ''}
+    ${review.detailsError ? `<div class="worktree-review-error" role="alert">${escapeHtml(review.detailsError)} <button class="text-button" data-action="retry-worktree-review-details">${worktreeText('Retry', '重试')}</button></div>` : ''}
+    ${details ? `<div class="workflow-tabs worktree-review-tabs" role="group" aria-label="${worktreeText('Worktree details', '工作树详情')}">
+      <button id="worktree-review-commits-tab" data-worktree-review-section="commits" aria-pressed="${review.section === 'commits'}">${worktreeText('Commits', '提交')} ${details.commits.length}${details.hasMore ? '+' : ''}</button>
+      <button id="worktree-review-changes-tab" data-worktree-review-section="changes" aria-pressed="${review.section === 'changes'}">${worktreeText('Uncommitted files', '未提交文件')} ${knownChanges ? details.changes.length : '—'}</button></div>
+      ${review.section === 'changes' ? `<p class="worktree-review-description">${worktreeText('These files are separate from commits and are not marked as reviewed.', '这些文件与提交分开显示，不会被标记为已审查。')}</p>${renderWorktreeReviewChanges(details)}` : `
+      <p class="worktree-review-description">${mode[details.mode] || ''}</p>
+      ${details.hasMore ? `<p class="push-review-warning">${icon('warning')}${worktreeText('Only part of the commit list is shown. Marking as reviewed still records the observed HEAD.', '仅显示部分提交。标记为已审查仍会记录观察到的 HEAD。')}</p>` : ''}
+      ${details.commits.length ? `<ol class="worktree-review-commits">${details.commits.map(commit => renderWorktreeReviewCommit(review, commit)).join('')}</ol>` : `<p>${worktreeText('No commits to show.', '没有可显示的提交。')}</p>`}`}` : ''}`;
+}
+
+function sameWorktreeReviewStatus(left, right) {
+  return Boolean(left && right && left.revision === right.revision && left.count === right.count && left.pending === right.pending);
+}
+
+function renderWorktreeReview(s) {
+  const review = ui.worktreeReview;
+  const status = ui.worktreeReviewStatus.get(s.root);
+  const changed = review.viewedStatus && status && !sameWorktreeReviewStatus(review.viewedStatus, status);
+  const close = worktreeText('Close Worktree Review', '关闭工作树审查');
+  return `<div class="push-review-overlay worktree-review-overlay"><div class="push-review-scrim" data-action="close-worktree-review"></div><section class="push-review-dialog workflow-dialog worktree-review-dialog" id="worktree-review-dialog" tabindex="-1" role="dialog" aria-modal="true" aria-labelledby="worktree-review-title" lang="${worktreeText('en', 'zh')}">
+    <header><div><small>${icon('repo')} ${escapeHtml(s.repositoryName)}</small><h2 id="worktree-review-title">${worktreeText('Worktree Review', '工作树审查')}</h2></div><button id="worktree-review-close" data-action="close-worktree-review" aria-label="${close}" title="${close}">${icon('close')}</button></header>
+    <div class="worktree-review-summary"><strong>${escapeHtml(worktreeCountLabel(status))}</strong><p>${worktreeText('Reviewing does not change Git or worktree files.', '审查不会更改 Git 或工作树文件。')}</p></div>
+    <div class="worktree-review-banner" aria-live="polite">
+      ${review.listRequest ? `<p role="status">${worktreeText('Refreshing worktrees…', '正在刷新工作树…')}</p>` : ''}
+      ${review.listError ? `<p class="worktree-review-error" role="alert">${escapeHtml(review.listError)}</p>` : ''}
+      ${(status?.stale || review.stale) && !review.listRequest ? `<p>${worktreeText('Worktree information could not be refreshed. Showing the last known results.', '无法刷新工作树信息，当前显示上次的结果。')}</p>` : changed && !review.listRequest ? `<p>${worktreeText('The worktree list changed. Refresh to see the latest information.', '工作树列表已更新。请刷新以查看最新信息。')}</p>` : ''}
+    </div>
+    <div class="worktree-review-layout"><nav id="worktree-review-list" class="worktree-review-list" aria-label="${worktreeText('Worktrees', '工作树')}">${renderWorktreeReviewList(review) || (!review.listRequest && !review.listError ? `<p class="worktree-review-placeholder">${worktreeText('No worktrees to display.', '没有可显示的工作树。')}</p>` : '')}</nav>
+      <section id="worktree-review-detail" class="worktree-review-detail" aria-label="${worktreeText('Selected worktree', '选中的工作树')}">${renderWorktreeReviewDetails(review)}</section></div>
+    <div class="worktree-review-feedback" aria-live="polite">${review.markError ? `<p class="worktree-review-error">${escapeHtml(review.markError)}</p>` : review.marked ? `<p>${icon('check')} ${worktreeText('Marked as reviewed.', '已标记为已审查。')}</p>` : ''}</div>
+    <footer><button id="worktree-review-refresh" class="push-review-cancel" data-action="refresh-worktree-review" aria-disabled="${Boolean(review.listRequest || review.markRequest)}">${icon('refresh')}${worktreeText('Refresh', '刷新')}</button><button id="worktree-review-mark" class="primary-button" data-action="mark-worktree-review" aria-disabled="${!canMarkWorktreeReview(review)}">${icon('check')}${review.markRequest ? worktreeText('Marking…', '正在标记…') : worktreeText('Mark as reviewed', '标记为已审查')}</button></footer>
+  </section></div>`;
+}
+
 function renderConflictState(s) {
   const operation = s.operation;
   if (!operation) return '';
@@ -1187,7 +1428,7 @@ function renderCommitRepository(s) {
   const label = `${icon('repo')}<span class="commit-repository-name">${escapeHtml(name)}</span>`;
   return `<div class="commit-repository-header">${s.repositoryCount > 1
     ? `<button class="commit-repository-label commit-repository-picker" data-action="choose-repository" aria-label="Choose repository, current ${escapeHtml(name)}" aria-haspopup="dialog" title="${escapeHtml(title)}\nChoose repository" ${ui.busy ? 'disabled' : ''}>${label}${icon('chevron-down')}</button>`
-    : `<div class="commit-repository-label" aria-label="Current repository ${escapeHtml(name)}" title="${escapeHtml(title)}">${label}</div>`}<button class="commit-header-branch" data-checkout-pending="${ui.checkoutPending}" data-action="branches" aria-haspopup="dialog" aria-expanded="${ui.branchOpen}" title="${escapeHtml(s.branch)}" aria-label="Current branch ${escapeHtml(s.branch)}; open branches" ${ui.busy ? 'disabled' : ''}>${icon(ui.checkoutPending ? 'loading' : 'git-branch', ui.checkoutPending ? 'codicon-modifier-spin' : '')}<span class="checkout-branch-label">${escapeHtml(s.branch === '(detached)' ? 'Detached HEAD' : s.branch)}</span></button></div>`;
+    : `<div class="commit-repository-label" aria-label="Current repository ${escapeHtml(name)}" title="${escapeHtml(title)}">${label}</div>`}<button class="commit-header-branch" data-checkout-pending="${ui.checkoutPending}" data-action="branches" aria-haspopup="dialog" aria-expanded="${ui.branchOpen}" title="${escapeHtml(s.branch)}" aria-label="Current branch ${escapeHtml(s.branch)}; open branches" ${ui.busy ? 'disabled' : ''}>${icon(ui.checkoutPending ? 'loading' : 'git-branch', ui.checkoutPending ? 'codicon-modifier-spin' : '')}<span class="checkout-branch-label">${escapeHtml(s.branch === '(detached)' ? 'Detached HEAD' : s.branch)}</span></button>${renderWorktreeReviewTrigger(s)}</div>`;
 }
 
 function renderCommitToolbar(s) {
@@ -1734,7 +1975,7 @@ function renderCommitDetails(s) {
     ${toolbar}
     <div class="commit-metadata" tabindex="0" aria-label="Commit metadata">
       <div class="commit-detail-head"><div><strong>${escapeHtml(commit.subject)}</strong></div></div>
-      <div class="commit-detail-meta"><span>${escapeHtml(commit.author)} · ${absoluteTime(commit.date)}</span><code title="${escapeHtml(commit.hash)}">${escapeHtml(commit.shortHash || commit.hash.slice(0, 7))}</code></div>
+      <div class="commit-detail-meta">${renderCommitAuthor(commit.author)}<span>${absoluteTime(commit.date)}</span><code title="${escapeHtml(commit.hash)}">${escapeHtml(commit.shortHash || commit.hash.slice(0, 7))}</code></div>
       ${commit.refs?.length ? `<div class="commit-detail-refs">${commit.refs.map(renderRef).join('')}</div>` : ''}
       ${details?.body && details.body !== details.subject ? `<p class="commit-body">${escapeHtml(details.body)}</p>` : ''}
       ${details?.parents?.length ? `<div class="detail-parents"><span>Parents</span>${details.parents.map((parent) => `<code title="${escapeHtml(parent)}">${escapeHtml(parent.slice(0, 8))}</code>`).join('')}</div>` : ''}
@@ -1883,7 +2124,8 @@ function renderLogActionToolbar(s) {
   const head = s.headOid || s.commits.find(commit => commit.refs?.some(ref => ref.current))?.hash;
   const canLocate = head && !ui.historyRefLoading && !ui.historySearchLoading && graphCommits().some(commit => commit.hash === head);
   return `<div class="log-action-toolbar" role="group" aria-label="History actions">
-    <button class="idea-toolbar-button" data-action="choose-worktree" aria-label="Manage Worktrees" title="Worktrees" ${ui.busy ? 'disabled' : ''}>${icon('folder-opened')}<span class="log-action-label">Worktrees</span></button>
+    ${renderWorktreeReviewTrigger(s)}
+    <button class="idea-toolbar-button" data-action="choose-worktree" aria-label="${worktreeText('Manage Worktrees', '管理工作树')}" title="${worktreeText('Manage Worktrees', '管理工作树')}" ${ui.busy ? 'disabled' : ''}>${icon('folder-opened')}</button>
     <button class="idea-toolbar-button" data-action="stashes" aria-label="Open saved Stashes" title="Stashes" ${ui.busy ? 'disabled' : ''}>${icon('archive')}<span class="log-action-label">Stashes</span></button>
     <button class="idea-toolbar-button" data-action="show-changes" aria-label="Open Commit tool window" title="Open Commit tool window">${kivoIcon('changes', 'kivo-toolbar-mark')}<span class="log-action-label">Commit</span></button>
     ${s.repositoryCount > 1 ? `<button class="idea-toolbar-button" data-action="choose-repository" aria-label="Choose repository, current ${escapeHtml(s.repositoryName)}" title="Repository: ${escapeHtml(s.repositoryName)}" ${ui.busy ? 'disabled' : ''}>${icon('repo')}<span class="log-action-label">Repos</span></button>` : ''}
@@ -2005,7 +2247,7 @@ function renderGraph(s) {
         ${ui.selectedCommitHashes.size > 1 && !ui.commitRangeDragging ? `<div class="history-selection-bar"><span role="status">${ui.selectedCommitHashes.size} commits selected</span><button class="history-selection-action" data-action="cherry-pick-selected" title="${escapeHtml(cherryPickUnavailable() || `Apply to ${s.branch}`)}" ${cherryPickUnavailable() ? 'disabled' : ''}>Cherry-pick…</button><button class="idea-toolbar-button" data-action="close-commit" aria-label="Clear selected commits">${icon('close')}</button></div>` : ''}
         <div class="log-column-header" aria-hidden="true" style="--graph-width:${graphWidth}px"><span data-log-column="graph">${document.body.dataset.locale === 'zh' ? '分支图' : 'Graph'}</span><span data-log-column="commit">${document.body.dataset.locale === 'zh' ? '提交' : 'Commit'}</span></div>
         <div class="graph-list ${graph.compressed ? 'graph-compressed' : ''} ${ui.graphLoadingMore ? 'is-loading' : ''}" id="kivo-graph-list" data-graph-list role="listbox" aria-multiselectable="true" aria-label="Commit history${graph.compressed ? `, compact ${laneCount}-lane topology` : ''}" aria-busy="${ui.graphLoadingMore || ui.historyRefLoading || ui.historySearchLoading}" aria-setsize="${commits.length}" style="--lane-count:${laneCount};--graph-width:${graphWidth}px;--graph-row-height:${GRAPH_ROW_HEIGHT}px">${ui.historyRefLoading || ui.historySearchLoading && !commits.length ? `<div class="inline-empty" role="status">${icon('loading', 'codicon-modifier-spin')} ${ui.historyRefLoading ? 'Loading branch history…' : 'Searching complete history…'}</div>` : commits.length ? `<div class="graph-rows" id="kivo-graph-rows"><div class="graph-virtual-spacer" id="kivo-graph-top" aria-hidden="true" style="height:${windowed.topSpacer}px"></div><div class="graph-row-window" id="kivo-graph-window" data-graph-window data-window-start="${windowed.start}" data-window-end="${windowed.end}">${visibleCommits.map((commit, index) => `<article class="graph-row ${commit.unpushedTo ? 'unpushed' : ''} ${commit.parents.length > 1 ? 'merge-row' : ''} ${ui.selectedCommitHashes.has(commit.hash) ? 'selected' : ''}" data-commit="${escapeHtml(commit.hash)}" data-hash="${escapeHtml(commit.hash)}" role="option" aria-selected="${ui.selectedCommitHashes.has(commit.hash)}" aria-posinset="${windowed.start + index + 1}" tabindex="${focusHash === commit.hash ? '0' : '-1'}">
-          <div class="graph-canvas">${renderGraphSvg(commit, graph)}</div><div class="graph-commit"><div class="log-subject"><strong title="${escapeHtml(commit.subject)}">${escapeHtml(commit.subject)}</strong></div><div class="log-meta"><span class="log-author">${escapeHtml(commit.author)}</span><code title="${escapeHtml(commit.hash)}">${escapeHtml(commit.shortHash)}</code>${renderLogDate(commit.date)}${renderUnpushedBadge(commit)}${renderRowRefs(commit.refs)}</div></div><span class="commit-row-menu" data-commit-row-menu aria-hidden="true" title="Commit actions">${icon('ellipsis')}</span>
+          <div class="graph-canvas">${renderGraphSvg(commit, graph)}</div><div class="graph-commit"><div class="log-subject"><strong data-commit-subject>${escapeHtml(commit.subject)}</strong></div><div class="log-meta"><span class="log-author">${renderCommitAuthor(commit.author)}</span><code title="${escapeHtml(commit.hash)}">${escapeHtml(commit.shortHash)}</code>${renderLogDate(commit.date)}${renderUnpushedBadge(commit)}${renderRowRefs(commit.refs)}</div></div><span class="commit-row-menu" data-commit-row-menu aria-hidden="true" title="Commit actions">${icon('ellipsis')}</span>
         </article>`).join('')}</div><div class="graph-virtual-spacer" id="kivo-graph-bottom" aria-hidden="true" style="height:${windowed.bottomSpacer}px"></div></div>` : `<div class="inline-empty" role="status">${ui.historySearchError ? `Search failed. <button data-action="retry-history-search">Retry</button>` : historySearchActive() ? 'No matching commits in this repository' : 'No commits yet'}</div>`}${commits.length && !ui.historyRefLoading ? `<div class="graph-load-sentinel" role="status">${ui.graphLoadingMore ? `${icon('loading', 'codicon-modifier-spin')}<span>Loading older commits…</span>` : hasMore ? 'Scroll to the bottom for older commits' : 'End of history'}</div>` : ''}</div>
       </section>
       <div class="log-detail-splitter" data-log-detail-splitter role="separator" aria-label="Resize commit history and details" aria-controls="kivo-log-history kivo-log-details" aria-orientation="${detailUsesRows ? 'horizontal' : 'vertical'}" aria-valuemin="${detailMinimum}" aria-valuemax="${detailMaximum}" aria-valuenow="${detailSize}" tabindex="0" title="Drag to resize. Double-click to reset."></div>
@@ -2771,6 +3013,33 @@ function bind() {
     node.__ideaGitListeners.add(token);
     node.addEventListener(event, handler);
   });
+  once('[data-worktree-review-entry]', 'click', event => {
+    const review = ui.worktreeReview;
+    const entry = review?.entries?.find(item => item.id === event.currentTarget.dataset.worktreeReviewEntry);
+    if (entry && entry.id !== review.selected?.id) requestWorktreeReviewDetails(entry);
+  });
+  once('[data-worktree-review-section]', 'click', event => {
+    if (!ui.worktreeReview) return;
+    ui.worktreeReview.section = event.currentTarget.dataset.worktreeReviewSection;
+    render();
+  });
+  once('[data-worktree-review-commit]', 'click', event => {
+    const review = ui.worktreeReview;
+    const hash = event.currentTarget.dataset.worktreeReviewCommit;
+    if (review?.selectedHash === hash) { review.selectedHash = undefined; render(); }
+    else requestWorktreeReviewCommit(hash);
+  });
+  once('[data-worktree-review-file]', 'click', event => openWorktreeReviewDiff(event.currentTarget.dataset.worktreeReviewFile));
+  once('#worktree-review-dialog', 'keydown', event => {
+    if (event.key !== 'Tab') return;
+    const items = [...event.currentTarget.querySelectorAll('button:not(:disabled)')];
+    if (!items.length) { event.preventDefault(); return; }
+    const current = items.indexOf(document.activeElement);
+    if (current === -1 || event.shiftKey && current === 0 || !event.shiftKey && current === items.length - 1) {
+      event.preventDefault();
+      (event.shiftKey ? items.at(-1) : items[0]).focus();
+    }
+  });
   once('[data-workflow-file]', 'click', event => { const w = ui.workflow; if (w) post('openWorkflowDiff', { root: w.root, requestId: w.requestId, path: event.currentTarget.dataset.workflowFile }); });
   once('[data-operation-recovery]', 'click', event => {
     if (!ui.failure || ui.busy) return;
@@ -3291,6 +3560,12 @@ function bind() {
 }
 
 function handleAction(action) {
+  if (action === 'open-worktree-review') { if (ui.snapshot) post('worktreeReviewOpen', { root: ui.snapshot.root }); return; }
+  if (action === 'close-worktree-review') { closeWorktreeReview(); return; }
+  if (action === 'refresh-worktree-review') { requestWorktreeReviewList(); return; }
+  if (action === 'mark-worktree-review') { markWorktreeReview(); return; }
+  if (action === 'retry-worktree-review-details') { if (ui.worktreeReview?.selected) requestWorktreeReviewDetails(ui.worktreeReview.selected, true); return; }
+  if (action === 'retry-worktree-review-commit') { if (ui.worktreeReview?.selectedHash) requestWorktreeReviewCommit(ui.worktreeReview.selectedHash); return; }
   if (action === 'stashes') { requestWorkflow('stashes'); return; }
   if (action === 'close-workflow') { closeWorkflow(); return; }
   if (action === 'retry-workflow' && ui.workflow) { const { kind, branch, remote, hash, hashes } = ui.workflow; requestWorkflow(kind, { branch, remote, hash, hashes }); return; }
@@ -3601,8 +3876,86 @@ function dismissToast(element) {
   else element.remove();
 }
 
+function receiveWorktreeReview(message) {
+  const { type, root } = message;
+  if (type === 'worktreeReviewStatus') {
+    const current = ui.worktreeReviewStatus.get(root);
+    if (current?.revision > message.revision) return;
+    const review = ui.worktreeReview;
+    if (review?.root === root && review.markedStatus && message.revision >= review.markedStatus.revision) {
+      if (sameWorktreeReviewStatus(review.markedStatus, message)) review.viewedStatus = message;
+      review.markedStatus = undefined;
+    }
+    ui.worktreeReviewStatus.set(root, message);
+    if (root === ui.snapshot?.root) render();
+    return;
+  }
+  if (surface !== 'history') return;
+  if (type === 'worktreeReviewShown') {
+    if (!ui.snapshot) ui.pendingWorktreeReviewRoot = root;
+    else if (root === ui.snapshot.root) openWorktreeReview(root);
+    return;
+  }
+  const review = ui.worktreeReview;
+  if (!review || review.root !== root || ui.snapshot?.root !== root) return;
+  const { requestId, id, version, error } = message;
+  if (type === 'worktreeReviewListResult') {
+    if (review.listRequest !== requestId) return;
+    review.listRequest = undefined;
+    review.listError = error;
+    review.stale = Boolean(message.stale || error);
+    if (!review.stale) {
+      const previous = review.selected;
+      review.entries = message.entries || [];
+      review.viewedStatus = ui.worktreeReviewStatus.get(root);
+      const selected = previous && review.entries.find(entry => entry.id === previous.id);
+      if (selected) { requestWorktreeReviewDetails(selected, selected.version === previous.version); return; }
+      review.selected = undefined;
+      review.detailsRequest = undefined;
+      review.commitRequest = undefined;
+      review.marked = false;
+    } else if (!review.entries && message.entries) review.entries = message.entries;
+  } else {
+    if (!review.selected || id !== review.selected.id || version !== review.selected.version) return;
+    if (type === 'worktreeReviewDetailsResult') {
+      if (review.detailsRequest !== requestId) return;
+      review.detailsRequest = undefined;
+      review.detailsError = error;
+      review.details = message.payload;
+      if (review.selectedHash && review.details?.commits.some(commit => commit.hash === review.selectedHash)) {
+        requestWorktreeReviewCommit(review.selectedHash);
+        return;
+      }
+      review.selectedHash = undefined;
+    } else if (type === 'worktreeReviewCommitResult') {
+      if (review.commitRequest !== requestId || message.hash !== review.selectedHash) return;
+      review.commitRequest = undefined;
+      review.commitError = error;
+      review.commitDetails = message.payload;
+    } else if (type === 'worktreeReviewDiffResult') {
+      if (message.hash !== review.selectedHash || message.path !== review.diffFile) return;
+      review.diffError = error;
+    } else if (type === 'worktreeReviewMarkResult') {
+      if (review.markRequest !== requestId) return;
+      review.markRequest = undefined;
+      review.markError = message.ok ? undefined : error || worktreeText('Could not mark this worktree as reviewed.', '无法将此工作树标记为已审查。');
+      if (message.ok) {
+        const status = ui.worktreeReviewStatus.get(root);
+        if (sameWorktreeReviewStatus(review.viewedStatus, status) && Number.isFinite(status.revision)) {
+          review.markedStatus = { ...status, revision: status.revision + 1, pending: status.pending - Number(review.selected.pending) };
+        }
+        review.selected.pending = false;
+        review.selected.previousReviewHead = review.selected.head;
+        review.marked = true;
+      }
+    } else return;
+  }
+  render();
+}
+
 window.addEventListener('message', (event) => {
   const message = event.data;
+  if (message.type?.startsWith('worktreeReview')) { receiveWorktreeReview(message); return; }
   if (message.type === 'pushPreparing') {
     if (message.root !== ui.snapshot?.root || ui.pushPreparing?.requestId > message.requestId) return;
     ui.pushPreparing = { requestId: message.requestId, branch: message.branch, head: message.head, active: message.active, error: message.error };
@@ -3770,6 +4123,7 @@ window.addEventListener('message', (event) => {
     const previousRoot = ui.snapshot?.root;
     const previousBranch = ui.snapshot?.branch;
     const nextRoot = message.payload.root;
+    if (ui.worktreeReview && ui.worktreeReview.root !== nextRoot) closeWorktreeReview(false);
     if (ui.workflow?.kind === 'stashDetails' && ui.workflow.error && message.payload.operation?.files.length) closeWorkflow();
     if (ui.workflow && (ui.workflow.root !== nextRoot || ui.workflow.kind === 'compare' && ui.workflow.payload && ui.workflow.payload.currentOid !== message.payload.headOid)) closeWorkflow();
     if (previousRoot && previousRoot !== nextRoot) saveRepositoryState(previousRoot);
@@ -3839,9 +4193,14 @@ window.addEventListener('message', (event) => {
       toast('Commit is not in the available history.', 'error');
     }
     if (ui.pendingRevealHash && !historySearchActive()) requestOlderHistoryForHash();
+    const pendingWorktreeReviewRoot = ui.pendingWorktreeReviewRoot;
+    ui.pendingWorktreeReviewRoot = undefined;
+    if (pendingWorktreeReviewRoot === nextRoot) openWorktreeReview(nextRoot);
   }
   if (message.type === 'empty' || message.type === 'repositoryLoading') {
     persist();
+    closeWorktreeReview(false);
+    if (message.type === 'empty') ui.pendingWorktreeReviewRoot = undefined;
     ui.pushReview = undefined;
     ui.pushPreparing = undefined;
     clearPushCommitPreview(true);
@@ -3938,8 +4297,96 @@ window.addEventListener('message', (event) => {
   if (message.type === 'notice') toast(message.message, message.phase || 'error');
 });
 
+// Render a single visual copy outside the scrolling/virtualized rows. The
+// untouched subject text in the row remains its accessible name content.
+const commitSubjectSelector = '[data-commit-subject]';
+const commitSubjectRowSelector = '[data-commit], [data-worktree-review-commit]';
+const commitSubjectPreview = document.createElement('div');
+commitSubjectPreview.className = 'commit-subject-preview';
+commitSubjectPreview.setAttribute('aria-hidden', 'true');
+commitSubjectPreview.hidden = true;
+app.after(commitSubjectPreview);
+let hoveredCommitSubject, focusedCommitSubject, shownCommitSubject;
+let dismissedHoverSubject, dismissedFocusSubject;
+
+function updateCommitSubjectPreview() {
+  const subject = hoveredCommitSubject === dismissedHoverSubject ? undefined : hoveredCommitSubject;
+  const anchor = subject || (focusedCommitSubject === dismissedFocusSubject ? undefined : focusedCommitSubject);
+  const row = anchor?.closest(commitSubjectRowSelector);
+  const scrollport = row?.closest('.graph-list, .worktree-review-detail');
+  const bounds = anchor?.getBoundingClientRect();
+  const clip = scrollport?.getBoundingClientRect();
+  if (!anchor?.isConnected || row?.closest('[inert]') || ui.commitContextMenu || ui.branchContextMenu ||
+      anchor.scrollWidth <= anchor.clientWidth || !bounds?.height || bounds.bottom <= Math.max(0, clip?.top ?? 0) ||
+      bounds.top >= Math.min(window.innerHeight, clip?.bottom ?? window.innerHeight)) {
+    shownCommitSubject = undefined;
+    commitSubjectPreview.hidden = true;
+    return;
+  }
+  shownCommitSubject = anchor;
+  commitSubjectPreview.textContent = anchor.textContent;
+  commitSubjectPreview.hidden = false;
+  const { offsetWidth: width, offsetHeight: height } = commitSubjectPreview;
+  const { top, bottom } = row.getBoundingClientRect();
+  const margin = 8;
+  const preferBelow = bottom + height + margin <= window.innerHeight || window.innerHeight - bottom >= top;
+  commitSubjectPreview.style.left = `${clamp(bounds.left, margin, Math.max(margin, window.innerWidth - width - margin))}px`;
+  commitSubjectPreview.style.top = `${clamp(preferBelow ? bottom : top - height, margin, Math.max(margin, window.innerHeight - height - margin))}px`;
+}
+
+function setHoveredCommitSubject(subject) {
+  if (subject === hoveredCommitSubject) return;
+  hoveredCommitSubject = subject;
+  dismissedHoverSubject = undefined;
+  updateCommitSubjectPreview();
+}
+
+document.addEventListener('pointermove', event => {
+  if (event.pointerType === 'touch' || event.buttons) return;
+  const subject = event.target.closest?.(commitSubjectSelector);
+  if (shownCommitSubject && shownCommitSubject === hoveredCommitSubject && subject !== hoveredCommitSubject) {
+    // Keep the preview open when moving from its row onto it, but don't turn
+    // it into a hit target that steals clicks/focus from the panel beneath.
+    const { left, right, top, bottom } = commitSubjectPreview.getBoundingClientRect();
+    if (event.target.closest?.(commitSubjectRowSelector) === hoveredCommitSubject.closest(commitSubjectRowSelector) ||
+        event.clientX >= left && event.clientX <= right && event.clientY >= top && event.clientY <= bottom) return;
+  }
+  setHoveredCommitSubject(subject);
+});
+document.addEventListener('pointerout', event => {
+  if (!event.relatedTarget) setHoveredCommitSubject(undefined);
+});
+document.addEventListener('focusin', event => {
+  const row = event.target.closest?.(commitSubjectRowSelector);
+  if (!row?.matches(':focus-visible')) return;
+  hoveredCommitSubject = undefined;
+  dismissedHoverSubject = undefined;
+  focusedCommitSubject = row.querySelector(commitSubjectSelector);
+  dismissedFocusSubject = undefined;
+  updateCommitSubjectPreview();
+});
+document.addEventListener('focusout', event => {
+  if (!focusedCommitSubject || event.target !== focusedCommitSubject.closest(commitSubjectRowSelector)) return;
+  focusedCommitSubject = undefined;
+  dismissedFocusSubject = undefined;
+  updateCommitSubjectPreview();
+});
+window.addEventListener('scroll', () => {
+  hoveredCommitSubject = undefined;
+  dismissedHoverSubject = undefined;
+  if (shownCommitSubject || focusedCommitSubject) updateCommitSubjectPreview();
+}, true);
+
 document.addEventListener('keydown', (event) => {
   if (event.key !== 'Escape') return;
+  if (shownCommitSubject) {
+    event.preventDefault();
+    dismissedHoverSubject = hoveredCommitSubject;
+    dismissedFocusSubject = focusedCommitSubject;
+    updateCommitSubjectPreview();
+    return;
+  }
+  if (ui.worktreeReview) { event.preventDefault(); closeWorktreeReview(); return; }
   if (ui.workflow) { event.preventDefault(); closeWorkflow(); return; }
   if (ui.pushReview) {
     event.preventDefault();
@@ -4106,7 +4553,12 @@ setInterval(() => {
   if (ui.snapshot && ui.lastFetchedAt && ui.syncPhase !== 'fetching') render();
 }, 60000);
 
-window.addEventListener('resize', () => { positionPullMenu(); positionHistoryFilters(); updateCommitMessageBudget(); });
+window.addEventListener('resize', () => {
+  positionPullMenu();
+  positionHistoryFilters();
+  updateCommitMessageBudget();
+  if (hoveredCommitSubject || focusedCommitSubject) updateCommitSubjectPreview();
+});
 window.addEventListener('beforeunload', persist);
 
 post('ready', { historyRef: surface === 'history' ? ui.graphBranchFilter : undefined });
