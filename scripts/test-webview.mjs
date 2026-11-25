@@ -796,8 +796,13 @@ try {
   assert.ok(await page.evaluate(() => window.__vscodeMessages.some((message) => message.type === 'commitDetails' && message.hash === '2d4411f0a1b2c3d4e5f678901234567890abcd12')), 'Blame navigation should load commit details.');
 
   await openSurface(page, 'surface=history&state=multi');
-  await page.getByRole('group', { name: 'History actions' }).getByRole('button', { name: /^Choose repository/ }).click();
+  const openHistoryMore = () => page.getByRole('button', { name: 'More History actions' }).click();
+  await openHistoryMore();
+  await page.getByRole('menuitem', { name: /^Choose repository/ }).click();
   assert.ok(await page.evaluate(() => window.__vscodeMessages.some((message) => message.type === 'chooseRepository')), 'History should also allow repository switching.');
+  await openHistoryMore();
+  await page.getByRole('menuitem', { name: 'Open Commit tool window' }).click();
+  assert.ok(await page.evaluate(() => window.__vscodeMessages.some((message) => message.type === 'showChanges')), 'History More should retain the Commit shortcut.');
 
   await openSurface(page, 'surface=history');
   assert.equal(await page.locator('.log-workspace').evaluate((element) => getComputedStyle(element).fontFamily), popupFont, 'Branch picker and History should use the same font family.');
@@ -951,7 +956,11 @@ try {
   assert.equal(await refRow.locator('.log-row-refs .graph-ref').count(), 1, 'Rows should show one primary ref and summarize the others.');
   assert.equal(await refRow.locator('.ref-overflow').textContent(), '+2');
   assert.match(await refRow.locator('.log-row-refs').getAttribute('title'), /origin\/feature\/a-very-long/);
-  assert.ok(await refRow.locator('.log-subject').evaluate(element => element.querySelector('strong').getBoundingClientRect().width >= element.getBoundingClientRect().width * .5), 'Long refs should leave at least half of the subject area for the commit title.');
+  assert.ok(await refRow.evaluate(row => {
+    const subject = row.querySelector('[data-commit-subject]');
+    const refs = row.querySelector('.log-row-refs');
+    return subject.scrollWidth <= subject.clientWidth + 1 && subject.getBoundingClientRect().bottom <= refs.getBoundingClientRect().top + 1;
+  }), 'Long refs should stay below the title and leave this subject fully readable.');
 
   const comparisonBranch = 'feature/keaton/20260924-solar';
   await page.locator(`[data-log-branch="${comparisonBranch}"]`).click({ button: 'right' });
@@ -969,7 +978,11 @@ try {
   await page.keyboard.press('Escape');
   assert.equal(await page.locator('.workflow-dialog').count(), 0);
 
-  await page.locator('[data-action="stashes"]').click();
+  const openHistoryStashes = async () => {
+    await openHistoryMore();
+    await page.getByRole('menuitem', { name: 'Open saved Stashes' }).click();
+  };
+  await openHistoryStashes();
   await page.waitForSelector('.workflow-stash');
   await page.locator('#stash-message').fill('unfinished feature');
   await page.locator('[data-action="save-stash"]').click();
@@ -986,10 +999,10 @@ try {
   await page.keyboard.press('Escape');
 
   await page.evaluate(() => { window.__holdWorkflow = true; });
-  await page.locator('[data-action="stashes"]').click();
+  await openHistoryStashes();
   const oldWorkflow = await page.evaluate(() => window.__vscodeMessages.filter(message => message.type === 'workflowRequest').at(-1));
   await page.keyboard.press('Escape');
-  await page.locator('[data-action="stashes"]').click();
+  await openHistoryStashes();
   const newWorkflow = await page.evaluate(() => window.__vscodeMessages.filter(message => message.type === 'workflowRequest').at(-1));
   await page.evaluate(({ oldWorkflow, newWorkflow }) => {
     emit({ type: 'workflowResult', root: oldWorkflow.root, requestId: oldWorkflow.requestId, payload: [{ subject: 'stale stash' }] });
@@ -1023,7 +1036,7 @@ try {
   for (const viewport of [{ width: 240, height: 300 }, { width: 1200, height: 300 }]) {
     await page.setViewportSize(viewport);
     await openSurface(page, viewport.width > 600 ? 'surface=history' : 'surface=changes');
-    if (viewport.width > 600) await page.locator('[data-action="stashes"]').click();
+    if (viewport.width > 600) await openHistoryStashes();
     else { await page.locator('[data-action="toolbar-more"]').click(); await page.locator('[data-action="stashes"]').click(); }
     await page.waitForSelector('.workflow-stash');
     const fits = await page.locator('.workflow-dialog').evaluate(element => { const r = element.getBoundingClientRect(), f = element.querySelector('footer').getBoundingClientRect(); return r.top >= 0 && r.bottom <= innerHeight && r.left >= 0 && r.right <= innerWidth && f.bottom <= innerHeight && element.scrollWidth <= element.clientWidth; });
@@ -1128,7 +1141,7 @@ try {
     await page.waitForSelector('[data-workflow-file]');
     await capture('06-branch-comparison');
     await page.keyboard.press('Escape');
-    await page.locator('[data-action="stashes"]').click();
+    await openHistoryStashes();
     await page.waitForSelector('.workflow-stash');
     await capture('07-stashes');
 

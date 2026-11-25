@@ -5,11 +5,12 @@ import path from 'node:path';
 import { promisify } from 'node:util';
 import { GitCommandError, parseWorktrees, sameWorktreePath, type WorktreeSummary } from './checkout';
 import { parsePorcelainV2 } from './statusParser';
-import type { GitChange } from './types';
+import type { GitChange, WorkflowFile } from './types';
 
 const exec = promisify(execFile);
 const defaultLimit = 20;
 const maximumLimit = 100;
+const maximumGitOffset = 0x7fffffff; // Git's --skip takes a signed int.
 const scopeChanged = 'The Git repository changed. Refresh Worktree Review and try again.';
 const worktreeUnavailable = 'This registered worktree is unavailable. Refresh Worktree Review and try again.';
 const worktreeChanged = 'This worktree or its HEAD changed. Refresh Worktree Review and try again.';
@@ -41,10 +42,29 @@ export interface WorktreeReviewWindow {
   hasMore: boolean;
 }
 
+export interface WorktreeReviewRange {
+  readonly tip: string;
+  readonly exclude?: string;
+}
+
 export interface WorktreeReviewData extends WorktreeReviewWindow {
   mode: 'recent' | 'since' | 'rewritten' | 'baseline-unavailable';
+  range?: WorktreeReviewRange;
   changes?: GitChange[];
   statusError?: string;
+}
+
+export interface WorktreeReviewTarget {
+  ref: string;
+  label: string;
+  oid: string;
+}
+
+export interface WorktreeReviewDelivery {
+  target: WorktreeReviewTarget;
+  head: string;
+  base: string;
+  files: WorkflowFile[];
 }
 
 interface DirectoryIdentity {
@@ -202,10 +222,10 @@ async function commitExists(objects: ObjectRunner, oid: string | undefined): Pro
   }
 }
 
-async function readLog(objects: ObjectRunner, tip: string, limit: number, exclude?: string): Promise<WorktreeReviewWindow> {
+async function readLog(objects: ObjectRunner, tip: string, limit: number, exclude?: string, offset = 0): Promise<WorktreeReviewWindow> {
   // `-z` frames the records. Use NULs for the individual well-formed Git
   // fields, so ordinary Unicode, newlines and other controls are not separators.
-  const output = await objects(['log', '--topo-order', '-n', String(limit + 1), '-z',
+  const output = await objects(['log', '--topo-order', '--no-show-signature', `--skip=${offset}`, '-n', String(limit + 1), '-z',
     '--format=%H%x00%h%x00%aI%x00%an%x00%s', tip, ...(exclude ? [`^${exclude}`] : []), '--']);
   const fields = output.split('\0');
   const commits: WorktreeReviewCommit[] = [];
@@ -236,11 +256,15 @@ async function readComparison(scope: Scope, entry: WorktreeReviewEntry, previous
   }
   const objects = objectRunner(scope);
   if (!await commitExists(objects, head)) throw new Error('The reviewed HEAD is no longer available in this repository.');
-  if (previous === undefined) return { mode: 'recent', ...await readLog(objects, head, limit) };
+  const withLog = async (mode: WorktreeReviewData['mode'], exclude?: string): Promise<WorktreeReviewData> => ({
+    mode, range: Object.freeze(exclude === undefined ? { tip: head } : { tip: head, exclude }),
+    ...await readLog(objects, head, limit, exclude)
+  });
+  if (previous === undefined) return withLog('recent');
   if (baseline === head) return { mode: 'since', commits: [], hasMore: false };
-  if (!baseline || !await commitExists(objects, baseline)) return { mode: 'baseline-unavailable', ...await readLog(objects, head, limit) };
-  if (!await baselineIsAncestor(objects, baseline, head)) return { mode: 'rewritten', ...await readLog(objects, head, limit) };
-  return { mode: 'since', ...await readLog(objects, head, limit, baseline) };
+  if (!baseline || !await commitExists(objects, baseline)) return withLog('baseline-unavailable');
+  if (!await baselineIsAncestor(objects, baseline, head)) return withLog('rewritten');
+  return withLog('since', baseline);
 }
 
 function matchingEntry(entries: Entry[], expected: WorktreeReviewEntry): Entry {
@@ -307,6 +331,101 @@ export async function readWorktreeReviewData(root: string, inventory: WorktreeRe
   ]);
   await checkScope(root, inventory);
   return { ...history, ...status };
+}
+
+export async function readWorktreeReviewPage(root: string, inventory: WorktreeReviewInventory, range: WorktreeReviewRange,
+  offset: number, limit = defaultLimit): Promise<WorktreeReviewWindow> {
+  if (!Number.isInteger(offset) || offset < 0 || offset > maximumGitOffset) throw new Error('Invalid Worktree Review page offset.');
+  const tip = commitOid(range?.tip);
+  const exclude = commitOid(range?.exclude);
+  if (!tip || (range.exclude !== undefined && !exclude)) throw new Error('Invalid Worktree Review history range.');
+  const scope = await checkScope(root, inventory);
+  const objects = objectRunner(scope);
+  const [hasTip, hasExclude] = await Promise.all([commitExists(objects, tip), exclude === undefined || commitExists(objects, exclude)]);
+  if (!hasTip || !hasExclude) throw new Error('The Worktree Review history range is no longer available in this repository.');
+  const page = await readLog(objects, tip, listLimit(limit), exclude, offset);
+  await checkScope(root, inventory);
+  return page;
+}
+
+function targetLabel(ref: string): string | undefined {
+  return /^refs\/(?:heads|remotes)\/(.+)$/.exec(ref)?.[1];
+}
+
+export async function readWorktreeReviewTargets(root: string, inventory: WorktreeReviewInventory): Promise<WorktreeReviewTarget[]> {
+  const scope = await checkScope(root, inventory);
+  // Full refs avoid local/remote ambiguity. Ignore symbolic aliases such as
+  // refs/remotes/origin/HEAD and list only refs pointing directly to a commit.
+  const output = await objectRunner(scope)(['for-each-ref', '--sort=refname',
+    '--format=%(refname)%00%(objectname)%00%(objecttype)%00%(symref)', 'refs/heads/', 'refs/remotes/']);
+  const targets: WorktreeReviewTarget[] = [];
+  const labelCounts = new Map<string, number>();
+  for (const line of output.split(/\r?\n/)) {
+    const [ref, object, type, symbolic] = line.split('\0');
+    const oid = commitOid(object);
+    const label = ref && targetLabel(ref);
+    if (!ref || !label || !oid || type !== 'commit' || symbolic !== '') continue;
+    targets.push({ ref, label, oid });
+    labelCounts.set(label, (labelCounts.get(label) ?? 0) + 1);
+  }
+  await checkScope(root, inventory);
+  return targets.map(target => labelCounts.get(target.label) === 1 ? target : { ...target, label: target.ref });
+}
+
+async function readDeliveryBase(objects: ObjectRunner, target: string, head: string): Promise<string> {
+  let output: string;
+  try {
+    output = await objects(['merge-base', '--all', target, head]);
+  } catch (error) {
+    if (error instanceof GitCommandError && error.exitCode === 1) {
+      throw new Error('The comparison target and reviewed HEAD have no common merge base.');
+    }
+    throw error;
+  }
+  const bases = gitLine(output).split(/\r?\n/);
+  if (bases.length > 1) throw new Error('The comparison target and reviewed HEAD have multiple merge bases.');
+  const base = commitOid(bases[0]);
+  if (!base) throw new Error('Git returned an invalid Worktree Review merge base.');
+  return base;
+}
+
+function parseDeliveryFiles(output: string, base: string, head: string): WorkflowFile[] {
+  const tokens = output.split('\0');
+  const invalid = 'Git returned an invalid Worktree Review file list.';
+  if (tokens.pop() !== '') throw new Error(invalid);
+  const files: WorkflowFile[] = [];
+  for (let index = 0; index < tokens.length;) {
+    const change = tokens[index++]!;
+    if (!/^(?:[ADMTUXB]|[MCR]\d{1,3})$/.test(change)) throw new Error(invalid);
+    const status = change[0]!;
+    const renamedOrCopied = status === 'R' || status === 'C';
+    const originalPath = renamedOrCopied ? tokens[index++] : undefined;
+    const file = tokens[index++];
+    if (!file || (renamedOrCopied && !originalPath)) throw new Error(invalid);
+    files.push({ path: file, ...(originalPath ? { originalPath } : {}), status, oldRevision: base, newRevision: head });
+  }
+  return files;
+}
+
+export async function readWorktreeReviewDelivery(root: string, inventory: WorktreeReviewInventory, entry: WorktreeReviewEntry,
+  target: WorktreeReviewTarget): Promise<WorktreeReviewDelivery> {
+  const scope = await checkScope(root, inventory);
+  const objects = objectRunner(scope);
+  const head = commitOid(entry.head);
+  const oid = commitOid(target?.oid);
+  const ref = target?.ref;
+  const label = target?.label;
+  if (!head || !await commitExists(objects, head)) throw new Error('The reviewed HEAD is no longer available in this repository.');
+  if (!oid || typeof ref !== 'string' || !targetLabel(ref) || typeof label !== 'string' || !await commitExists(objects, oid)) {
+    throw new Error('The comparison target is no longer available in this repository.');
+  }
+  // Neither branch is resolved again: compare the captured OIDs, even if a
+  // ref moved. Diffing the unique base to HEAD excludes target-only changes.
+  const base = await readDeliveryBase(objects, oid, head);
+  const output = await objects(['diff-tree', '-r', '--no-commit-id', '--name-status', '-z', '-M', '-l0',
+    '--no-color', '--no-ext-diff', '--no-textconv', '--no-relative', '--ignore-submodules=none', base, head, '--']);
+  await checkScope(root, inventory);
+  return { target: { ref, label, oid }, head, base, files: parseDeliveryFiles(output, base, head) };
 }
 
 export async function compareWorktreeReviewTarget(root: string, inventory: WorktreeReviewInventory, entry: WorktreeReviewEntry,

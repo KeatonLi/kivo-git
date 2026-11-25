@@ -145,7 +145,8 @@ export class IdeaGitViewProvider implements vscode.WebviewViewProvider, vscode.T
       (surface, message) => surface === undefined ? this.postToReadyViews(message) : this.readyViews.has(surface)
         ? Promise.resolve(this.views.get(surface)?.webview.postMessage(message)) : Promise.resolve(false),
       () => this.showLog(),
-      (client, hash, file, original, kind, details) => this.openCommitDiff(client, hash, file, original, kind, details, true)
+      (client, hash, file, original, kind, details) => this.openCommitDiff(client, hash, file, original, kind, details, true),
+      (root, file) => this.openWorkflowFileDiff(root, file)
     );
     this.context.subscriptions.push(
       vscode.window.onDidChangeWindowState(state => {
@@ -628,7 +629,8 @@ export class IdeaGitViewProvider implements vscode.WebviewViewProvider, vscode.T
       return;
     }
     if (message.type === 'worktreeReviewOpen' || message.type === 'worktreeReviewClose' || message.type === 'worktreeReviewList' ||
-      message.type === 'worktreeReviewDetails' || message.type === 'worktreeReviewCommit' || message.type === 'worktreeReviewDiff' || message.type === 'worktreeReviewMark') {
+      message.type === 'worktreeReviewDetails' || message.type === 'worktreeReviewCommit' || message.type === 'worktreeReviewDiff' || message.type === 'worktreeReviewMark' ||
+      message.type === 'worktreeReviewPage' || message.type === 'worktreeReviewDelivery' || message.type === 'worktreeReviewDeliveryDiff') {
       await this.worktreeReview.handle(surface, message);
       return;
     }
@@ -928,9 +930,7 @@ export class IdeaGitViewProvider implements vscode.WebviewViewProvider, vscode.T
           if (!session || session.root !== client.workspaceRoot || message.root !== session.root || message.requestId !== session.id) return;
           const file = session.files.find(file => file.path === message.path);
           if (!file) return;
-          const oldUri = this.revisionUri(file.originalPath || file.path, file.status === 'A' ? 'empty=1' : `commit=${file.oldRevision}`);
-          const newUri = this.revisionUri(file.path, file.status === 'D' ? 'empty=1' : `commit=${file.newRevision}`);
-          await vscode.commands.executeCommand('vscode.diff', oldUri, newUri, `${file.path} (${file.oldRevision.slice(0, 7)} ↔ ${file.newRevision.slice(0, 7)})`, { preview: false, preserveFocus: true });
+          await this.openWorkflowFileDiff(session.root, file);
           return;
         }
         case 'stashCreate':
@@ -1726,6 +1726,13 @@ export class IdeaGitViewProvider implements vscode.WebviewViewProvider, vscode.T
     const root = this.selectedWorkspace()?.uri.fsPath;
     if (root) parameters.set('repo', root);
     return vscode.Uri.from({ scheme: IdeaGitViewProvider.revisionScheme, path: `/${filePath}`, query: parameters.toString() });
+  }
+
+  private async openWorkflowFileDiff(root: string, file: WorkflowFile): Promise<void> {
+    if (this.selectedWorkspace()?.uri.fsPath !== root) throw new Error('The selected repository changed. Open the comparison again.');
+    const oldUri = this.revisionUri(file.originalPath || file.path, file.status === 'A' ? 'empty=1' : `commit=${file.oldRevision}`);
+    const newUri = this.revisionUri(file.path, file.status === 'D' ? 'empty=1' : `commit=${file.newRevision}`);
+    await vscode.commands.executeCommand('vscode.diff', oldUri, newUri, `${file.path} (${file.oldRevision.slice(0, 7)} ↔ ${file.newRevision.slice(0, 7)})`, { preview: false, preserveFocus: true });
   }
 
   private async openCommitDiff(client: GitClient, hash: string, filePath: string, originalPath?: string, kind?: string, loadedDetails?: CommitDetails, preserveFocus = false): Promise<void> {

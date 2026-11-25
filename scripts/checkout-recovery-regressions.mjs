@@ -18,15 +18,58 @@ export async function verifyCheckoutRecovery(page, openSurface) {
   assert.ok(await page.evaluate(() => window.__vscodeMessages.some(message => message.type === 'chooseWorktree' && message.root === fixture.root)),
     'Worktrees must remain discoverable and keyboard accessible with a single registered worktree.');
   await page.setViewportSize({ width: 1440, height: 260 });
-  const lastHistoryAction = page.getByRole('group', { name: 'History actions' }).getByRole('button', { name: 'Focus on commit history' });
-  await lastHistoryAction.focus();
-  assert.equal(await lastHistoryAction.evaluate(element => {
+  const toolbar = page.getByRole('group', { name: 'History actions' });
+  const focusHistory = toolbar.getByRole('button', { name: 'Focus on commit history' });
+  await focusHistory.focus();
+  assert.equal(await focusHistory.evaluate(element => {
     const toolbar = element.closest('.log-action-toolbar');
     const button = element.getBoundingClientRect(), bounds = toolbar.getBoundingClientRect();
     const workspace = toolbar.closest('.log-workspace').getBoundingClientRect();
     return button.top >= bounds.top && button.bottom <= bounds.bottom
       && bounds.top === workspace.top && bounds.width === workspace.width;
-  }), true, 'The last History action must remain keyboard accessible in the full-width top toolbar of a short panel.');
+  }), true, 'History Focus must remain keyboard accessible in the full-width top toolbar of a short panel.');
+  assert.equal(await toolbar.getByRole('button', { name: 'Refresh History' }).isVisible(), true);
+  assert.equal(await toolbar.getByRole('button', { name: 'Locate current commit' }).isVisible(), true);
+  const more = toolbar.getByRole('button', { name: 'More History actions' });
+  const menu = toolbar.locator('#kivo-history-actions-menu');
+  assert.equal(await more.getAttribute('aria-haspopup'), 'menu');
+  assert.equal(await more.getAttribute('aria-expanded'), 'false');
+  assert.equal(await menu.isVisible(), false);
+  await more.press('Enter');
+  assert.equal(await more.getAttribute('aria-expanded'), 'true');
+  assert.equal(await menu.locator('[data-action="choose-repository"]').count(), 0, 'A single repository needs no chooser.');
+  assert.equal(await menu.getByRole('menuitem', { name: 'Open saved Stashes' }).evaluate(element => document.activeElement === element), true);
+  await page.keyboard.press('ArrowDown');
+  assert.equal(await menu.getByRole('menuitem', { name: 'Open Commit tool window' }).evaluate(element => document.activeElement === element), true);
+  await page.keyboard.press('End');
+  await page.keyboard.press('Enter');
+  assert.equal(await menu.isVisible(), false);
+  assert.equal(await more.evaluate(element => document.activeElement === element), true);
+  assert.ok(await page.evaluate(() => window.__vscodeMessages.some(message => message.type === 'fetch')), 'Fetch from History More still reaches VS Code.');
+  await more.press('ArrowDown');
+  await page.keyboard.press('Shift+Tab');
+  assert.equal(await menu.isVisible(), false);
+  assert.equal(await focusHistory.evaluate(element => document.activeElement === element), true, 'Tab leaves More in the toolbar focus order.');
+
+  await page.setViewportSize({ width: 240, height: 260 });
+  await page.evaluate(() => emit({ type: 'snapshot', payload: { ...fixture, repositoryCount: 2 } }));
+  const selectedCommit = await page.locator('.graph-row.selected').getAttribute('data-commit');
+  await more.press('ArrowUp');
+  assert.equal(await menu.getByRole('menuitem', { name: /^Choose repository/ }).evaluate(element => document.activeElement === element), true);
+  assert.equal(await menu.evaluate(element => {
+    const rect = element.getBoundingClientRect();
+    return rect.left >= 7 && rect.right <= innerWidth - 7 && rect.top >= 0 && rect.bottom <= innerHeight - 7 && element.scrollWidth <= element.clientWidth;
+  }), true, 'The overflow menu must be readable in a narrow, short History panel.');
+  await page.keyboard.press('Escape');
+  assert.equal(await menu.isVisible(), false);
+  assert.equal(await more.evaluate(element => document.activeElement === element), true);
+  assert.equal(await page.locator('.graph-row.selected').getAttribute('data-commit'), selectedCommit, 'Dismissing More must not clear the selected commit.');
+  await more.click();
+  const search = page.locator('#graph-search');
+  await search.click();
+  assert.equal(await menu.isVisible(), false);
+  assert.equal(await search.evaluate(element => document.activeElement === element), true, 'Outside dismissal must not steal focus.');
+  await page.evaluate(() => emit({ type: 'snapshot', payload: fixture }));
   await page.setViewportSize({ width: 1440, height: 600 });
   await page.evaluate(() => {
     window.__checkoutFailure = { id: 40, root: fixture.root, kind: 'checkout', title: 'feature/login is already open in another worktree.',

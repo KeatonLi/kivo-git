@@ -789,7 +789,7 @@ body[data-surface="history"] .content { min-width: 0; background: var(--vscode-p
   padding: 2px 6px;
   border-bottom: 1px solid var(--history-divider, var(--border-subtle));
 }
-.parity-mode .log-action-toolbar .idea-toolbar-divider { flex: 0 0 1px; margin: 0 1px; }
+.parity-mode .log-action-toolbar .idea-toolbar-divider { flex: 0 0 1px; margin: 0 4px; }
 .parity-mode .log-action-toolbar .idea-toolbar-button {
   flex: 0 0 auto;
   display: inline-flex;
@@ -804,6 +804,49 @@ body[data-surface="history"] .content { min-width: 0; background: var(--vscode-p
   white-space: nowrap;
 }
 .parity-mode .log-action-toolbar .log-action-label { color: var(--vscode-foreground); }
+.history-actions-overflow { flex: 0 0 auto; margin-inline-start: auto; }
+.parity-mode .history-actions-overflow .log-action-label { color: inherit; }
+.parity-mode .history-actions-overflow [aria-expanded="true"] {
+  background: var(--vscode-toolbar-activeBackground, var(--vscode-toolbar-hoverBackground));
+  color: var(--vscode-foreground);
+}
+.history-actions-menu {
+  position: fixed;
+  z-index: 30;
+  width: min(208px, calc(100vw - 16px));
+  padding: 4px;
+  overflow: auto;
+  overscroll-behavior: contain;
+  border: 1px solid var(--vscode-menu-border, var(--vscode-panel-border));
+  border-radius: 4px;
+  background: var(--vscode-menu-background, var(--vscode-editorWidget-background, var(--surface-base)));
+  box-shadow: var(--shadow-popover);
+}
+.history-actions-menu button {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  min-height: 27px;
+  padding: 3px 7px;
+  border-radius: 3px;
+  background: transparent;
+  color: var(--vscode-menu-foreground, var(--vscode-foreground));
+  text-align: start;
+  font: inherit;
+  cursor: pointer;
+}
+.history-actions-menu button:is(:hover, :focus-visible):not(:disabled) {
+  background: var(--vscode-menu-selectionBackground, var(--vscode-toolbar-hoverBackground));
+  color: var(--vscode-menu-selectionForeground, var(--vscode-foreground));
+}
+.history-actions-menu button:focus-visible { outline: 1px solid var(--vscode-focusBorder, var(--accent)); outline-offset: -1px; }
+.history-actions-menu button:disabled { opacity: .45; cursor: default; }
+.history-actions-menu :is(.codicon, .kivo-icon) { width: 14px; height: 14px; flex: 0 0 14px; color: inherit; }
+@media (max-width: 500px) {
+  .parity-mode .log-action-toolbar .idea-toolbar-button { padding: 0; }
+  .parity-mode .log-action-toolbar .log-action-label { display: none; }
+}
 .parity-mode .log-branch-pane {
   grid-area: branches;
   min-width: 0;
@@ -880,14 +923,18 @@ body[data-surface="history"] .content { min-width: 0; background: var(--vscode-p
 .parity-mode .log-branch-group-title .codicon,
 .parity-mode .log-branch-folder .codicon { color: var(--muted); font-size: 12px; }
 .parity-mode .log-head-group .log-branch-group-title { color: var(--vscode-foreground); font-weight: 600; }
-.parity-mode .log-branch-folder { padding-left: calc(7px + var(--tree-indent, 0px)); }
+.parity-mode button.log-branch-folder { min-height: 25px; padding: 3px 6px 3px calc(7px + var(--tree-indent, 0px)); }
+.parity-mode .log-branch-folder-name { min-width: 0; line-height: 1.3; overflow-wrap: anywhere; }
+.parity-mode .log-branch-folder .codicon,
+.parity-mode .log-branch-row > .codicon { flex: none; }
+.parity-mode .log-branch-pane :is(.log-branch-group-title, .log-branch-folder, .log-branch-row, .log-branch-update, .branch-load-more):focus-visible { outline: 1px solid var(--vscode-focusBorder, var(--accent)); outline-offset: -1px; }
 .parity-mode .log-branch-row {
   min-height: var(--idea-row);
   width: 100%;
   display: flex;
   align-items: center;
   gap: 5px;
-  padding: 0 6px 0 calc(8px + var(--tree-indent, 0px));
+  padding: 3px 6px 3px calc(8px + var(--tree-indent, 0px));
   border-radius: 3px;
   background: transparent;
   color: var(--vscode-foreground);
@@ -936,7 +983,8 @@ body[data-surface="history"] .content { min-width: 0; background: var(--vscode-p
 .parity-mode .log-branch-search input { font-size: 12px; }
 .parity-mode .log-branch-group-title { font-size: 12px; }
 .parity-mode .log-branch-group-title > small { font-size: 10px; }
-.parity-mode .log-branch-row > span:not(.codicon):not(.branch-sync-indicator) { font-size: inherit; }
+.parity-mode .log-branch-row > .checkout-branch-label { font-size: inherit; line-height: 1.3; white-space: normal; overflow-wrap: anywhere; }
+.parity-mode .log-branch-row > small { flex: none; white-space: nowrap; }
 .parity-mode .log-filter-bar .graph-search input { font-size: 12px; }
 .parity-mode .log-column-header { height: 30px; font-size: 10px; letter-spacing: .3px; }
 .parity-mode .log-author,
@@ -959,27 +1007,47 @@ body[data-surface="history"] .content { min-width: 0; background: var(--vscode-p
   min-height: 42px;
   display: flex;
   align-items: center;
-  padding: 7px 10px;
+  padding: 6px 10px;
   border-bottom: 1px solid var(--vscode-panel-border, var(--border-subtle));
   background: var(--vscode-panel-background, var(--surface-base));
 }
 .log-filter-bar .graph-toolbar-head { position: relative; width: 100%; flex-wrap: wrap; gap: 6px; }
-.log-filter-bar .graph-search { flex: 1 1 72px; min-width: 0; height: 29px; margin-left: 0; border-radius: 4px; }
+.log-filter-bar :is(.graph-search, .history-ref-select, .history-filters-trigger) {
+  height: 28px;
+  border: 1px solid var(--vscode-contrastBorder, var(--vscode-input-border, var(--border-subtle)));
+  border-radius: 4px;
+  font: inherit;
+}
+.log-filter-bar .graph-search:focus-within,
+.log-filter-bar :is(.history-ref-select, .history-filters-trigger):focus-visible {
+  border-color: var(--vscode-focusBorder, var(--accent));
+  outline: 1px solid var(--vscode-focusBorder, var(--accent));
+  outline-offset: -1px;
+  box-shadow: none;
+}
+.log-filter-bar .graph-search { flex: 1 1 72px; min-width: 0; margin-left: 0; }
 .log-filter-bar .graph-search input { width: 0; padding: 0; }
 .history-ref-select {
   flex: 0 1 clamp(76px, 24cqi, 148px);
   min-width: min(76px, 100%);
   max-width: min(100%, 148px);
-  height: 29px;
   padding: 0 5px;
-  border: 1px solid var(--vscode-dropdown-border, var(--vscode-input-border, var(--border-subtle)));
-  border-radius: 4px;
   background: var(--vscode-dropdown-background, var(--vscode-input-background, var(--surface-base)));
   color: var(--vscode-dropdown-foreground, var(--vscode-input-foreground, var(--vscode-foreground)));
-  font: inherit;
   text-overflow: ellipsis;
 }
-.log-filter-bar .log-result-count { flex: 0 1 auto; min-width: 0; max-width: 23%; overflow: hidden; padding: 0; border: 0; font-size: 11px; text-overflow: ellipsis; }
+.log-filter-bar .log-result-count {
+  flex: 0 1 auto;
+  min-width: 0;
+  max-width: 23%;
+  overflow: hidden;
+  padding: 0 0 0 3px;
+  border: 0;
+  color: var(--vscode-descriptionForeground, var(--muted));
+  font-size: 10px;
+  font-weight: 400;
+  text-overflow: ellipsis;
+}
 .history-filter-disclosure { flex: 0 0 auto; max-width: 100%; }
 @container history-toolbar (max-width: 410px) {
   /* Keep the live status accessible without taking width from the controls. */
@@ -994,10 +1062,7 @@ body[data-surface="history"] .content { min-width: 0; background: var(--vscode-p
   display: flex;
   align-items: center;
   gap: 5px;
-  height: 29px;
   padding: 0 7px;
-  border: 1px solid var(--vscode-contrastBorder, var(--vscode-widget-border, var(--border-subtle)));
-  border-radius: 4px;
   background: transparent;
   color: var(--vscode-foreground);
   cursor: pointer;
@@ -1141,41 +1206,47 @@ body[data-surface="history"] .content { min-width: 0; background: var(--vscode-p
   display: flex;
   align-items: center;
   gap: 2px;
-  padding: 4px 7px;
+  padding: 4px 8px 4px 12px;
   border-bottom: 1px solid var(--vscode-panel-border, var(--border-subtle));
 }
-.parity-mode .commit-files-panel { flex: 1 1 auto; min-height: 96px; padding: 5px 7px 8px; border-bottom: 0; }
-.parity-mode .details-section-heading { min-height: 26px; font-size: 12px; font-weight: 500; }
+.parity-mode .commit-detail-caption { color: var(--muted); font-size: 11px; font-weight: 500; }
+.parity-mode .commit-files-panel { flex: 1 1 auto; min-height: 96px; padding: 4px 8px 9px; border-bottom: 0; }
+.parity-mode .details-section-heading { min-height: 24px; margin: 0; padding-inline: 4px; font-size: 12px; font-weight: 600; }
+.parity-mode .details-count { font-variant-numeric: tabular-nums; }
 .parity-mode .commit-files { gap: 0; margin-top: 2px; }
 .parity-mode .commit-file-folder {
-  min-height: 26px;
+  min-height: 25px;
   display: flex;
   align-items: center;
-  gap: 3px;
-  padding: 0 4px 0 calc(4px + var(--tree-indent, 0px));
-  color: var(--vscode-foreground);
-  font-size: var(--kivo-list-font-size);
-  font-weight: var(--kivo-list-font-weight);
+  gap: 6px;
+  padding: 3px 4px 3px calc(4px + var(--tree-indent, 0px));
+  color: var(--muted);
+  font-size: calc(var(--kivo-list-font-size) - 1px);
+  line-height: 1.3;
 }
-.parity-mode .commit-file-folder span { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.parity-mode .commit-file-folder .codicon { color: var(--muted); font-size: 12px; }
+.parity-mode .commit-file-folder-name { min-width: 0; overflow-wrap: anywhere; }
+.parity-mode .commit-file-folder .codicon { flex: 0 0 16px; text-align: center; font-size: 13px; }
 .parity-mode .commit-file {
   min-height: 28px;
-  gap: 4px;
-  padding: 0 4px 0 calc(5px + var(--tree-indent, 0px));
+  gap: 6px;
+  padding: 3px 4px 3px calc(4px + var(--tree-indent, 0px));
   border-radius: 2px;
   font-size: var(--kivo-list-font-size);
   font-weight: var(--kivo-list-font-weight);
 }
+.parity-mode .commit-files-panel .commit-file:focus-visible { outline: 1px solid var(--vscode-focusBorder, var(--accent)); outline-offset: -1px; }
+.parity-mode .commit-file-name { line-height: 1.3; white-space: normal; overflow-wrap: anywhere; }
 .parity-mode .commit-file .codicon { color: var(--muted); font-size: 12px; }
 .parity-mode .commit-file .status { width: 13px; font-size: 10px; }
-.parity-mode .commit-metadata { flex: 0 1 var(--commit-metadata-height, 180px); min-height: 96px; max-height: none; padding: 8px 10px 11px; }
+.parity-mode .commit-metadata { flex: 0 1 var(--commit-metadata-height, 180px); min-height: 96px; max-height: none; padding: 10px 12px 12px; }
 .parity-mode .commit-metadata:focus-visible { outline: 1px solid var(--vscode-focusBorder, var(--accent)); outline-offset: -1px; }
-.parity-mode .commit-detail-head strong { white-space: normal; font-size: 11px; line-height: 1.35; }
 .parity-mode .detail-kicker { font-size: 9px; letter-spacing: 0; }
-.parity-mode .commit-detail-meta { align-items: flex-start; margin-top: 6px; font-size: 10px; }
-.parity-mode .commit-detail-meta code { max-width: 126px; }
-.parity-mode .commit-body { max-height: none; margin: 8px 0; padding: 0; border-left: 0; color: var(--vscode-foreground); font-size: 10px; line-height: 1.45; }
+.parity-mode .log-workspace .commit-detail-meta { flex-wrap: wrap; justify-content: flex-start; gap: 4px 9px; margin-top: 6px; font-size: 11px; }
+.parity-mode .commit-detail-meta code { font-size: 10px; white-space: nowrap; }
+.parity-mode .commit-detail-refs { gap: 4px; margin-top: 8px; }
+.parity-mode .commit-detail-refs .graph-ref { max-width: 100%; min-width: 0; white-space: normal; overflow-wrap: anywhere; }
+.parity-mode .commit-detail-refs .graph-ref > .codicon { flex: none; }
+.parity-mode .commit-body { max-height: none; margin: 9px 0 0; padding: 0; border-left: 0; color: var(--vscode-foreground); overflow-wrap: anywhere; }
 .parity-mode .commit-detail-empty-copy {
   min-height: 0;
   flex: 1;
@@ -1224,8 +1295,6 @@ body[data-surface="history"] .content { min-width: 0; background: var(--vscode-p
   }
   .parity-mode .log-branch-pane,
   .parity-mode .log-splitter { display: none; }
-  .parity-mode .log-action-toolbar .idea-toolbar-button { padding: 0; }
-  .parity-mode .log-action-toolbar .log-action-label { display: none; }
   .parity-mode .log-column-header,
   .parity-mode .graph-row { grid-template-columns: var(--graph-width) minmax(0, 1fr) 80px; }
   .parity-mode .graph-row .log-date { overflow: visible; white-space: normal; line-height: 1.2; }
@@ -1674,7 +1743,7 @@ body.commit-zone-resizing, body.commit-zone-resizing * { cursor: row-resize !imp
 .worktree-review-overlay { z-index: 86; }
 .worktree-review-dialog { width: min(730px, 100%); }
 .worktree-review-dialog:focus { outline: none; }
-.worktree-review-dialog button:focus-visible { outline: 1px solid var(--vscode-focusBorder, var(--accent)); outline-offset: -1px; }
+.worktree-review-dialog :is(button, select, .worktree-review-commit-count):focus-visible { outline: 1px solid var(--vscode-focusBorder, var(--accent)); outline-offset: -1px; }
 .worktree-review-summary { display: flex; flex-wrap: wrap; justify-content: space-between; align-items: baseline; gap: 4px 12px; padding: 0 16px 10px; }
 .worktree-review-summary strong { font-size: 12px; font-weight: 600; }
 .worktree-review-dialog :is(.worktree-review-banner, .worktree-review-feedback) p { padding: 6px 16px; overflow-wrap: anywhere; }
@@ -1700,8 +1769,22 @@ body.commit-zone-resizing, body.commit-zone-resizing * { cursor: row-resize !imp
 .worktree-review-tabs { margin: 8px 0 7px; }
 .worktree-review-tabs [aria-pressed="true"] { color: var(--vscode-foreground); box-shadow: inset 0 -2px var(--vscode-focusBorder, var(--accent)); }
 .worktree-review-description { padding-bottom: 6px; }
-.worktree-review-detail .push-review-warning { margin: 4px 0; }
-.worktree-review-commits, .worktree-review-changes { padding: 0; margin: 0; list-style: none; }
+.worktree-review-commits, .worktree-review-changes, .worktree-review-delivery-files { padding: 0; margin: 0; list-style: none; }
+.worktree-review-pagination { display: flex; align-items: baseline; flex-wrap: wrap; justify-content: space-between; gap: 4px 8px; margin-top: 5px; padding-top: 6px; border-top: 1px solid var(--border-subtle); }
+.worktree-review-pagination .worktree-review-error { flex-basis: 100%; }
+.worktree-review-pagination button[aria-disabled="true"] { color: var(--muted); }
+.worktree-review-mark-guide { flex: 1 1 155px; align-self: center; }
+.worktree-review-mark-guide .text-button { min-height: 0; padding: 2px 0; }
+.worktree-review-delivery-picker { display: flex; align-items: baseline; flex-wrap: wrap; gap: 4px 8px; margin-bottom: 6px; }
+.worktree-review-delivery-picker label { font-size: 11px; font-weight: 600; }
+.worktree-review-delivery-picker select { flex: 1 1 18ch; min-width: 0; max-width: 100%; padding: 4px 5px; background: var(--vscode-dropdown-background, var(--surface-base)); color: var(--vscode-dropdown-foreground, var(--vscode-foreground)); border: 1px solid var(--vscode-dropdown-border, var(--border-subtle)); border-radius: 3px; font: inherit; }
+.worktree-review-delivery-revisions { display: flex; flex-wrap: wrap; gap: 6px 16px; padding: 7px 9px; margin: 4px 0 8px; border: 1px solid var(--border-subtle); border-inline-start: 2px solid var(--vscode-textLink-foreground, var(--accent)); border-radius: 3px; }
+.worktree-review-delivery-revisions > div { flex: 1 0 auto; }
+.worktree-review-delivery-revisions dt { color: var(--muted); font-size: 10px; }
+.worktree-review-delivery-revisions dd { margin: 2px 0 0; font-size: 11px; }
+.worktree-review-delivery-count { padding-bottom: 4px; }
+.worktree-review-delivery-files li { border-top: 1px solid var(--border-subtle); }
+.worktree-review-delivery-file code { flex: 1; min-width: 0; overflow-wrap: anywhere; }
 .worktree-review-commit.push-review-commit { grid-template-columns: 12px max-content minmax(0, 1fr); }
 .worktree-review-commit-full-subject { margin: 1px 0 5px; font-weight: 500; overflow-wrap: anywhere; }
 .worktree-review-commit-meta { display: flex; flex-wrap: wrap; align-items: center; gap: 3px 8px; margin-bottom: 5px; overflow-wrap: anywhere; font-size: 10px; color: var(--muted); }
@@ -1779,10 +1862,13 @@ body.commit-zone-resizing, body.commit-zone-resizing * { cursor: row-resize !imp
 .parity-mode .log-history-pane .log-column-header [data-log-column=commit] { color:var(--vscode-foreground); font-weight:600; }
 .parity-mode .log-history-pane .log-author,.parity-mode .log-history-pane .log-date { display:block; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; font-size:11px; font-weight:400; }
 .parity-mode .log-history-pane .log-time-full { display:none; }.parity-mode .log-history-pane .log-time-compact { display:inline; }
-.parity-mode .log-history-pane .graph-commit strong { font-weight:450; font-size:var(--kivo-list-font-size); }
+.parity-mode .log-history-pane .graph-commit strong { font-weight:600; font-size:var(--kivo-list-font-size); }
+.parity-mode .log-history-pane .merge-row .graph-commit strong { font-weight:500; }
 .parity-mode .log-history-pane .graph-row.selected strong { color:inherit; }
-.parity-mode .log-history-pane .graph-edge { stroke:color-mix(in srgb,var(--muted) 76%,var(--lane-color,var(--accent))); stroke-width:1.5; opacity:.57; }
-.parity-mode .log-history-pane .graph-edge.through { opacity:.48; }
+.parity-mode .log-history-pane .graph-edge { stroke:color-mix(in srgb,var(--muted) 65%,var(--lane-color,var(--accent))); stroke-width:1.5; opacity:.79; }
+.parity-mode .log-history-pane .graph-edge.through { opacity:.62; }
+.parity-mode .log-history-pane [data-history-head] .graph-edge:is(.incoming,.outgoing) { opacity:.95; }
+.parity-mode .log-history-pane [data-history-head] .graph-node { fill:var(--vscode-focusBorder,var(--accent)); stroke:var(--vscode-panel-background,var(--surface-base)); stroke-width:1.5; }
 .parity-mode .log-history-pane .graph-row:is(:hover,:focus-visible,.selected) .graph-edge:is(.incoming,.outgoing) { stroke:var(--lane-color,var(--accent)); stroke-width:2; opacity:1; }
 .parity-mode .log-history-pane .graph-node { stroke-width:1.7; }
 .parity-mode .log-history-pane .graph-node.merge { stroke-width:2.1; }
@@ -1790,20 +1876,27 @@ body.commit-zone-resizing, body.commit-zone-resizing * { cursor: row-resize !imp
 .graph-row:is(:hover,:focus-visible,.selected) .commit-row-menu { visibility:visible; opacity:1; }
 .commit-row-menu:hover { background:var(--vscode-toolbar-hoverBackground,var(--idea-hover)); }
 @media(prefers-reduced-motion:no-preference){.commit-row-menu { transition:opacity 100ms ease-out; }}
-.parity-mode .log-workspace .commit-detail-head strong { font-size:var(--kivo-list-font-size); font-weight:600; line-height:1.45; white-space:normal; overflow-wrap:anywhere; }
-.parity-mode .log-workspace .commit-body { font-size:12px; line-height:1.5; }
+.parity-mode .log-workspace .commit-detail-head strong { font-size: calc(var(--kivo-list-font-size) + 1px); font-weight: 650; line-height: 1.4; white-space: pre-wrap; overflow-wrap: anywhere; }
+.parity-mode .log-workspace .commit-body { font-size: 12px; line-height: 1.5; }
 .parity-mode .log-history-pane .graph-row { height:auto; min-height:var(--graph-row-height); }
 .parity-mode .log-history-pane .graph-commit { display:flex; flex-direction:column; align-items:stretch; justify-content:center; gap:2px; padding:3px 8px; }
-.parity-mode .log-history-pane .log-subject { display:block; overflow:visible; }
-.parity-mode .log-history-pane .log-subject strong { line-height:1.35; }
+.parity-mode .log-history-pane .log-subject { display:flex; align-items:center; gap:5px; }
+.parity-mode .log-history-pane .log-subject strong { flex:0 1 auto; line-height:1.35; }
+.log-original-subject { position:absolute; width:1px; height:1px; padding:0; margin:-1px; overflow:hidden; clip-path:inset(50%); white-space:nowrap; }
+.log-merge-mark { flex:none; color:var(--muted); font-size:13px; }
+.log-head-badge { flex:none; border-radius:3px; padding:0 4px; font-size:10px; font-weight:600; line-height:15px; color:var(--vscode-textLink-foreground,var(--accent)); background:color-mix(in srgb,var(--accent) 12%,transparent); }
+.log-issue-label { color:var(--muted); white-space:nowrap; }
+@container (max-width:170px) { .parity-mode .log-history-pane .log-subject:has(.log-head-badge) { gap:3px; } }
 [data-commit-subject] { display:block; min-width:0; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
 .commit-subject-preview { position:fixed; z-index:90; width:max-content; max-width:min(36rem,calc(100vw - 16px)); padding:5px 8px; border:1px solid var(--vscode-editorHoverWidget-border,var(--vscode-widget-border,var(--border-subtle))); border-radius:var(--radius-md); background:var(--vscode-editorHoverWidget-background,var(--surface-base)); color:var(--vscode-editorHoverWidget-foreground,var(--vscode-foreground)); box-shadow:var(--shadow-popover); font-size:12px; line-height:1.4; overflow-wrap:anywhere; pointer-events:none; }
 .parity-mode .log-history-pane .graph-commit .log-meta { display:flex; flex-wrap:wrap; align-items:baseline; min-width:0; gap:2px 8px; line-height:1.35; }
 .parity-mode .log-history-pane .log-meta :is(.log-author,.log-date) { max-width:100%; padding:0; white-space:normal; overflow-wrap:anywhere; text-align:start; }
 .parity-mode .log-history-pane .log-meta code { flex:none; font-size:inherit; font-family:var(--vscode-editor-font-family, monospace); }
+.parity-mode .log-history-pane .log-meta .log-date { margin-inline-start:auto; text-align:end; font-variant-numeric:tabular-nums; white-space:nowrap; }
 .parity-mode .log-history-pane .log-row-refs { max-width:100%; gap:4px; overflow:visible; }
-.parity-mode .log-history-pane .log-row-refs .graph-ref { max-width:100%; overflow-wrap:anywhere; white-space:normal; }
-.parity-mode .log-history-pane .log-row-refs .graph-ref > span { display:inline; overflow:visible; }
+.parity-mode .log-history-pane .log-row-refs .graph-ref { max-width:min(25cqi,26ch); padding:0 4px; border-radius:3px; color:var(--muted); background:var(--surface-soft); white-space:nowrap; }
+.parity-mode .log-history-pane .log-row-refs .graph-ref > span { display:inline; overflow:hidden; text-overflow:ellipsis; }
+.parity-mode .log-history-pane .ref-overflow { color:var(--muted); }
 .parity-mode .log-history-pane .graph-canvas { align-self:stretch; height:auto; }
 .parity-mode .log-history-pane .graph-svg { height:100%; }
 .graph-node-svg { position:absolute; top:50%; left:0; width:100%; height:var(--graph-row-height); transform:translateY(-50%); overflow:visible; }

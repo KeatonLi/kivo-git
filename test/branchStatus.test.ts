@@ -5,19 +5,19 @@ import { describe, expect, it } from 'vitest';
 
 async function renderBranches(snapshot: Record<string, unknown>, phase = 'idle', query = ''): Promise<string> {
   const source = await readFile(path.join(process.cwd(), 'media', 'main.js'), 'utf8');
-  const start = source.indexOf('function renderLogBranchRow(');
+  const start = source.indexOf('function buildPathTree(');
   const end = source.indexOf('\nfunction renderBranchContextMenu(', start);
   return runInNewContext(`${source.slice(start, end)}\nrenderLogBranchPane(snapshot)`, {
     snapshot,
     ui: {
       logBranchQuery: query, graphBranchFilter: 'other', syncPhase: phase,
       branchGroupsExpanded: { local: true, remote: true, tags: false },
+      collapsedLogBranchFolders: new Set(),
       branchVisibleCounts: { local: 36, remote: 36, tags: 36 }
     },
     BRANCH_PAGE_SIZE: 36,
     icon: (name: string, className?: string) => `<icon name="${name}"${className ? ` class="${className}"` : ''}>`,
-    escapeHtml: (value: unknown) => String(value ?? '').replaceAll('&', '&amp;').replaceAll('"', '&quot;'),
-    buildPathTree: (items: Array<Record<string, unknown>>) => ({ directories: new Map(), leaves: items.map((item) => ({ ...item, leaf: item.name })) })
+    escapeHtml: (value: unknown) => String(value ?? '').replaceAll('&', '&amp;').replaceAll('"', '&quot;')
   }) as string;
 }
 

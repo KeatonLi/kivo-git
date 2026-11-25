@@ -6,6 +6,7 @@ import assert from 'node:assert/strict';
 const laneCount = 12;
 const inspectedLane = 8;
 const inspectedSubject = 'Validate an interior integration';
+const mergeSubject = 'Accept Merge Request #7961: (feature/integration -> main) Verify production rollout';
 const inspectedPath = 'src/integration/Validation.ts';
 const hash = (id) => `d${id.toString(16).padStart(39, '0')}`;
 const through = (count, excluded, compact = false) => Array.from({ length: count }, (_, from) => from === excluded ? [] : [
@@ -18,7 +19,7 @@ export async function openDenseHistory(page, openSurface) {
 
   const tips = Array.from({ length: laneCount }, (_, lane) => hash(lane + 20));
   const commits = [
-    { hash: hash(1), lane: 0, subject: 'Merge the integration branches', parents: [...tips], incomingLanes: [], hasIncoming: false,
+    { hash: hash(1), lane: 0, subject: mergeSubject, parents: [...tips], incomingLanes: [], hasIncoming: false,
       parentLanes: tips.map((_, lane) => lane), laneTransitions: tips.map((_, lane) => ({ from: 0, to: lane, kind: 'parent' })),
       refs: [{ name: 'feature/integration', kind: 'local', current: true }] },
     ...[1, 5, inspectedLane, 10].map((lane, index) => ({ hash: tips[lane], lane,
@@ -86,7 +87,23 @@ async function verifyGraphAndDetails(page, openSurface) {
   const search = page.locator('#graph-search');
   await search.hover();
   assert.match(await list.getAttribute('aria-label'), /compact 12-lane topology/);
-  assert.equal(await row(head).locator('.graph-node.merge[data-lane="0"]').count(), 1);
+  const headRow = row(head);
+  assert.equal(await headRow.locator('.graph-node.merge[data-lane="0"]').count(), 1);
+  assert.equal(await headRow.getAttribute('data-history-head'), 'true');
+  assert.equal(await list.locator('[data-history-head]').count(), 1, 'Only the checked-out commit receives HEAD emphasis.');
+  assert.equal(await headRow.locator('.log-merge-mark').count(), 1);
+  const mergeLabel = headRow.locator('[data-commit-subject]');
+  assert.equal(await mergeLabel.textContent(), 'Merge Request #7961');
+  assert.equal(await mergeLabel.getAttribute('data-full-subject'), mergeSubject);
+  await mergeLabel.hover();
+  const originalPreview = page.locator('.commit-subject-preview');
+  await originalPreview.waitFor({ state: 'visible' });
+  assert.equal(await originalPreview.textContent(), mergeSubject);
+  await page.keyboard.press('Escape');
+  await search.hover();
+  const headDate = await headRow.locator('time.log-date').boundingBox();
+  const targetDate = await target.locator('time.log-date').boundingBox();
+  assert.ok(Math.abs(headDate.x + headDate.width - targetDate.x - targetDate.width) <= 1, 'Dates share a trailing alignment.');
   assert.equal(await row(head).locator('.graph-edge.outgoing').count(), laneCount, 'The octopus merge needs all of its parent edges.');
   assert.equal(await target.locator(`.graph-node[data-lane="${inspectedLane}"]`).count(), 1, 'Lane IDs must be actual topology indices, not palette indices.');
   assert.equal(await row(bend).locator('.graph-edge.through[data-lane="9"]').evaluate(edge => {
@@ -154,6 +171,7 @@ async function verifyGraphAndDetails(page, openSurface) {
   await page.locator('[data-action="locate-history-head"]').click();
   await page.waitForFunction(hash => document.activeElement?.dataset.commit === hash, head);
   assert.equal(await row(head).getAttribute('aria-selected'), 'true');
+  assert.equal(await details.locator('.commit-detail-head strong').textContent(), mergeSubject, 'The detail pane always shows the original subject.');
   await search.focus();
   await page.keyboard.press('Tab');
   // Move focus by keyboard modality, then exercise the keyboard path on a row.
@@ -231,6 +249,12 @@ async function verifyFilterDisclosure(page, openSurface) {
   assert.ok(searchRect && refRect && triggerRect && searchRect.x < refRect.x && refRect.x < triggerRect.x &&
     [refRect, triggerRect].every(box => Math.abs(centerY(searchRect) - centerY(box)) <= 2),
     'Narrow History must keep Search, All refs, and Advanced filters visible in order on the same row.');
+  assert.equal(await page.locator('.log-filter-bar').evaluate(bar => {
+    const controls = [...bar.querySelectorAll('.graph-search, .history-ref-select, .history-filters-trigger')];
+    const borders = controls.map(control => getComputedStyle(control).borderTop);
+    const heights = controls.map(control => control.getBoundingClientRect().height);
+    return borders[0].startsWith('1px solid ') && new Set(borders).size === 1 && new Set(heights).size === 1;
+  }), true, 'The three History filter controls use one height and border treatment.');
   assert.equal(await ref.locator('option:checked').textContent(), 'All refs');
   assert.equal(await ref.locator('option[value="v1.0.0"]').count(), 1, 'The native selector also includes tags.');
   assert.equal(await trigger.getAttribute('aria-expanded'), 'false');

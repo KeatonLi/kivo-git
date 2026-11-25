@@ -129,6 +129,55 @@ export async function verifyExperienceRegressions(page, openSurface) {
       await page.evaluate(hash => emit({ type: 'commitDetails', payload: { hash, subject: 'STALE SEARCH DETAILS', files: [] } }), hash);
       assert.doesNotMatch(await page.locator('.commit-metadata').textContent(), /STALE SEARCH DETAILS/);
     }],
+    ['narrow History side panes keep complete path and subject context', async () => {
+      await page.setViewportSize({ width: 960, height: 500 });
+      await openSurface('surface=history');
+      const namespace = 'platform/integrations/dependency-checks/安全审查/reconciliation';
+      const ref = `origin/${namespace}/fix-auth`;
+      const file = `src/${namespace}/ValidateExtremelyLongProviderConfiguration.ts`;
+      const subject = 'fix:  保留提交主题的原始文字 · Keep the complete original History subject, including spacing and this ending';
+      const hash = await page.evaluate(({ namespace, ref, file, subject }) => {
+        const commit = { ...fixture.commits[0], subject, refs: [{ name: ref, kind: 'remote' }], paths: [file] };
+        fixture.commits[0] = commit;
+        fixture.branches = [fixture.branches.find(branch => branch.current),
+          { name: ref, remote: true, current: false, oid: commit.hash },
+          { name: `origin/${namespace}/verify-auth`, remote: true, current: false, oid: commit.hash }];
+        emit({ type: 'snapshot', payload: fixture });
+        emit({ type: 'commitDetails', payload: { ...commit, files: [{ path: file, status: 'M' }] } });
+        return commit.hash;
+      }, { namespace, ref, file, subject });
+      await page.locator('[data-log-splitter]').press('Home');
+      const branchPane = page.locator('#kivo-log-branches');
+      const folders = branchPane.locator('.log-branch-folder');
+      assert.equal(await folders.count(), 2, 'Keep the remote root, but combine a linear nested namespace into one folder.');
+      const folder = folders.last();
+      assert.equal(await folder.textContent(), namespace);
+      assert.equal(await folder.getAttribute('title'), `Collapse origin/${namespace}`);
+      assert.ok(await folder.locator('.log-branch-folder-name').evaluate(element => element.scrollWidth <= element.clientWidth + 1));
+      const branch = branchPane.locator(`[data-log-branch="${ref}"]`);
+      assert.equal(await branch.getAttribute('title'), `Show ${ref} history · Right-click for branch actions`);
+      await folder.press('Enter');
+      assert.equal(await folder.getAttribute('aria-expanded'), 'false');
+      await branch.waitFor({ state: 'hidden' });
+      await folder.press('Enter');
+      await branch.waitFor();
+      assert.equal(await folder.getAttribute('aria-expanded'), 'true', 'The compact folder remains keyboard operable.');
+
+      await page.locator('[data-log-detail-splitter]').press('Home');
+      const details = page.locator('#kivo-log-details');
+      const title = details.locator('.commit-detail-head strong');
+      assert.equal(await title.textContent(), subject);
+      assert.equal(await title.getAttribute('title'), subject);
+      assert.equal(await title.evaluate(element => getComputedStyle(element).whiteSpace), 'pre-wrap');
+      assert.equal(await details.locator('.commit-detail-meta code').getAttribute('title'), hash);
+      assert.equal(await details.getByRole('region', { name: 'Changed Files' }).count(), 1);
+      const fileRow = details.locator(`[data-commit-file="${file}"]`);
+      assert.equal(await fileRow.getAttribute('title'), `Open diff for ${file}`);
+      assert.equal(await details.locator('.commit-file-folder').getAttribute('title'), `src/${namespace}`);
+      assert.ok(await fileRow.locator('.commit-file-name').evaluate(element => element.scrollWidth <= element.clientWidth + 1));
+      await fileRow.press('Enter');
+      assert.ok(await page.evaluate(({ hash, file }) => window.__vscodeMessages.some(message => message.type === 'openCommitDiff' && message.hash === hash && message.path === file), { hash, file }));
+    }],
     ['short History panes keep all commit information reachable', async () => {
       for (const viewport of [{ width: 700, height: 420 }, { width: 520, height: 420 }, { width: 960, height: 260 }]) {
         await page.setViewportSize(viewport);
@@ -197,12 +246,15 @@ export async function verifyExperienceRegressions(page, openSurface) {
       }
       await page.setViewportSize({ width: 1450, height: 650 });
       await openSurface('surface=history');
-      await page.locator('[data-action="stashes"]').click();
+      const historyMore = page.getByRole('button', { name: 'More History actions' });
+      await historyMore.click();
+      await page.getByRole('menuitem', { name: 'Open saved Stashes' }).click();
       await page.waitForSelector('.workflow-stash');
       await page.keyboard.press('Escape');
       await settle(page);
-      assert.equal(await page.locator('[data-action="stashes"]').evaluate(element => element === document.activeElement), true,
-        'A direct Stashes entry must regain focus.');
+      assert.equal(await historyMore.getAttribute('aria-expanded'), 'false');
+      assert.equal(await historyMore.evaluate(element => element === document.activeElement), true,
+        'Stashes in History must return focus to its More trigger.');
       const branch = page.locator('[data-log-branch="feature/keaton/20260924-solar"]');
       await branch.click({ button: 'right' });
       await page.locator('[data-branch-context-action="compare"]').click();
@@ -228,7 +280,7 @@ export async function verifyExperienceRegressions(page, openSurface) {
       catch (error) { failures.push(new Error(`${name}: ${error.message}`, { cause: error })); }
     }
     if (failures.length) throw new AggregateError(failures, 'Experience regression checks failed');
-    console.log('Experience regressions passed: caret, cleared filters, complete-history details, short panes and workflow focus.');
+    console.log('Experience regressions passed: caret, cleared filters, complete-history details, narrow and short side panes, and workflow focus.');
   } finally {
     await page.setViewportSize(originalViewport);
   }

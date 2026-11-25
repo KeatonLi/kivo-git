@@ -1,8 +1,9 @@
 import * as vscode from 'vscode';
 import { GitClient } from './git/GitClient';
 import { WorktreeReviewState, type WorktreeReviewEntry } from './git/WorktreeReviewState';
-import { readWorktreeReviewInventory, readWorktreeReviewData, type WorktreeReviewInventory } from './git/WorktreeReviewGit';
-import type { CommitDetails } from './git/types';
+import { readWorktreeReviewInventory, readWorktreeReviewData, readWorktreeReviewPage, readWorktreeReviewTargets, readWorktreeReviewDelivery,
+  type WorktreeReviewInventory, type WorktreeReviewRange, type WorktreeReviewTarget, type WorktreeReviewDelivery } from './git/WorktreeReviewGit';
+import type { CommitDetails, WorkflowFile } from './git/types';
 import type { KivoSurface } from './viewLayout';
 
 export type WorktreeReviewMessage =
@@ -10,11 +11,18 @@ export type WorktreeReviewMessage =
   | { type: 'worktreeReviewList'; root: string; requestId: number }
   | { type: 'worktreeReviewMark'; root: string; requestId: number; id: string; version: number }
   | { type: 'worktreeReviewDetails'; root: string; requestId: number; id: string; version: number }
+  | { type: 'worktreeReviewPage'; root: string; requestId: number; id: string; version: number }
+  | { type: 'worktreeReviewDelivery'; root: string; requestId: number; id: string; version: number; ref: string }
+  | { type: 'worktreeReviewDeliveryDiff'; root: string; id: string; version: number; deliveryId: number; path: string }
   | { type: 'worktreeReviewCommit'; root: string; requestId: number; id: string; version: number; hash: string }
   | { type: 'worktreeReviewDiff'; root: string; id: string; version: number; hash: string; path: string };
 
 type ReviewScope = { root: string; inventory: WorktreeReviewInventory; state: WorktreeReviewState };
-type ReviewSession = { scope: ReviewScope; id: string; version: number; hashes: Set<string>; details?: CommitDetails; commitRequest?: number };
+type ReviewSession = {
+  scope: ReviewScope; entry: WorktreeReviewEntry; hashes: Set<string>; details?: CommitDetails; commitRequest?: number;
+  range?: WorktreeReviewRange; hasMore: boolean; offset: number; pageLoading?: boolean;
+  targets: WorktreeReviewTarget[]; deliveryRequest?: number; delivery?: WorktreeReviewDelivery & { deliveryId: number };
+};
 
 export class WorktreeReviewController implements vscode.Disposable {
   private scope?: ReviewScope;
@@ -36,7 +44,8 @@ export class WorktreeReviewController implements vscode.Disposable {
     private readonly visible: () => boolean,
     private readonly post: (surface: KivoSurface | undefined, message: Record<string, unknown>) => Promise<unknown>,
     private readonly focusHistory: () => Promise<void>,
-    private readonly openDiff: (client: GitClient, hash: string, path: string, originalPath: string | undefined, kind: string, details: CommitDetails) => Promise<void>
+    private readonly openDiff: (client: GitClient, hash: string, path: string, originalPath: string | undefined, kind: string, details: CommitDetails) => Promise<void>,
+    private readonly openDeliveryDiff: (root: string, file: WorkflowFile) => Promise<void>
   ) {}
 
   reset(): void {
@@ -187,7 +196,8 @@ export class WorktreeReviewController implements vscode.Disposable {
     const { id, version } = message;
     const reply = { type: `${type}Result`, root, id, version,
       ...('requestId' in message ? { requestId: message.requestId } : {}),
-      ...('hash' in message ? { hash: message.hash } : {}), ...('path' in message ? { path: message.path } : {}) };
+      ...('hash' in message ? { hash: message.hash } : {}), ...('path' in message ? { path: message.path } : {}),
+      ...('deliveryId' in message ? { deliveryId: message.deliveryId } : {}) };
     const epoch = type === 'worktreeReviewDetails' ? ++this.requestEpoch : this.requestEpoch;
     const send = async (payload: Record<string, unknown>) => {
       if (epoch === this.requestEpoch && this.isActive(root)) await this.post(surface, { ...reply, ...payload });
@@ -198,15 +208,22 @@ export class WorktreeReviewController implements vscode.Disposable {
       if (type === 'worktreeReviewDetails') {
         this.session = undefined;
         const entry = this.entry(scope, id, version);
-        const data = await readWorktreeReviewData(root, scope.inventory, entry, entry.previousReviewHead);
+        const [{ range, ...data }, targets] = await Promise.all([
+          readWorktreeReviewData(root, scope.inventory, entry, entry.previousReviewHead),
+          entry.head ? readWorktreeReviewTargets(root, scope.inventory).catch(() => undefined) : Promise.resolve([])
+        ]);
         if (epoch !== this.requestEpoch || this.scope !== scope) return;
-        this.session = { scope, id, version, hashes: new Set(data.commits.map(commit => commit.hash)) };
-        await send({ payload: data });
+        this.session = { scope, entry, range, hasMore: data.hasMore, offset: data.commits.length,
+          hashes: new Set(data.commits.map(commit => commit.hash)), targets: targets ?? [] };
+        await send({ payload: { ...data, targets: targets ?? [], targetsUnavailable: targets === undefined } });
       } else if (type === 'worktreeReviewMark') {
         const reviewed = this.session;
         const selected = this.entry(scope, id, version);
-        if (selected.kind !== 'removed' && (!reviewed || reviewed.scope !== scope || reviewed.id !== id || reviewed.version !== version)) {
+        if (selected.kind !== 'removed' && (!reviewed || reviewed.scope !== scope || reviewed.entry.id !== id || reviewed.entry.version !== version)) {
           throw new Error('Load the worktree details before marking it reviewed.');
+        }
+        if (reviewed?.entry.id === id && reviewed.entry.version === version && reviewed.hasMore) {
+          throw new Error('Load the remaining commits before marking this worktree reviewed.');
         }
         // Do not use a refresh which started before this request as confirmation.
         if (this.inFlight) await this.inFlight;
@@ -219,9 +236,56 @@ export class WorktreeReviewController implements vscode.Disposable {
         if (this.scope === scope) await this.post(undefined, this.status(root));
       } else {
         const session = this.session;
-        if (!session || session.scope !== scope || session.id !== id || session.version !== version || !session.hashes.has(message.hash)) {
-          throw new Error('Select a commit in the pinned review range.');
+        if (!session || session.scope !== scope || session.entry.id !== id || session.entry.version !== version) {
+          throw new Error('Select a worktree and load its review details first.');
         }
+        if (type === 'worktreeReviewPage') {
+          if (session.pageLoading) throw new Error('The next page is already loading.');
+          if (!session.hasMore) { await send({ payload: { commits: [], hasMore: false } }); return; }
+          if (!session.range) throw new Error('The pinned history range is unavailable. Refresh and try again.');
+          session.pageLoading = true;
+          try {
+            const page = await readWorktreeReviewPage(root, scope.inventory, session.range, session.offset);
+            if (this.session !== session || epoch !== this.requestEpoch) return;
+            if (!page.commits.length || page.commits.some(commit => session.hashes.has(commit.hash)) || new Set(page.commits.map(commit => commit.hash)).size !== page.commits.length) {
+              throw new Error('The pinned history no longer matches the loaded pages. Refresh and try again.');
+            }
+            for (const commit of page.commits) session.hashes.add(commit.hash);
+            session.offset += page.commits.length;
+            session.hasMore = page.hasMore;
+            await send({ payload: page });
+          } finally { session.pageLoading = false; }
+          return;
+        }
+        if (type === 'worktreeReviewDelivery') {
+          if (!Number.isSafeInteger(message.requestId) || message.requestId < 0 || (session.deliveryRequest !== undefined && message.requestId <= session.deliveryRequest)) return;
+          session.deliveryRequest = message.requestId;
+          session.delivery = undefined;
+          const target = session.targets.find(option => option.ref === message.ref);
+          try {
+            if (!target) throw new Error('Choose a target branch from the pinned list.');
+            const delivery = await readWorktreeReviewDelivery(root, scope.inventory, session.entry, target);
+            if (this.session !== session || session.deliveryRequest !== message.requestId) return;
+            session.delivery = { ...delivery, deliveryId: message.requestId };
+            await send({ payload: session.delivery });
+          } catch (error) {
+            if (this.session === session && session.deliveryRequest === message.requestId) {
+              await send({ error: error instanceof Error ? error.message : 'Unable to compare the delivery.' });
+            }
+          }
+          return;
+        }
+        if (type === 'worktreeReviewDeliveryDiff') {
+          const delivery = session.delivery;
+          const file = delivery?.deliveryId === message.deliveryId ? delivery.files.find(candidate => candidate.path === message.path) : undefined;
+          if (!delivery || !file) throw new Error('Choose a file from the active delivery comparison.');
+          await this.verifyScope(scope);
+          if (this.session !== session || session.delivery !== delivery || epoch !== this.requestEpoch) return;
+          await this.openDeliveryDiff(root, file);
+          await send({});
+          return;
+        }
+        if (!session.hashes.has(message.hash)) throw new Error('Select a commit in the pinned review range.');
         await this.verifyScope(scope);
         if (this.session !== session || epoch !== this.requestEpoch) return;
         const client = new GitClient(root);

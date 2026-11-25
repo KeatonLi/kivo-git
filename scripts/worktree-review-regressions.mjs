@@ -39,11 +39,12 @@ export async function verifyWorktreeReview(page, openSurface) {
   const request = await last('worktreeReviewDetails');
   assert.equal(request.version, selection.version);
   const subject = 'Handle request timeouts without dropping queued work and keep the original error visible to the operator even when the request is retried';
+  const target = { ref: 'refs/heads/main', label: 'main', oid: '4ecf5120cf0ca1d0f451a45170aefd18fe39a575' };
   await send({ type: 'worktreeReviewDetailsResult', ...selection, requestId: request.requestId, payload: {
     mode: 'recent', commits: [{ hash, shortHash: hash.slice(0, 7), subject, author: 'Dev User', date: '2026-11-23T10:22:00Z' }],
-    hasMore: false, changes: [{ path: 'notes/local test.md', kind: 'untracked' }]
+    hasMore: true, targets: [target], changes: [{ path: 'notes/local test.md', kind: 'untracked' }]
   } });
-  const commitRow = dialog.locator('[data-worktree-review-commit]');
+  const commitRow = dialog.locator(`[data-worktree-review-commit="${hash}"]`);
   await commitRow.locator('[data-commit-subject]').hover();
   const preview = page.locator('.commit-subject-preview');
   await preview.waitFor({ state: 'visible' });
@@ -58,6 +59,37 @@ export async function verifyWorktreeReview(page, openSurface) {
   assert.equal(diff.hash, hash);
   assert.equal(diff.path, file);
   await send({ type: 'worktreeReviewDiffResult', ...selection, hash, path: file });
+  const markButton = dialog.locator('[data-action="mark-worktree-review"]');
+  assert.equal(await markButton.getAttribute('aria-disabled'), 'true', 'Do not mark after only the first page.');
+  const more = dialog.locator('#worktree-review-load-more');
+  await more.click();
+  const firstPage = await last('worktreeReviewPage');
+  assert.equal(firstPage.version, selection.version);
+  await send({ type: 'worktreeReviewPageResult', ...selection, requestId: firstPage.requestId, error: 'Git read timed out' });
+  await dialog.getByText('Git read timed out').waitFor();
+  await more.click();
+  const retry = await page.evaluate(() => window.__vscodeMessages.filter(message => message.type === 'worktreeReviewPage').at(-1));
+  assert.notEqual(firstPage.requestId, retry.requestId);
+  await send({ type: 'worktreeReviewPageResult', ...selection, requestId: retry.requestId, payload: {
+    commits: [{ hash: parent, shortHash: parent.slice(0, 7), subject: 'Add request queue', author: 'Dev User', date: '2026-11-22T10:00:00Z' }], hasMore: false
+  } });
+  assert.equal(await dialog.locator('[data-worktree-review-commit]').count(), 2);
+  assert.equal(await commitRow.getAttribute('aria-expanded'), 'true');
+  assert.equal(await markButton.getAttribute('aria-disabled'), 'false');
+  await dialog.locator('[data-worktree-review-section="delivery"]').click();
+  const targetSelect = dialog.locator('#worktree-review-delivery-target');
+  assert.equal(await targetSelect.inputValue(), '', 'Do not guess the target branch.');
+  await targetSelect.selectOption(target.ref);
+  const compare = await last('worktreeReviewDelivery');
+  assert.equal(compare.ref, target.ref);
+  const renamed = 'src/request-queue.ts';
+  await send({ type: 'worktreeReviewDeliveryResult', ...selection, requestId: compare.requestId, payload: {
+    deliveryId: compare.requestId, target, head: hash, base: parent, files: [{ path: renamed, originalPath: file, status: 'R', oldRevision: parent, newRevision: hash }]
+  } });
+  await dialog.locator('[data-worktree-review-delivery-file]').click();
+  const deliveryDiff = await last('worktreeReviewDeliveryDiff');
+  assert.equal(deliveryDiff.path, renamed);
+  assert.equal(deliveryDiff.deliveryId, compare.requestId);
   if (process.env.KIVO_WORKTREE_CAPTURE) {
     const out = path.resolve(process.env.KIVO_WORKTREE_CAPTURE);
     await mkdir(path.dirname(out), { recursive: true });

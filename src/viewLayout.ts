@@ -68,6 +68,7 @@ const messagesBySurface: Record<KivoSurface, ReadonlySet<string>> = {
   ]),
   history: new Set([
     'worktreeReviewList', 'worktreeReviewDetails', 'worktreeReviewCommit', 'worktreeReviewDiff', 'worktreeReviewMark', 'worktreeReviewClose',
+    'worktreeReviewPage', 'worktreeReviewDelivery', 'worktreeReviewDeliveryDiff',
     'createWorktree',
     'cherryPick',
     'searchHistory',
